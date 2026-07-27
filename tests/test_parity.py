@@ -49,9 +49,13 @@ CONFIG_MATRIX: dict[str, dict[str, Any]] = {
 # would dump every credential into `-vv` failure output).
 _UNSTABLE_STATE_KEYS = frozenset({"_sandbox_id", "_env"})
 
-# Nested compiled graphs are built by upstream, not composed by the port;
-# recursing into them yields no drift signal and megabytes of failure output.
-_OPAQUE_TYPES = frozenset({"CompiledStateGraph", "Pregel"})
+# Nested compiled graphs are summarized rather than walked: full recursion
+# produced megabytes of failure output, but they cannot be fully opaque —
+# `GoalCriteriaMiddleware`'s entire state is two compiled graphs, so an
+# opaque marker would put every argument the port passes to
+# `_create_goal_criteria_agent` (tools, repository root, fs_tools,
+# auto_mode) outside the tripwire.
+_SUMMARIZED_TYPES = frozenset({"CompiledStateGraph", "Pregel"})
 
 
 def _fake_model():
@@ -80,8 +84,8 @@ def _normalize(value: Any, depth: int = 0, memo: dict[int, str] | None = None) -
         return value
     if isinstance(value, PurePath):
         return str(value)
-    if type(value).__name__ in _OPAQUE_TYPES:
-        return {"opaque": type(value).__name__}
+    if type(value).__name__ in _SUMMARIZED_TYPES:
+        return _graph_summary(value)
     # Routines must be checked BEFORE `__dict__`: functions, lambdas, bound
     # methods and partials all carry a (usually empty) `__dict__`, so without
     # this they would all collapse to `{"function": {}}` and compare equal.
@@ -108,7 +112,7 @@ def _normalize(value: Any, depth: int = 0, memo: dict[int, str] | None = None) -
         # Slotted dataclasses (e.g. MCPServerInfo) have no `__dict__`.
         return {
             type(value).__name__: {
-                field.name: _normalize(getattr(value, field.name, None), depth + 1)
+                field.name: _normalize(getattr(value, field.name, None), depth + 1, memo)
                 for field in dataclasses.fields(value)
             }
         }
@@ -127,6 +131,21 @@ def _normalize(value: Any, depth: int = 0, memo: dict[int, str] | None = None) -
     if callable(value):
         return {"callable": getattr(value, "__qualname__", type(value).__name__)}
     return {"repr": type(value).__name__}
+
+
+def _graph_summary(graph: Any) -> Any:
+    """Structural summary of a nested compiled graph.
+
+    Keeps the part the port controls — which nodes exist and which tools the
+    nested agent was given — without walking the whole upstream-built graph.
+    """
+    nodes = getattr(graph, "nodes", {}) or {}
+    tools: list[str] = []
+    for node in nodes.values():
+        by_name = getattr(getattr(node, "bound", None), "_tools_by_name", None)
+        if by_name:
+            tools = sorted(by_name)
+    return {"graph": {"nodes": sorted(nodes), "tools": tools}}
 
 
 @functools.lru_cache(maxsize=1)
@@ -254,17 +273,17 @@ class _FixedArtifactsStorage:
     storage across both sides keeps a real mismatch the only way to fail.
     """
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, large_results: bool = True) -> None:
         self.root = str(root)
-        self.large_results_dir = root / "large_tool_results"
+        self.large_results_dir = root / "large_tool_results" if large_results else None
 
 
-def _run_both(case_kwargs: dict[str, Any], tmp_path, monkeypatch=None):
+def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = True):
     import deepagents_code.agent as v0_module
 
     import lc_factory.assembly as ours_module
 
-    storage = _FixedArtifactsStorage(tmp_path / "artifacts")
+    storage = _FixedArtifactsStorage(tmp_path / "artifacts", large_results=large_results)
     fixed_root = lambda: storage  # noqa: E731
     originals = [
         (v0_module, v0_module._artifacts_root),
@@ -329,6 +348,43 @@ def test_composition_parity_server_realistic(tmp_path):
         tmp_path,
     )
     assert _fingerprint(ours) == _fingerprint(v0)
+
+
+def test_composition_parity_with_tracing(tmp_path, monkeypatch):
+    """Tracing configured, so `LocalContextMiddleware`'s tracing args matter.
+
+    `get_langsmith_project_name()` returns a value only when a key and the
+    tracing flag are both set; without them the tracing arguments fold into
+    an empty string and dropping them would be invisible.
+    """
+    monkeypatch.setenv("LANGSMITH_API_KEY", "lsv2-parity-fixture")
+    monkeypatch.setenv("LANGSMITH_TRACING", "true")
+    monkeypatch.setenv("LANGSMITH_PROJECT", "parity-fixture-project")
+
+    ours, v0 = _run_both({}, tmp_path)
+    fingerprint = _fingerprint(ours)
+    assert fingerprint == _fingerprint(v0)
+    # Guard the guard: if upstream stops surfacing tracing in composed state,
+    # this case silently stops covering what it claims to.
+    assert "parity-fixture-project" in str(fingerprint["middleware"]), (
+        "tracing context is no longer observable in composed state — this "
+        "case no longer covers LocalContextMiddleware's tracing arguments"
+    )
+
+
+def test_composition_parity_without_large_results_route(tmp_path):
+    """The healthy-machine artifacts shape: no `large_tool_results` route.
+
+    `_artifacts_root()` supplies a `large_results_dir` only on its fallback
+    branch, so this covers the false side of the route guard in the assembly
+    (the fixed storage used elsewhere always supplies one).
+    """
+    ours, v0 = _run_both({}, tmp_path, large_results=False)
+    fingerprint = _fingerprint(ours)
+    assert fingerprint == _fingerprint(v0)
+    assert not any(
+        "large_tool_results" in route for route in fingerprint["backend_routes"]
+    )
 
 
 def test_composition_parity_headless_mcp(tmp_path):
