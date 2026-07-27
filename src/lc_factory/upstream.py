@@ -6,8 +6,9 @@ upstream breakage surfaces here first, and this file doubles as the divergence
 inventory. Private (underscore) upstream names carry no semver protection;
 they are the exact surface the parity suite guards.
 
-Verified against deepagents-code==0.1.47 / deepagents==0.7.0b2
-(monorepo commit 8da0ccb13).
+Verified against deepagents-code==0.1.48 / deepagents==0.7.0b2.
+(The port was authored against 0.1.47 / monorepo commit 8da0ccb13; the
+0.1.48 bump required no changes here.)
 
 Layout mirrors the consumers: assembly (the ported ``create_cli_agent``),
 server graph, and launcher. Type-only names live in the TYPE_CHECKING block

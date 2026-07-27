@@ -35,18 +35,34 @@ private (underscore) names that carry no semver protection.
 
 ## Procedure
 
-1. **Read the release delta.** In a checkout of the upstream monorepo:
+1. **Read the release delta.** Diff the *published artifact*, not the
+   monorepo — the wheel is what we pin, and this needs no upstream checkout:
 
    ```sh
-   git diff <old-tag>..<new-tag> -- libs/code/deepagents_code/agent.py \
-       libs/code/deepagents_code/server_graph.py \
-       libs/code/deepagents_code/client/launch/server_manager.py
+   # download + unpack the new sdist to a scratch dir, then:
+   OLD=.venv/lib/python3.11/site-packages/deepagents_code
+   NEW=<scratch>/deepagents_code-<version>/deepagents_code
+   for f in agent.py server_graph.py client/launch/server_manager.py; do
+       diff -u "$OLD/$f" "$NEW/$f"
+   done
    ```
 
-   Also skim `libs/code/CHANGELOG.md`. Decide, per hunk, whether it is a
-   composition change we must re-apply or an internal change we inherit free.
+   Also diff the modules the boundary imports from (`auto_mode.py`,
+   `goal_rubric.py`, `reliable_rubric.py`, `offload_middleware.py`,
+   `local_context.py`, `_server_config.py`, `client/launch/server.py`,
+   `client/remote_client.py`) and skim the sdist's `CHANGELOG.md`.
 
-2. **Update the pins** in `pyproject.toml`, then `uv sync`.
+   **Check the changed line ranges before reading hunks.** `agent.py` is a
+   ~3000-line file and we ported only `create_cli_agent` (roughly lines
+   2155-2989). A change to that file usually is not a change to our region —
+   `diff -u ... | grep '^@@'` answers this in one step. Decide, per hunk in
+   our region, whether it is a composition change we must re-apply or an
+   internal change we inherit free.
+
+2. **Update the pins** in `pyproject.toml` — and the matching constants in
+   `tests/test_smoke.py`, which assert the installed versions. `deepagents`
+   may or may not move with `deepagents-code`; check the new release's
+   `requires_dist`. Then `uv sync`.
 
 3. **Check the boundary first.** `uv run pytest tests/test_boundary.py` — it
    resolves every name in `upstream.__all__` plus every entry in
@@ -83,8 +99,24 @@ private (underscore) names that carry no semver protection.
    breaks collection of the *default* suite too — a deliberate early signal,
    but read the traceback before assuming the port drifted.
 
-7. **Commit the bump on its own**, with the upstream delta summarized in the
+7. **Re-check the tripwire.** Run one drift injection (see below) to confirm
+   the parity suite still fails when it should at the new version. A suite
+   that quietly stopped working looks exactly like a clean bump.
+
+8. **Update provenance strings** — the "Verified against" line in
+   `upstream.py` and the version note in `assembly.py`.
+
+9. **Commit the bump on its own**, with the upstream delta summarized in the
    message. Never bundle a pin bump with feature work.
+
+### Bump log
+
+Real bumps and what they cost, so the recurring maintenance burden of the
+recomposition strategy is measured rather than guessed.
+
+| Bump | Port changes needed | Notes |
+|---|---|---|
+| 0.1.47 → 0.1.48 | **none** | `agent.py` changed only in the agent-directory discovery helpers (~lines 1105-1271), far outside the ported region. `auto_mode.py` changed classifier failure wording only. `server_graph.py` and `server_manager.py` byte-identical. Upstream also migrated legacy hooks to v2 events — inherited free. |
 
 ## Validating the tripwire itself
 

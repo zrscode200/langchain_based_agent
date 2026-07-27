@@ -2,7 +2,7 @@
 
 from importlib.metadata import version
 
-PINNED_DEEPAGENTS_CODE = "0.1.47"
+PINNED_DEEPAGENTS_CODE = "0.1.48"
 PINNED_DEEPAGENTS = "0.7.0b2"
 
 

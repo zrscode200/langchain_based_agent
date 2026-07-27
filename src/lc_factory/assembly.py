@@ -2,7 +2,8 @@
 
 ``create_factory_agent`` is a line-faithful port of
 ``deepagents_code.agent.create_cli_agent`` (``agent.py:2155-2989`` at monorepo
-``8da0ccb13``, deepagents-code==0.1.47), with every upstream import routed
+``8da0ccb13``, authored against deepagents-code==0.1.47 and unchanged
+through 0.1.48), with every upstream import routed
 through :mod:`lc_factory.upstream`. Wave 1.2 rule: byte-equivalent semantics
 to v0 — zero behavioral deltas beyond the import indirection. The middleware
 injection seam and the other ratified deltas land in later iterations.

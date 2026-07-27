@@ -475,7 +475,7 @@ wheels = [
 
 [[package]]
 name = "deepagents-code"
-version = "0.1.47"
+version = "0.1.48"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -513,9 +513,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/c7/10/2be60f91b4beebd24de56211197b14011753e92f2b8fba55a64967e9fce1/deepagents_code-0.1.47.tar.gz", hash = "sha256:57a298afcd55c65e1383b3f6a597a36bc2d2782c8ec0941b8a9071603e467aa5", size = 3202886, upload-time = "2026-07-24T05:55:16.679Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b8/aa/07544d6be61aa6b3b279252e40c69b6c2ba11aee6d9dfae0127293d81446/deepagents_code-0.1.48.tar.gz", hash = "sha256:11312f91e39d733c6a62b5cc145d17715de336c23dd4ceb50c9c3622c48b427e", size = 3212483, upload-time = "2026-07-27T17:19:30.259Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/43/99a10cbbb496562ef011bc01f68107b93695e0256e4175fb06774805a5e0/deepagents_code-0.1.47-py3-none-any.whl", hash = "sha256:2afee83a9fe3b2fd5a070f81a89451554165962fde609f140a85f3a76b327dd3", size = 1452181, upload-time = "2026-07-24T05:55:14.97Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/2e/788dc3d5a84bf3d4b763e6776e7f25fe716529fb5e2af2de4af7ccd10848/deepagents_code-0.1.48-py3-none-any.whl", hash = "sha256:480885686964fb9c5047595a0e5dd6fc92f2c12a1ce0670a7328b7cf1d28dd33", size = 1456778, upload-time = "2026-07-27T17:19:28.363Z" },
 ]
 
 [[package]]
@@ -1339,7 +1339,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "deepagents", specifier = "==0.7.0b2" },
-    { name = "deepagents-code", specifier = "==0.1.47" },
+    { name = "deepagents-code", specifier = "==0.1.48" },
 ]
 
 [package.metadata.requires-dev]
