@@ -77,6 +77,11 @@ private (underscore) names that carry no semver protection.
    uv run pytest -m integration   # live server round trip
    ```
 
+   Note: the integration module imports upstream's private
+   `deepagents_code._testing_models` at module scope, so a rename there
+   breaks collection of the *default* suite too — a deliberate early signal,
+   but read the traceback before assuming the port drifted.
+
 7. **Commit the bump on its own**, with the upstream delta summarized in the
    message. Never bundle a pin bump with feature work.
 
