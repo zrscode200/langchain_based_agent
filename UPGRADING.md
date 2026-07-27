@@ -86,6 +86,60 @@ private (underscore) names that carry no semver protection.
 7. **Commit the bump on its own**, with the upstream delta summarized in the
    message. Never bundle a pin bump with feature work.
 
+## Validating the tripwire itself
+
+The parity suite is the only thing standing between a pin bump and a silent
+behavioral change, so it needs its own check: **does it still fail when it
+should?** A suite that cannot fail is worse than none, because it converts
+"we didn't look" into "we verified."
+
+The technique is drift injection: monkeypatch the port to make a mistake a
+maintainer would plausibly make while re-applying an upstream change, then
+confirm the suite goes red. Do this whenever you change `_fingerprint`,
+`_normalize`, or the matrix — those edits can silently remove coverage. (One
+did: making nested compiled graphs opaque, to shrink failure output, dropped
+criteria-agent coverage entirely.)
+
+Recipe — a throwaway pytest plugin, run with `-p`:
+
+```python
+# /tmp/drift/dc.py    →    PYTHONPATH=/tmp/drift uv run pytest tests/test_parity.py -p dc
+def pytest_configure(config):
+    import lc_factory.assembly as A
+    from lc_factory.upstream import ShellAllowListMiddleware as S
+    A.ShellAllowListMiddleware = lambda _allow: S(["sudo", "curl", "rm"])
+```
+
+Patch `lc_factory.assembly` for symbols the assembly imports at module scope,
+and `lc_factory.upstream` for ones it imports lazily inside the function
+(e.g. `_create_goal_criteria_agent`). Patching only the port — never
+upstream — is what makes the two sides diverge.
+
+Three permanent negative controls live in the suite itself
+(`test_fingerprint_detects_*`), so the most important cases are protected
+from regression without any manual step.
+
+### Known blind spots
+
+Verified by injection and deliberately accepted. Re-check these first if you
+suspect the suite is missing something:
+
+- **`repository_root` and `auto_mode_enabled` passed to
+  `_create_goal_criteria_agent`.** They shape the nested criteria agent's
+  system prompt and interrupt predicates, neither of which the graph summary
+  reaches (it compares node names and tool names). Catching them means
+  fingerprinting the nested agent's prompt and interrupt configs.
+- **`async_subagents`, and the resolved `tools`/`mcp_tools` lists.** No
+  matrix case supplies them.
+
+Two ingredients are needed before criteria-agent arguments are observable at
+all: `goal_criteria_tools` (or the middleware is not installed) *and*
+`project_context` (or the nested agent gets no repository backend, so it has
+no filesystem tools to differ in). `test_composition_parity_criteria_agent_with_repository`
+supplies both; each of its guard assertions exists to fail loudly if a future
+upstream stops surfacing that state, rather than letting the case quietly
+stop testing anything.
+
 ## Rollback
 
 The pin bump is one commit touching `pyproject.toml`, `uv.lock`, and the

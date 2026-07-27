@@ -379,6 +379,45 @@ def test_composition_parity_with_project_context(tmp_path):
     )
 
 
+def test_composition_parity_criteria_agent_with_repository(tmp_path):
+    """Criteria tools AND a project context, so the nested agent gets a backend.
+
+    Neither ingredient alone is enough: without `goal_criteria_tools` the
+    middleware is not installed, and without `project_context` the criteria
+    agent gets `repository_backend=None` and therefore no filesystem tools —
+    so the arguments the port passes to `_create_goal_criteria_agent` have
+    nothing observable to differ in. Together they put the nested agent's
+    tool surface inside the tripwire.
+    """
+    import subprocess
+
+    from deepagents_code.tools import fetch_url
+
+    from lc_factory.upstream import ProjectContext
+
+    repo = tmp_path / "crit_repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+
+    ours, v0 = _run_both(
+        {
+            "goal_criteria_tools": [fetch_url],
+            "rubric_grader_tools": [fetch_url],
+            "project_context": ProjectContext.from_user_cwd(repo),
+            "cwd": repo,
+        },
+        tmp_path,
+    )
+    fingerprint = _fingerprint(ours)
+    assert fingerprint == _fingerprint(v0)
+    # Guard the guard: the nested agent must actually carry filesystem tools,
+    # otherwise this case silently stops covering what it claims to.
+    assert "read_file" in str(fingerprint["middleware"]), (
+        "criteria agent has no repository tools — this case no longer covers "
+        "the arguments passed to _create_goal_criteria_agent"
+    )
+
+
 def test_composition_parity_with_tracing(tmp_path, monkeypatch):
     """Tracing configured, so `LocalContextMiddleware`'s tracing args matter.
 
