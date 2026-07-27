@@ -25,4 +25,4 @@ def test_import_boundary_resolves():
     assert callable(upstream.generate_langgraph_json)
     assert callable(upstream.start_server_and_get_agent)
     for symbol in ("ServerConfig", "ServerProcess", "RemoteAgent"):
-        assert getattr(upstream, symbol) is not None
+        assert callable(getattr(upstream, symbol))
