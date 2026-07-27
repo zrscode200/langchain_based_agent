@@ -25,7 +25,8 @@ tags before touching anything:
 |---|---|
 | `deepagents_code/agent.py` (`create_cli_agent` body) | `src/lc_factory/assembly.py` |
 | `deepagents_code/server_graph.py` (`_make_graph`) | `src/lc_factory/server_graph.py` |
-| `deepagents_code/client/launch/server_manager.py` | `src/lc_factory/launch.py` |
+| `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace`, `_write_pyproject`) | `src/lc_factory/launch.py` — **the live surface; re-apply changes here** |
+| `deepagents_code/client/launch/server_manager.py` (`start_server_and_get_agent`) | `src/lc_factory/launch.py` — standalone launcher, currently **unused in production** (the TUI seam routes through upstream's own). Re-apply only if you intend to keep it; otherwise consider deleting it rather than carrying the maintenance. |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace` global) | `src/lc_factory/tui.py` — **rebind seam, re-verify every bump** |
 
 Everything else is consumed as a library through `src/lc_factory/upstream.py`,
@@ -116,6 +117,20 @@ recomposition possible, and each must be re-verified on a bump:
   `pyproject.toml` (src layout) rather than upstream's fixed `parent.parent`.
 - `start_factory_server_and_get_agent` drops upstream's third return slot
   (an always-`None` MCP session manager placeholder).
+
+**Import timing** (no behavioral effect, but a real difference):
+- `lc_factory.server_graph` imports the boundary at module scope, which
+  eagerly loads `deepagents_code.agent` (~2350 modules). Upstream's
+  `server_graph` defers that to the first `make_graph()` call. Total work is
+  identical — the server builds the graph immediately either way, and the
+  process ends in the same state (same warning filters) — but the cost is
+  paid at import rather than at first build.
+- `cli_main` is deliberately isolated in `lc_factory/upstream_cli.py`,
+  imported only by `tui.py`. Re-exporting it from `upstream.py` would pull
+  `deepagents_code.main` (and its module-level global warning filters) into
+  the server subprocess, which upstream's server never loads.
+- `lc-code` startup is slower than `dcode` for the same reason: upstream's
+  `dcode -v` fast path depends on lazy imports the boundary flattens.
 
 **`tui.py`** — the launch seam, and the port's single most fragile coupling:
 - Rebinds the **private upstream module global**

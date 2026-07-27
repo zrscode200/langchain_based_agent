@@ -37,5 +37,17 @@ configurable verification, archetype presets, headless eval harness.
 
 ## Status
 
-Wave 1.1: packaging skeleton over the pinned baseline. The assembly port
-(wave 1.2) follows.
+**Group 1 (Factory Skeleton) complete.** The factory reaches parity with v0:
+the ported assembly, its own `make_graph`, and a micro-launcher run under the
+upstream deepagents-code TUI and headless CLI via the `lc-code` entry point.
+Group 1 deliberately adds no behavioral deltas — the divergence inventory in
+[`UPGRADING.md`](UPGRADING.md) is exhaustive and structural only.
+
+Verified: composition parity against v0 across a config matrix (with negative
+controls), import-boundary integrity, a live headless session through the
+real upstream client, and an in-process proof that upstream's launcher
+serves the factory graph.
+
+Not yet verified by automation: the interactive Textual TUI in a terminal,
+the approval-interrupt path end-to-end (proven once manually), and rubric
+verdicts with a real model.

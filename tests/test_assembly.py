@@ -9,10 +9,27 @@ from lc_factory.assembly import create_factory_agent
 
 
 def test_signature_parity_with_v0():
-    """The port keeps v0's exact public signature (params, defaults, return)."""
-    ours = inspect.signature(create_factory_agent)
-    v0 = inspect.signature(upstream.create_cli_agent)
-    assert ours == v0
+    """Every v0 parameter survives in the port, unchanged.
+
+    A subset check, not equality: later groups add factory-only parameters
+    (the middleware injection seam first). Equality would fail on the first
+    such delta, and the only available "fix" would be deleting the test —
+    losing the guarantee that actually matters, which is that no v0
+    parameter silently changes kind, default, or annotation.
+    """
+    ours = inspect.signature(create_factory_agent).parameters
+    v0 = inspect.signature(upstream.create_cli_agent).parameters
+
+    missing = [name for name in v0 if name not in ours]
+    assert not missing, f"v0 parameters dropped by the port: {missing}"
+
+    for name, v0_param in v0.items():
+        assert ours[name].kind == v0_param.kind, f"{name}: parameter kind changed"
+        assert ours[name].default == v0_param.default, f"{name}: default changed"
+        assert ours[name].annotation == v0_param.annotation, f"{name}: annotation changed"
+
+    # Group 1 adds no parameters of its own; later groups will.
+    assert set(ours) >= set(v0)
 
 
 def test_construction_smoke(tmp_path):

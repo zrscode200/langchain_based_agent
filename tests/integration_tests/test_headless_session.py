@@ -66,9 +66,12 @@ def test_headless_write_file_round_trip(tmp_path):
     )
 
     assert result.returncode == 0, result.stderr[-2000:]
-    # The deterministic model's gated write executed. That it ran through the
-    # FACTORY graph (not upstream's) is proven in-process by
-    # tests/test_launch.py's scaffold-target and seam-rebind tests.
+    # Scope, stated precisely: headless with no shell allow-list resolves to
+    # `auto_approve=True` upstream (client/non_interactive.py), so this
+    # exercises boot + model turn + tool execution + persistence — NOT the
+    # approval-interrupt path, which is composed away in this configuration.
+    # That the run served the FACTORY graph is proven in-process by
+    # tests/test_launch.py::test_upstream_launcher_serves_the_factory_graph.
     assert target.read_text() == TOP_LEVEL_WRITE_CONTENT
     # The session persisted in the standard dcode sessions DB location.
     assert (home / ".deepagents" / ".state" / "sessions.db").exists()

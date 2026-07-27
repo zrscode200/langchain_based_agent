@@ -29,20 +29,17 @@ from deepagents.middleware.subagents import (
 # --- langchain core ---
 from langchain_core._api import suppress_langchain_beta_warning
 
-# --- deepagents_code: package entry (TUI CLI main, patched by lc_factory.tui) ---
-from deepagents_code import cli_main
+# NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here —
+# importing it eagerly would drag the entire CLI stack into the server
+# subprocess. See that module's docstring.
 from deepagents_code._cli_context import CLIContextSchema
-from deepagents_code._env_vars import SERVER_ENV_PREFIX
 from deepagents_code._glm_5p2_profile import (
     _ensure_glm_5p2_profile_registered,
     _GlmTerminalStallRecovery,
 )
 from deepagents_code._repository_bounds import REPOSITORY_TOOL_CALL_LIMIT
 from deepagents_code._server_config import ServerConfig
-from deepagents_code._startup_error import (
-    STARTUP_ERROR_MARKER,
-    emit_startup_failure,
-)
+from deepagents_code._startup_error import STARTUP_ERROR_MARKER
 
 # --- v0 assembly module: reference implementation + its private helpers ---
 from deepagents_code.agent import (
@@ -69,7 +66,6 @@ from deepagents_code.auto_mode import (
     AutoModeHITLMiddleware,
     HeadlessMCPGuardMiddleware,
     gated_mcp_tool_names,
-    mcp_tool_is_coherently_read_only,
 )
 
 # --- client machinery reused by the micro-launcher and TUI entry ---
@@ -91,7 +87,6 @@ from deepagents_code.client.remote_client import RemoteAgent
 
 # --- config / settings ---
 from deepagents_code.config import (
-    _INHERITED_PYTHONPATH_ENV,
     _ShellAllowAll,
     config,
     configure_langsmith_secret_redaction,
@@ -153,7 +148,6 @@ from deepagents_code.server_graph import (
     _build_tools,
     _criteria_context_tools,
 )
-from deepagents_code.sessions import get_db_path
 from deepagents_code.subagents import list_subagents
 
 
@@ -240,14 +234,12 @@ __all__ = [
     "RemoteAgent",
     "ResumeStateMiddleware",
     "RuntimeSubAgent",
-    "SERVER_ENV_PREFIX",
     "ServerConfig",
     "ServerProcess",
     "ShellAllowListMiddleware",
     "STARTUP_ERROR_MARKER",
     "_EPHEMERAL_PORT",
     "_FALLBACK_ARTIFACTS_ROOT",
-    "_INHERITED_PYTHONPATH_ENV",
     "_MEMORY_READONLY_SYSTEM_PROMPT",
     "_AsyncExecutableBackend",
     "_ContextToolCallBudgetMiddleware",
@@ -280,7 +272,6 @@ __all__ = [
     "_sanitize_agent_message_name",
     "_set_or_clear_server_env",
     "_write_checkpointer",
-    "cli_main",
     "config",
     "configure_langsmith_secret_redaction",
     "create_cli_agent",
@@ -290,10 +281,8 @@ __all__ = [
     "create_sandbox",
     "discover_plugins",
     "emit_preserved_log_notices",
-    "emit_startup_failure",
     "gated_mcp_tool_names",
     "generate_langgraph_json",
-    "get_db_path",
     "get_default_working_dir",
     "get_langsmith_project_name",
     "get_server_project_context",
@@ -302,7 +291,6 @@ __all__ = [
     "is_memory_auto_save_enabled",
     "list_subagents",
     "load_async_subagents",
-    "mcp_tool_is_coherently_read_only",
     "plugin_skill_sources",
     "resolve_recursion_limit",
     "restore_user_tracing_api_keys",

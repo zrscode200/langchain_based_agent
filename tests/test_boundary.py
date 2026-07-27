@@ -87,13 +87,21 @@ def test_runtime_upstream_imports_are_all_exported():
 
 
 def test_no_direct_upstream_imports_outside_boundary():
-    """src/lc_factory imports upstream ONLY through upstream.py."""
+    """src/lc_factory imports upstream ONLY through the boundary modules.
+
+    `upstream_cli.py` is a second, deliberately tiny boundary: it isolates
+    `cli_main` so the server subprocess never pulls the whole CLI stack.
+    """
     package_dir = Path(lc_factory.__file__).resolve().parent
+    boundary_modules = {
+        (package_dir / "upstream.py").resolve(),
+        (package_dir / "upstream_cli.py").resolve(),
+    }
     offenders: list[str] = []
     for path in sorted(package_dir.rglob("*.py")):
-        if path.name == "upstream.py":
+        if path.resolve() in boundary_modules:
             continue
-        tree = ast.parse(path.read_text())
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:

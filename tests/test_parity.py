@@ -350,6 +350,35 @@ def test_composition_parity_server_realistic(tmp_path):
     assert _fingerprint(ours) == _fingerprint(v0)
 
 
+def test_composition_parity_with_project_context(tmp_path):
+    """A resolved project context, which the real server always supplies.
+
+    `server_graph` always passes `project_context`, and it drives six live
+    branches — including `AutoModeHITLMiddleware`'s trusted root, i.e. the
+    auto-approval boundary. `cwd` is a subdirectory of the git root so
+    `project_root != user_cwd` and the distinction is observable.
+    """
+    import subprocess
+
+    from lc_factory.upstream import ProjectContext
+
+    repo = tmp_path / "repo"
+    (repo / "pkg" / "deep").mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    workdir = repo / "pkg" / "deep"
+
+    context = ProjectContext.from_user_cwd(workdir)
+    ours, v0 = _run_both({"project_context": context, "cwd": workdir}, tmp_path)
+    fingerprint = _fingerprint(ours)
+    assert fingerprint == _fingerprint(v0)
+    # Guard the guard: the case is only meaningful while the project root is
+    # actually distinct from the working directory in composed state.
+    assert str(repo.resolve()) in str(fingerprint["middleware"]), (
+        "project root is no longer observable in composed state — this case "
+        "no longer covers project-context-dependent branches"
+    )
+
+
 def test_composition_parity_with_tracing(tmp_path, monkeypatch):
     """Tracing configured, so `LocalContextMiddleware`'s tracing args matter.
 
