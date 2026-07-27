@@ -163,6 +163,18 @@ suspect the suite is missing something:
   fingerprinting the nested agent's prompt and interrupt configs.
 - **`async_subagents`, and the resolved `tools`/`mcp_tools` lists.** No
   matrix case supplies them.
+- **State nested deeper than `_MAX_DEPTH` (6) in `_normalize`.** The cap
+  bounds failure output; anything below it reduces to `"<max-depth>"` and is
+  invisible. Nothing is truncated at the current pin, and the richest parity
+  case asserts that stays true — so if upstream deepens composed state this
+  fails a test rather than quietly shrinking coverage. If it fires, either
+  raise the cap or record here what is being given up.
+
+Both of the above are *latent* rather than live: they cost nothing today and
+would begin costing silently after an upstream change. That is the failure
+mode this section exists to make findable — the summarized-graph tool list
+had the same shape (it kept only the last tool-bearing node until it was
+changed to union across them), and opaque nested graphs had it before that.
 
 Two ingredients are needed before criteria-agent arguments are observable at
 all: `goal_criteria_tools` (or the middleware is not installed) *and*

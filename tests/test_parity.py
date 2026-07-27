@@ -57,6 +57,15 @@ _UNSTABLE_STATE_KEYS = frozenset({"_sandbox_id", "_env"})
 # auto_mode) outside the tripwire.
 _SUMMARIZED_TYPES = frozenset({"CompiledStateGraph", "Pregel"})
 
+_MAX_DEPTH = 6
+"""Recursion bound for `_normalize`, to keep failure output readable.
+
+State nested deeper than this is invisible to the tripwire. Nothing is
+truncated at the current pin, and
+`test_composition_parity_criteria_agent_with_repository` asserts that stays
+true — see UPGRADING.md's "Known blind spots".
+"""
+
 
 def _fake_model():
     # Test layer may reach upstream's test fakes directly (the boundary rule
@@ -78,7 +87,7 @@ def _normalize(value: Any, depth: int = 0, memo: dict[int, str] | None = None) -
     """
     if memo is None:
         memo = {}
-    if depth > 6:
+    if depth > _MAX_DEPTH:
         return "<max-depth>"
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
@@ -140,12 +149,15 @@ def _graph_summary(graph: Any) -> Any:
     nested agent was given — without walking the whole upstream-built graph.
     """
     nodes = getattr(graph, "nodes", {}) or {}
-    tools: list[str] = []
+    # Union across nodes, not assignment: only one tool-bearing node exists at
+    # the current pin, but assigning would silently drop every earlier node's
+    # tools the moment upstream splits them across nodes.
+    tools: set[str] = set()
     for node in nodes.values():
         by_name = getattr(getattr(node, "bound", None), "_tools_by_name", None)
         if by_name:
-            tools = sorted(by_name)
-    return {"graph": {"nodes": sorted(nodes), "tools": tools}}
+            tools.update(by_name)
+    return {"graph": {"nodes": sorted(nodes), "tools": sorted(tools)}}
 
 
 @functools.lru_cache(maxsize=1)
@@ -416,6 +428,14 @@ def test_composition_parity_criteria_agent_with_repository(tmp_path):
         "criteria agent has no repository tools — this case no longer covers "
         "the arguments passed to _create_goal_criteria_agent"
     )
+    # `_normalize` truncates below `_MAX_DEPTH` to bound failure output.
+    # Nothing is truncated at the current pin; assert that stays true on the
+    # richest composition, so deepening upstream state fails here instead of
+    # quietly leaving the tripwire.
+    assert "<max-depth>" not in str(fingerprint), (
+        "composed state now nests deeper than the normalizer walks — raise "
+        "_MAX_DEPTH or record what is being truncated in UPGRADING.md"
+    )
 
 
 def test_composition_parity_with_tracing(tmp_path, monkeypatch):
@@ -490,6 +510,34 @@ def test_composition_parity_sandbox(tmp_path):
         tmp_path,
     )
     assert _fingerprint(ours) == _fingerprint(v0)
+
+
+def test_graph_summary_unions_tools_across_nodes():
+    """A summarized graph keeps tools from every tool-bearing node.
+
+    Only one such node exists at the current pin, so no live case would
+    notice a regression to per-node assignment — which is exactly why this
+    asserts the property directly on a stub.
+    """
+
+    class StubBound:
+        def __init__(self, tools):
+            self._tools_by_name = {name: object() for name in tools}
+
+    class StubNode:
+        def __init__(self, tools):
+            self.bound = StubBound(tools)
+
+    class StubGraph:
+        nodes = {
+            "tools": StubNode(["read_file", "glob"]),
+            "extra_tools": StubNode(["fetch_url"]),
+            "model": object(),
+        }
+
+    summary = _graph_summary(StubGraph())
+    assert summary["graph"]["tools"] == ["fetch_url", "glob", "read_file"]
+    assert summary["graph"]["nodes"] == ["extra_tools", "model", "tools"]
 
 
 def test_parity_suite_is_not_vacuous(tmp_path):
