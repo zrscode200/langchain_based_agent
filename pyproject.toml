@@ -34,3 +34,9 @@ packages = ["src/lc_factory"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Integration tests boot a real `langgraph dev` server; excluded from the
+# default run. Execute with `uv run pytest -m integration`.
+addopts = "-m 'not integration'"
+markers = [
+    "integration: boots a live server subprocess (slow; run explicitly)",
+]

@@ -18,6 +18,18 @@ not itself a product.
 - TUI compatibility seams held by construction: stream contract, resume-state
   channels, interrupt payloads, sessions DB layout, ServerConfig env bridge.
 
+## Development
+
+```sh
+uv sync
+uv run pytest                 # default suite (parity, boundary, unit)
+uv run pytest -m integration  # live server round trip (slow)
+lc-code                       # the dcode TUI, wired to the factory graph
+```
+
+Bumping the upstream pin follows [`UPGRADING.md`](UPGRADING.md) — the parity
+suite gates it.
+
 ## Planned deltas over v0
 
 Ratified backlog (content chosen per iteration): middleware injection seam,
