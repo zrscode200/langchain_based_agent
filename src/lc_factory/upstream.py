@@ -171,10 +171,33 @@ def import_code_interpreter():  # noqa: ANN201
     return CodeInterpreterMiddleware, PTCOption
 
 
+TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
+    ("deepagents.backends.protocol", "BackendProtocol"),
+    ("deepagents.backends.sandbox", "SandboxBackendProtocol"),
+    ("deepagents.middleware.async_subagents", "AsyncSubAgent"),
+    ("deepagents.middleware.subagents", "CompiledSubAgent"),
+    ("deepagents.middleware.subagents", "SubAgent"),
+    ("langchain.agents.middleware", "InterruptOnConfig"),
+    ("langchain.agents.middleware.types", "AgentMiddleware"),
+    ("langchain.tools", "BaseTool"),
+    ("langchain_core.language_models", "BaseChatModel"),
+    ("langgraph.checkpoint.base", "BaseCheckpointSaver"),
+    ("langgraph.pregel", "Pregel"),
+    ("deepagents_code.mcp_tools", "MCPServerInfo"),
+    ("deepagents_code.plugins.adapters.skills", "CodeSkillSource"),
+)
+"""Upstream names used only in annotations, mirrored from the block below.
+
+These are never evaluated at runtime (every lc_factory module uses
+`from __future__ import annotations`), so an upstream rename would fail
+silently. `tests/test_boundary.py` resolves this list explicitly to keep
+them inside the pin-bump tripwire. Keep it in sync with the block below.
+"""
+
 if TYPE_CHECKING:
     # Type-only names (annotation/type-checking use; never evaluated at
     # runtime by lc_factory modules, which all use
-    # `from __future__ import annotations`).
+    # `from __future__ import annotations`). Mirrored in TYPE_ONLY_IMPORTS.
     from deepagents.backends.protocol import BackendProtocol
     from deepagents.backends.sandbox import SandboxBackendProtocol
     from deepagents.middleware.async_subagents import AsyncSubAgent

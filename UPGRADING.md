@@ -26,6 +26,7 @@ tags before touching anything:
 | `deepagents_code/agent.py` (`create_cli_agent` body) | `src/lc_factory/assembly.py` |
 | `deepagents_code/server_graph.py` (`_make_graph`) | `src/lc_factory/server_graph.py` |
 | `deepagents_code/client/launch/server_manager.py` | `src/lc_factory/launch.py` |
+| `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace` global) | `src/lc_factory/tui.py` — **rebind seam, re-verify every bump** |
 
 Everything else is consumed as a library through `src/lc_factory/upstream.py`,
 which is the single inventory of upstream symbols we depend on — including
@@ -46,9 +47,12 @@ private (underscore) names that carry no semver protection.
 
 2. **Update the pins** in `pyproject.toml`, then `uv sync`.
 
-3. **Check the boundary first.** `uv run pytest tests/test_boundary.py` —
-   this fails by name on any upstream rename or removal, and is the cheapest
-   signal that the surface moved.
+3. **Check the boundary first.** `uv run pytest tests/test_boundary.py` — it
+   resolves every name in `upstream.__all__` plus every entry in
+   `upstream.TYPE_ONLY_IMPORTS` (annotation-only names that would otherwise
+   break silently, since nothing evaluates them at runtime). This is the
+   cheapest signal that the upstream surface moved. Note that runtime names
+   also fail earlier, at `import lc_factory.upstream`.
 
 4. **Re-apply composition changes** to the ported files, keeping the port
    line-faithful to the new upstream body (plus our deltas, once we have
@@ -56,9 +60,15 @@ private (underscore) names that carry no semver protection.
    section as it lands).
 
 5. **Run the parity suite.** `uv run pytest tests/test_parity.py` — it
-   compares our composed middleware stack, interrupt gating, subagent wiring,
-   backend routes, prompt, and schema against upstream's across a config
-   matrix. A mismatch means the port drifted; fix the port, not the test.
+   compares our composed agent against upstream's across a config matrix,
+   down to middleware *state* (constructor arguments, not just classes),
+   interrupt gating including the `when` predicates, subagent wiring, backend
+   composition, prompt, schema, and `.with_config`. A mismatch means the port
+   drifted; fix the port, not the test.
+
+   The matrix must keep covering the shape the server actually boots with
+   (`server_graph.py` always passes goal-criteria and rubric-grader tools) —
+   see `test_composition_parity_server_realistic`.
 
 6. **Full verification.**
 
@@ -81,7 +91,34 @@ baseline; no state migration is involved.
 Intentional differences between our assembly and upstream's, re-verified on
 every bump. Keep this list exhaustive — it is what makes step 4 tractable.
 
-- **None yet.** The port is currently line-faithful to
-  `deepagents-code==0.1.47` apart from the function rename, imports routed
-  through `upstream.py`, and the lazy interpreter import going through
-  `upstream.import_code_interpreter()`.
+No *behavioral* deltas exist yet — the composed agent is verified identical
+to v0 by the parity suite. The structural divergences below are what make the
+recomposition possible, and each must be re-verified on a bump:
+
+**`assembly.py`** (otherwise line-faithful to `agent.py:2155-2989`):
+- `create_cli_agent` renamed to `create_factory_agent`.
+- All upstream imports routed through `upstream.py`.
+- The lazy `langchain_quickjs` import goes through
+  `upstream.import_code_interpreter()` (laziness preserved).
+
+**`launch.py`** (ported from `server_manager.py`):
+- `GRAPH_REF` targets `lc_factory.server_graph:make_graph` instead of
+  upstream's `deepagents_code.server_graph:make_graph`.
+- `_DISTRIBUTION_NAME` is `lc_factory`, and the generated runtime
+  `pyproject.toml` depends on this package rather than `deepagents-code`.
+- Upstream's private `_scaffold_workspace` is public `scaffold_workspace`.
+- `_default_package_project_root` probes two ancestor levels for
+  `pyproject.toml` (src layout) rather than upstream's fixed `parent.parent`.
+- `start_factory_server_and_get_agent` drops upstream's third return slot
+  (an always-`None` MCP session manager placeholder).
+
+**`tui.py`** — the launch seam, and the port's single most fragile coupling:
+- Rebinds the **private upstream module global**
+  `server_manager._scaffold_workspace` before calling `cli_main`. Upstream
+  resolves that name at call time on every launch path (TUI start, restart,
+  cwd switch, headless), which is what makes the rebind sufficient.
+- On every bump, re-check that upstream still resolves it as a module global
+  and has not added a caller that captures it earlier or imports it by name.
+  `tests/test_launch.py::test_tui_main_rebinds_scaffold_seam` covers the
+  rebind itself; the grep to run is `_scaffold_workspace` across
+  `deepagents_code/`. Upstreaming a pluggable `graph_ref` would retire this.

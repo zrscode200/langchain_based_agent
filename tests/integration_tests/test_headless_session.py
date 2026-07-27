@@ -15,6 +15,9 @@ from pathlib import Path
 
 import pytest
 
+# Upstream owns the marker/content contract for its deterministic test model.
+from deepagents_code._testing_models import TOP_LEVEL_WRITE_CONTENT
+
 pytestmark = pytest.mark.integration
 
 
@@ -33,6 +36,16 @@ def test_headless_write_file_round_trip(tmp_path):
     lc_code = Path(sys.executable).parent / "lc-code"
     assert lc_code.exists(), "lc-code console script not installed (run uv sync)"
 
+    # Hermetic child env: drop inherited agent/tracing configuration so the
+    # run does not depend on the developer's or CI's environment.
+    child_env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("DEEPAGENTS_CODE_", "LANGSMITH_", "LANGCHAIN_"))
+    }
+    child_env["HOME"] = str(home)
+    child_env["DEEPAGENTS_CODE_NO_UPDATE_CHECK"] = "1"
+
     result = subprocess.run(
         [
             str(lc_code),
@@ -46,14 +59,16 @@ def test_headless_write_file_round_trip(tmp_path):
             f"DCA_TEST_WRITE_FILE={target}",
         ],
         cwd=workdir,
-        env={**os.environ, "HOME": str(home)},
+        env=child_env,
         capture_output=True,
         text=True,
         timeout=300,
     )
 
     assert result.returncode == 0, result.stderr[-2000:]
-    # The deterministic model's gated write executed through OUR graph.
-    assert target.read_text() == "auto-approved"
+    # The deterministic model's gated write executed. That it ran through the
+    # FACTORY graph (not upstream's) is proven in-process by
+    # tests/test_launch.py's scaffold-target and seam-rebind tests.
+    assert target.read_text() == TOP_LEVEL_WRITE_CONTENT
     # The session persisted in the standard dcode sessions DB location.
     assert (home / ".deepagents" / ".state" / "sessions.db").exists()
