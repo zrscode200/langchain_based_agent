@@ -28,8 +28,29 @@ def test_signature_parity_with_v0():
         assert ours[name].default == v0_param.default, f"{name}: default changed"
         assert ours[name].annotation == v0_param.annotation, f"{name}: annotation changed"
 
-    # Group 1 adds no parameters of its own; later groups will.
     assert set(ours) >= set(v0)
+
+
+def test_factory_only_parameters_are_keyword_only_and_default_off():
+    """Every parameter the factory adds beyond v0 must be inert by default.
+
+    This is what keeps the no-injection composition byte-identical to v0 — the
+    property `test_parity.py` relies on. A factory-only parameter that was
+    positional, or defaulted to anything but "do nothing", would break parity
+    for every caller rather than only for callers who opted in.
+    """
+    ours = inspect.signature(create_factory_agent).parameters
+    v0 = inspect.signature(upstream.create_cli_agent).parameters
+
+    added = sorted(set(ours) - set(v0))
+    assert added == ["middleware"], f"undeclared factory-only parameters: {added}"
+    for name in added:
+        assert ours[name].kind is inspect.Parameter.KEYWORD_ONLY, (
+            f"{name}: factory-only parameters must be keyword-only"
+        )
+        assert ours[name].default is None, (
+            f"{name}: factory-only parameters must default to inert"
+        )
 
 
 def test_construction_smoke(tmp_path):

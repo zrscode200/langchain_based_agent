@@ -28,6 +28,8 @@ tags before touching anything:
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace`, `_write_pyproject`) | `src/lc_factory/launch.py` — **the live surface; re-apply changes here** |
 | `deepagents_code/client/launch/server_manager.py` (`start_server_and_get_agent`) | `src/lc_factory/launch.py` — standalone launcher, currently **unused in production** (the TUI seam routes through upstream's own). Re-apply only if you intend to keep it; otherwise consider deleting it rather than carrying the maintenance. |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace` global) | `src/lc_factory/tui.py` — **rebind seam, re-verify every bump** |
+| `deepagents/graph.py` (`_apply_custom_middleware`, the core/tail split) | `src/lc_factory/assembly.py` — the injection seam's **positional contract** depends on it: our block must keep landing contiguous and order-preserving, and the SDK's reserved name set (core, tail, and harness-profile extras) must not gain a member. `tests/test_seam.py` |
+| `langchain/agents/factory.py` (hook wiring, duplicate-name check) | `src/lc_factory/assembly.py` — the seam documents `before_*` forward / `after_*` reversed. A reversal inverts every phase guarantee. `tests/test_seam.py` |
 
 Everything else is consumed as a library through `src/lc_factory/upstream.py`,
 which is the single inventory of upstream symbols we depend on — including
@@ -86,6 +88,21 @@ private (underscore) names that carry no semver protection.
    The matrix must keep covering the shape the server actually boots with
    (`server_graph.py` always passes goal-criteria and rubric-grader tools) —
    see `test_composition_parity_server_realistic`.
+
+   **The parity suite is a documented-divergence suite, not an equality
+   suite.** It asserts that the *default* composition matches v0; deltas are
+   opt-in and must not perturb it. If a change to the port forces an edit to
+   `test_parity.py`, that is the signal a delta has stopped being opt-in —
+   fix the delta, not the test.
+
+5b. **Run the seam suite.** `uv run pytest tests/test_seam.py` — it asserts the
+   injection seam's positional contract against the **final** composed stack
+   (after the SDK's own merge, not just the factory block), re-derives the
+   SDK's middleware names — core, tail, AND the harness-profile union — and
+   checks `_SDK_RESERVED_MIDDLEWARE_NAMES` still covers them, and proves hook direction by running the hooks. These are the
+   upstream behaviors the seam's public promises rest on, so a bump that
+   changes any of them fails here rather than silently inverting a documented
+   guarantee.
 
 6. **Full verification.**
 
@@ -195,15 +212,40 @@ baseline; no state migration is involved.
 Intentional differences between our assembly and upstream's, re-verified on
 every bump. Keep this list exhaustive — it is what makes step 4 tractable.
 
-No *behavioral* deltas exist yet — the composed agent is verified identical
-to v0 by the parity suite. The structural divergences below are what make the
-recomposition possible, and each must be re-verified on a bump:
+**Behavioral deltas** (opt-in; the default composition stays identical to v0,
+which is what `tests/test_parity.py` asserts *unmodified*):
+
+1. **Middleware injection seam** (`middleware=`, wave 2.1). The factory accepts
+   caller-supplied middleware, which `create_cli_agent` structurally cannot.
+   Inert when omitted. **Four sites** in `assembly.py`, each marked `# SEAM` —
+   grep that marker to find them all when re-applying an upstream change:
+   - `# SEAM (resolve)` — `_normalize_injected_middleware` near the top of the
+     body. The three splices below all reference the binding it creates, so
+     restoring them without this one is a `NameError`.
+   - phase `first` — in the `agent_middleware` list initializer.
+   - phase `before_verification` — immediately before the
+     `if goal_criteria_tools is not None:` block.
+   - phase `last` — after `ReliableRubricMiddleware` is appended, followed by
+     the single `_validate_injected_middleware` call.
+
+   Each phase anchors to *unconditional* middleware so its boundary does not
+   move with configuration. One documented exception: with `fs_tools` set, the
+   factory's own `FilesystemMiddleware` shares a name with the SDK's and is
+   hoisted by the SDK's merge ahead of the `first` phase.
+   `tests/test_seam.py` asserts placement in the final composed stack, so a
+   re-application that moves a site fails there.
+
+**Structural divergences** — what makes the recomposition possible. Each must
+be re-verified on a bump:
 
 **`assembly.py`** (otherwise line-faithful to `agent.py:2155-2989`):
 - `create_cli_agent` renamed to `create_factory_agent`.
 - All upstream imports routed through `upstream.py`.
 - The lazy `langchain_quickjs` import goes through
   `upstream.import_code_interpreter()` (laziness preserved).
+- The seam: the `middleware` parameter, `FactoryPhase`, `_PHASE_ORDER`,
+  `_SDK_RESERVED_MIDDLEWARE_NAMES`, `_normalize_injected_middleware`,
+  `_validate_injected_middleware`, and the four `# SEAM` sites above.
 
 **`launch.py`** (ported from `server_manager.py`):
 - `GRAPH_REF` targets `lc_factory.server_graph:make_graph` instead of

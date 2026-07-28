@@ -18,8 +18,10 @@ from __future__ import annotations
 import logging
 import os
 import warnings
+from collections import Counter
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lc_factory.upstream import (
     CONVERSATION_HISTORY_DIRNAME,
@@ -91,6 +93,204 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+FactoryPhase = Literal["first", "before_verification", "last"]
+"""Where caller-supplied middleware is spliced into the factory stack.
+
+Each phase anchors to middleware the assembly builds *unconditionally*, so a
+phase boundary does not move when configuration turns other middleware on or
+off. See ``_PHASE_ORDER`` for the guarantees.
+"""
+
+_PHASE_ORDER: tuple[FactoryPhase, ...] = ("first", "before_verification", "last")
+"""Phases in stack order.
+
+- ``first`` — ahead of every factory middleware, with one exception the seam
+  does not control: when ``fs_tools`` is set, the factory's own
+  ``FilesystemMiddleware`` shares a name with the SDK's, so the SDK's
+  name-based merge hoists it to the SDK's own position, ahead of this phase.
+- ``before_verification`` — after everything that installs tools, context,
+  memory, skills and approval policy; ahead of the goal-criteria -> compaction
+  -> rubric verification tail.
+- ``last`` — after every factory middleware, immediately ahead of the SDK's own
+  tail (harness profile, prompt caching, HITL), which is not addressable.
+"""
+
+_DEFAULT_PHASE: FactoryPhase = "before_verification"
+"""Phase used when ``middleware`` is given as a bare sequence."""
+
+_SDK_RESERVED_MIDDLEWARE_NAMES = frozenset(
+    {
+        # Core, ahead of the factory block.
+        "FilesystemMiddleware",
+        "SubAgentMiddleware",
+        "SummarizationMiddleware",
+        "PatchToolCallsMiddleware",
+        "AsyncSubAgentMiddleware",
+        "SkillsMiddleware",
+        # Tail, behind the factory block. Reachable for replacement just the
+        # same: the SDK's merge compares against its FULLY assembled stack.
+        "AnthropicPromptCachingMiddleware",
+        "BedrockPromptCachingMiddleware",
+        "FireworksPromptCachingMiddleware",
+        "MemoryMiddleware",
+        "HumanInTheLoopMiddleware",
+        # Harness-profile `extra_middleware`. Model-dependent at runtime, so
+        # this is the union across every built-in profile — the guard stays
+        # model-independent on purpose (see below).
+        "TodoListMiddleware",
+        "ChatNVIDIAMessageCompatibilityMiddleware",
+        "EntityResolutionGuardMiddleware",
+        "FinalAnswerGuardMiddleware",
+        "FollowupDisciplineMiddleware",
+        "ModelRateLimitRetryMiddleware",
+        "NemotronPolicyNudgeMiddleware",
+        "NemotronProgressBudgetMiddleware",
+        "NemotronReasoningTagCleanupMiddleware",
+        "NemotronTextToolCallParser",
+        "NemotronToolCallShim",
+        "ReadFileContinuationNoticeMiddleware",
+        "ToolRetryMiddleware",
+    }
+)
+"""Names the deepagents SDK may own in the stack it assembles around ours.
+
+`create_deep_agent` merges custom middleware **by name** against its *fully
+assembled* stack (`graph.py:217`, called at `:883` — after the tail is appended
+at `:859-876`). A collision is *replaced in place at the SDK's position*
+instead of being inserted at the requested phase, silently.
+
+Both halves matter, and the tail is the dangerous one. Measured at this pin:
+injecting langchain's stock `HumanInTheLoopMiddleware` — the most natural thing
+a caller might do — raised nothing and replaced the factory's approval gate,
+taking the gated-tool set from eleven entries down to the caller's own. `execute`,
+`write_file`, `edit_file`, `delete` and `task` all became unattended. Injecting
+a `FilesystemMiddleware` likewise displaces the SDK's own, which backs every
+filesystem tool and enforces `permissions`.
+
+`tests/test_seam.py` re-derives all three groups — core, tail, and the
+harness-profile union — and asserts this constant still covers them, so an
+upstream release that adds middleware fails there rather than opening a hole.
+Deriving in the test rather than at runtime keeps the private
+`_HARNESS_PROFILES` registry out of `src/`, and keeps profile middleware from
+being *constructed* on every composition just to read its name.
+
+**Deliberately model-independent.** A name is rejected when *any* registered
+profile could own it, not only the profile for the caller's model — so
+injecting e.g. `ToolRetryMiddleware` is refused even on a model whose profile
+does not install one. Over-rejection is the safe direction: the error is
+explicit and the caller can override `.name`, whereas under-rejection is
+silent replacement. This matches the stance already taken for
+`MemoryMiddleware`, which the factory never lets the SDK install either.
+
+**Known residual:** profiles registered by third parties after import
+(`register_harness_profile` is public API) are not covered.
+"""
+
+
+def _normalize_injected_middleware(
+    middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]]
+    | None,
+) -> dict[FactoryPhase, list[AgentMiddleware[Any, Any]]]:
+    """Resolve the ``middleware`` argument into one list per phase.
+
+    Args:
+        middleware: Caller-supplied middleware — a bare sequence (assigned to
+            the default phase) or a mapping keyed by phase. ``None`` yields
+            empty lists, which is what keeps the no-injection composition
+            byte-identical to v0.
+
+    Returns:
+        Mapping of every phase in `_PHASE_ORDER` to its middleware list.
+
+    Raises:
+        ValueError: When a mapping contains a key that is not a known phase, or
+            when an entry is not usable as middleware.
+    """
+    resolved: dict[FactoryPhase, list[AgentMiddleware[Any, Any]]] = {
+        phase: [] for phase in _PHASE_ORDER
+    }
+    if middleware is None:
+        return resolved
+
+    def _checked(items: Sequence[AgentMiddleware[Any, Any]], phase: str) -> list[Any]:
+        # Materialize BEFORE inspecting: a generator, `map`, or any one-shot
+        # iterable would otherwise be consumed by the check and compose as
+        # empty — a silent drop, which is the exact failure the phase-key check
+        # below exists to prevent.
+        items = list(items)
+        # Shape is validated here rather than at the composition site so a bad
+        # entry fails before any setup work, and with a message that says what
+        # was wrong instead of an `AttributeError` on `.name` much later.
+        for item in items:
+            if not isinstance(getattr(item, "name", None), str):
+                msg = (
+                    f"Injected middleware for phase {phase!r} must be "
+                    f"AgentMiddleware instances with a string `.name`; got "
+                    f"{item!r}."
+                )
+                raise ValueError(msg)
+        return items
+
+    if isinstance(middleware, Mapping):
+        # Fail fast on shape: a typo'd phase key would otherwise be silently
+        # dropped, and the caller's middleware would never be composed at all.
+        if unknown := sorted(str(key) for key in middleware if key not in resolved):
+            msg = (
+                f"Unknown middleware phase(s): {unknown}. "
+                f"Valid phases: {list(_PHASE_ORDER)}."
+            )
+            raise ValueError(msg)
+        for phase, items in middleware.items():
+            resolved[phase].extend(_checked(items, phase))
+    else:
+        resolved[_DEFAULT_PHASE].extend(_checked(middleware, _DEFAULT_PHASE))
+    return resolved
+
+
+def _validate_injected_middleware(
+    agent_middleware: Sequence[AgentMiddleware[Any, Any]],
+    injected: Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]],
+) -> None:
+    """Reject injected middleware the SDK's merge would mishandle.
+
+    Runs on the fully composed factory stack, immediately before it is handed
+    to `create_deep_agent`, so there is a single site to re-apply on a pin bump.
+
+    Args:
+        agent_middleware: The composed factory stack, injections included.
+        injected: Per-phase caller middleware, from
+            `_normalize_injected_middleware`.
+
+    Raises:
+        ValueError: When injected middleware claims an SDK base name, or when
+            any name appears twice in the composed stack.
+    """
+    injected_names = {item.name for items in injected.values() for item in items}
+    if colliding := sorted(injected_names & _SDK_RESERVED_MIDDLEWARE_NAMES):
+        msg = (
+            f"Injected middleware uses name(s) reserved by the deepagents SDK: "
+            f"{colliding}. The SDK merges custom middleware by name against the "
+            f"stack it assembles around ours, so these would REPLACE the SDK's "
+            f"own middleware at its position instead of landing at the "
+            f"requested phase — silently removing scaffolding the agent depends "
+            f"on, up to and including the human approval gate. Override "
+            f"`.name` on the injected middleware."
+        )
+        raise ValueError(msg)
+
+    counts = Counter(item.name for item in agent_middleware)
+    if duplicates := sorted(name for name, count in counts.items() if count > 1):
+        # The factory's own middleware are distinct by construction, so any
+        # duplicate necessarily involves an injection. langchain rejects this
+        # too, but with a message that names nothing.
+        msg = (
+            f"Duplicate middleware name(s) in the composed stack: {duplicates}. "
+            f"Every middleware needs a unique `.name`. Override `.name` on the "
+            f"injected middleware."
+        )
+        raise ValueError(msg)
+
 
 def create_factory_agent(
     model: str | BaseChatModel,
@@ -123,6 +323,9 @@ def create_factory_agent(
     async_subagents: list[AsyncSubAgent] | None = None,
     goal_criteria_tools: Sequence[BaseTool | Callable[..., Any]] | None = None,
     rubric_grader_tools: Sequence[BaseTool | Callable[..., Any]] | None = None,
+    middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]]
+    | None = None,
 ) -> tuple[Pregel[Any, Any, Any, Any], CompositeBackend]:
     """Create a CLI-configured agent with flexible options.
 
@@ -260,6 +463,60 @@ def create_factory_agent(
         rubric_grader_tools: External read-only context tools available to rubric
             grading for verifying work completed in MCP-backed or web-accessible
             systems.
+        middleware: Caller-supplied middleware spliced into the factory stack.
+            **This is the factory's first capability beyond v0**;
+            `create_cli_agent` has no equivalent.
+
+            Pass a bare sequence to use the default `'before_verification'`
+            phase, or a mapping keyed by `FactoryPhase` to place middleware
+            explicitly:
+
+            ```python
+            create_factory_agent(..., middleware=[MyMiddleware()])
+            create_factory_agent(..., middleware={"first": [MyMiddleware()]})
+            ```
+
+            `None` (default) composes exactly as v0 does — the seam is inert
+            unless used.
+
+            !!! warning "Position is an onion, not a timeline"
+
+                Earlier phases are **outermost**, not "earlier in time". A
+                middleware in `'first'` has its `before_*` hooks run first and
+                its `after_*` hooks run **last**; one in `'last'` is the
+                reverse. To have the final say on the way out, use `'first'`.
+
+            Phases and what each guarantees:
+
+            - `'first'`: ahead of every factory middleware — except that
+                with `fs_tools` set, the factory's own `FilesystemMiddleware`
+                is hoisted ahead of this phase by the SDK's name-based merge.
+            - `'before_verification'` (default): after everything that
+                installs tools, context, memory, skills and approval policy;
+                ahead of the goal-criteria/compaction/rubric tail.
+            - `'last'`: after every factory middleware, immediately ahead of
+                the SDK's own tail (harness profile, prompt caching, HITL).
+                That SDK tail is not addressable from here.
+
+            Injected middleware reaches the **main agent only**. Subagents
+            (including `general-purpose`), the goal-criteria agent, and the
+            rubric grader keep their own stacks, so work delegated through
+            `task` is not covered by anything injected here.
+
+            Every injected middleware needs a `.name` that is unique in the
+            composed stack and is not one the deepagents SDK may use for its
+            own middleware; both are rejected with an explicit error rather
+            than silently mis-composed. The SDK merges by name, so a collision
+            would otherwise *replace* its middleware in place — including the
+            human approval gate — instead of landing at the requested phase.
+
+            Reserved names include langchain stock middleware the SDK installs
+            for some models (`TodoListMiddleware`, `ToolRetryMiddleware`,
+            `HumanInTheLoopMiddleware`, ...). If you need one of those,
+            override `.name` on your instance. The guard is deliberately
+            model-independent, so it also refuses names that could only
+            collide on a model you are not using.
+
 
     Returns:
         2-tuple of `(agent_graph, backend)`
@@ -271,11 +528,17 @@ def create_factory_agent(
     Raises:
         ValueError: When `enable_interpreter=True` is paired with a
             non-`None` `sandbox`, when `settings.interpreter_ptc` contains
-            unknown tool names, or when `interpreter_ptc="all"` is used
-            without `auto_approve` or `interpreter_ptc_acknowledge_unsafe`.
+            unknown tool names, when `interpreter_ptc="all"` is used
+            without `auto_approve` or `interpreter_ptc_acknowledge_unsafe`,
+            when `middleware` names an unknown phase, or when injected
+            middleware collides by `.name` with the SDK's base stack or with
+            another middleware in the composed stack.
     """
     tools = tools or []
     mcp_tools = tuple(mcp_tools or ())
+    # SEAM (resolve): up front, so a bad phase key or entry fails before any
+    # setup work. The three splice sites below depend on this binding.
+    injected_middleware = _normalize_injected_middleware(middleware)
     if auto_mode_enabled and (not interactive or sandbox is not None):
         logger.warning(
             "Classifier-backed Auto is unavailable outside the local interactive "
@@ -434,6 +697,8 @@ def create_factory_agent(
 
     # Build middleware stack based on enabled features
     agent_middleware: list[AgentMiddleware[Any, Any]] = [
+        # SEAM (phase "first"): ahead of every factory middleware.
+        *injected_middleware["first"],
         ConfigurableModelMiddleware(),
     ]
     if not interactive:
@@ -778,6 +1043,11 @@ def create_factory_agent(
             main_tool_descriptions=main_tool_descriptions,
         )
 
+    # SEAM (phase "before_verification"): every middleware that installs
+    # tools, context, memory, skills or approval policy is now composed; the
+    # goal-criteria -> compaction -> rubric verification tail follows.
+    agent_middleware.extend(injected_middleware["before_verification"])
+
     if goal_criteria_tools is not None:
         from lc_factory.upstream import (
             GoalCriteriaMiddleware,
@@ -905,6 +1175,11 @@ def create_factory_agent(
         if rubric_max_iterations is not None:
             rubric_kwargs["max_iterations"] = rubric_max_iterations
         agent_middleware.append(ReliableRubricMiddleware(**rubric_kwargs))
+
+    # SEAM (phase "last"): after every factory middleware, immediately ahead of
+    # the SDK's own tail (harness profile, prompt caching, HITL).
+    agent_middleware.extend(injected_middleware["last"])
+    _validate_injected_middleware(agent_middleware, injected_middleware)
 
     # Create the agent
     all_subagents: list[SubAgent | CompiledSubAgent | AsyncSubAgent] = [
