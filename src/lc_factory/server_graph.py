@@ -25,6 +25,7 @@ from collections.abc import Iterable
 from collections.abc import Set as AbstractSet
 from typing import Any
 
+from lc_factory._env import MIDDLEWARE_REF_ENV, reserve_middleware_ref_env
 from lc_factory.upstream import (
     STARTUP_ERROR_MARKER as _STARTUP_ERROR_MARKER,
     ServerConfig,
@@ -44,60 +45,6 @@ logger = logging.getLogger(__name__)
 
 _sandbox_cm: Any = None
 _sandbox_backend: Any = None
-
-MIDDLEWARE_REF_ENV = "LC_FACTORY_MIDDLEWARE"
-"""Env var naming a zero-argument callable that supplies factory middleware.
-
-Format is ``"module.path:callable"`` — the same shape upstream already uses for
-``graph_ref``, ``checkpointer_path``, and model ``class_path``. The callable's
-return value is passed straight to ``create_factory_agent(middleware=...)``, so
-it may be a bare sequence or a phase-keyed mapping; choosing phases stays in
-Python rather than being encoded into a string.
-
-Resolving it imports and executes the named module inside the server process,
-so it must come from a **real shell export**: a project-local source would mean
-that entering an untrusted repository and running ``lc-code`` executes that
-repository's code before any approval gate (decisions.md D4).
-
-Reading ``os.environ`` is *not* by itself sufficient for that — upstream loads
-``.env`` files straight into it, on two paths that both run before resolution.
-:func:`reserve_middleware_ref_env` is what actually holds the invariant; read
-its docstring before changing anything here, and do not add a file-based
-source without an explicit trust design.
-
-Deliberately outside ``ServerConfig``: upstream's ``DEEPAGENTS_CODE_SERVER_*``
-contract stays byte-identical, and ``_build_server_env`` relays this variable
-to the subprocess on every start and restart because it filters by an explicit
-denylist rather than by prefix.
-"""
-
-
-def reserve_middleware_ref_env() -> None:
-    """Claim ``LC_FACTORY_MIDDLEWARE`` so no ``.env`` file can introduce it.
-
-    This is what actually enforces the user-scoped invariant, and it must run
-    before anything touches ``settings``.
-
-    Upstream loads ``.env`` files into ``os.environ`` on two paths that both
-    precede resolution: the client's settings bootstrap searches upward from
-    the cwd, and the server's ``settings.reload_from_environment`` re-reads the
-    project directory. Either would let a **committed** ``.env`` in a cloned
-    repository name a module for the server to import and call — the exact
-    thing decisions.md D4 forbids, and the reason upstream keeps its own
-    denylist of keys that "turn `.env` loading into code execution". That
-    denylist is a `frozenset` and cannot be extended, and it cannot know about
-    this variable anyway.
-
-    So instead of filtering the loader, this occupies the slot: upstream's
-    ``apply_dotenv`` skips any key already present in ``os.environ``, so a
-    pre-set value — even an empty one, which reads as "unset" — makes the
-    variable unsettable from any ``.env``. Consequence worth knowing: the
-    variable is then settable **only** from a real shell export, including in
-    the user's own global ``~/.deepagents/.env``. Distinguishing a global
-    ``.env`` from a project one needs upstream internals we deliberately do not
-    reach for; refusing both is the safe direction and is documented.
-    """
-    os.environ.setdefault(MIDDLEWARE_REF_ENV, "")
 
 
 def _resolve_middleware_ref(ref: str) -> Any:  # noqa: ANN401
@@ -379,9 +326,5 @@ async def _make_graph() -> Any:  # noqa: ANN401
 
     return await asyncio.to_thread(_create_factory_agent_sync)
 
-
-# Runs at import, which precedes every `settings` access in the server process
-# and therefore every `.env` load. See the function's docstring.
-reserve_middleware_ref_env()
 
 make_graph = _build_graph_factory(_make_graph)

@@ -13,6 +13,7 @@ the transport only exists across a process boundary.
 from __future__ import annotations
 
 import os
+import sys
 
 import pytest
 
@@ -137,38 +138,90 @@ def test_the_transport_survives_the_upstream_server_env_filter(monkeypatch):
     assert "PYTHONPATH" not in _build_server_env()
 
 
-def test_a_project_dotenv_cannot_supply_the_reference(tmp_path, monkeypatch):
-    """decisions.md D4, pinned against the real `_make_graph` sequence.
+_D4_PROBE = """
+import os, sys, pathlib
+{sabotage}
+import lc_factory.server_graph as sg
+resolved = sg._factory_middleware()
+print("INJECTED" if resolved else "SAFE")
+"""
 
-    A `.env` travels with a cloned repository, and upstream loads it straight
-    into `os.environ` — so without a guard, `git clone && lc-code` lets the
-    repo name a module for the server to import and call before any approval
-    gate. Upstream denies a fixed set of keys from `.env` for exactly this
-    reason; it cannot know about ours, and its denylist is a frozenset.
 
-    An earlier version of this test seeded the files but called
-    `_factory_middleware()` in isolation — it never ran the
-    `settings.reload_from_environment` that `_make_graph` performs two lines
-    earlier, so it passed while the invariant was broken. This one reproduces
-    the real order, which is the only version that can fail.
+def _run_d4_probe(repo, *, sabotage: str = "") -> str:
+    """Import lc_factory in a FRESH interpreter whose cwd is a seeded repo.
+
+    Must be a subprocess. The contamination happens at *import* time — upstream's
+    config module has a PEP 562 `__getattr__` that bootstraps settings and loads
+    `.env` on first attribute access, so simply importing `lc_factory.upstream`
+    triggers it. By the time any in-process test function runs, `lc_factory` has
+    long since been imported under pytest's own cwd, so an in-process version of
+    this test cannot fail no matter what it asserts.
     """
-    from lc_factory.upstream import settings
+    import subprocess
 
-    monkeypatch.delenv(MIDDLEWARE_REF_ENV, raising=False)
-    ref = "lc_factory._testing_middleware:build_marker_middleware"
-    (tmp_path / ".env").write_text(
-        f"{MIDDLEWARE_REF_ENV}={ref}\n"
+    env = {k: v for k, v in os.environ.items() if k != MIDDLEWARE_REF_ENV}
+    result = subprocess.run(
+        [sys.executable, "-c", _D4_PROBE.format(sabotage=sabotage)],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr[-2000:]
+    return result.stdout.strip()
+
+
+def _seed_hostile_repo(tmp_path):
+    repo = tmp_path / "cloned_repo"
+    repo.mkdir()
+    (repo / ".env").write_text(
+        f"{MIDDLEWARE_REF_ENV}=lc_factory._testing_middleware:build_marker_middleware\n"
         f"LC_FACTORY_TEST_MIDDLEWARE_MARKER={tmp_path / 'pwned.txt'}\n"
     )
-    monkeypatch.chdir(tmp_path)
+    return repo
 
-    reserve_middleware_ref_env()          # what server_graph does at import
-    settings.reload_from_environment(start_path=tmp_path)  # what _make_graph does
 
-    assert _factory_middleware() is None, (
+def test_a_project_dotenv_cannot_supply_the_reference(tmp_path):
+    """decisions.md D4, pinned where it can actually fail.
+
+    A `.env` travels with a cloned repository and upstream loads it straight
+    into `os.environ`, so without a guard `git clone && lc-code` lets the repo
+    name a module for the server to import and call before any approval gate.
+    Upstream denies a fixed set of keys from `.env` for exactly this reason; it
+    cannot know about ours, and its denylist is a frozenset.
+    """
+    assert _run_d4_probe(_seed_hostile_repo(tmp_path)) == "SAFE", (
         "a project .env supplied the middleware reference — cloning a "
         "repository and running lc-code inside it would execute code it "
         "chose, before any approval gate (decisions.md D4)"
+    )
+
+
+def test_the_d4_probe_can_actually_fail(tmp_path):
+    """Negative control: prove the guard above is load-bearing.
+
+    Two earlier versions of the D4 pin passed against vulnerable code — one
+    because it skipped the `.env` reload entirely, one because it called the
+    reservation from a test body, in a process where the import had already
+    happened. Both measured something other than the property. So this removes
+    the reservation the package installed at import and asserts the probe goes
+    red, which is the only evidence that a green run means anything.
+    """
+    injected = _run_d4_probe(
+        _seed_hostile_repo(tmp_path),
+        # Undo the reservation, then re-trigger the project .env load the
+        # server performs — i.e. exactly the pre-fix world.
+        sabotage=(
+            "import lc_factory\n"
+            "os.environ.pop('LC_FACTORY_MIDDLEWARE', None)\n"
+            "from lc_factory.upstream import settings\n"
+            "settings.reload_from_environment(start_path=pathlib.Path.cwd())\n"
+        ),
+    )
+    assert injected == "INJECTED", (
+        "the D4 probe reports SAFE even with the reservation removed — it is "
+        "not testing the guard, and a green result proves nothing"
     )
 
 

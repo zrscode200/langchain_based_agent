@@ -269,13 +269,29 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      own denylist of keys that "turn `.env` loading into code execution", but
      it is a `frozenset` and cannot know about ours.
 
-     `server_graph.reserve_middleware_ref_env()` therefore claims the slot with
-     an empty value at `server_graph` import and at the top of `tui.main()`,
-     exploiting the fact that upstream's `apply_dotenv` skips keys already
-     present in `os.environ`. **On a bump, re-check that skip** — if
-     `apply_dotenv` starts overwriting existing keys, the guard is void.
-     `tests/test_server_graph.py` pins the outcome, the mechanism, and that a
-     shell export still works.
+     `lc_factory._env.reserve_middleware_ref_env()` therefore claims the slot
+     with an empty value, exploiting the fact that upstream's `apply_dotenv`
+     skips keys already present in `os.environ`.
+
+     **Placement is the guard, and it is subtle enough that a first attempt got
+     it wrong.** `deepagents_code.config` has a module-level PEP 562
+     `__getattr__` that bootstraps settings and loads `.env` on first attribute
+     access — so merely importing `lc_factory.upstream` already contaminates
+     the environment. Calling the reservation from `server_graph` module scope
+     or `tui.main()` runs *after* that and silently no-ops. It must stay in
+     **`lc_factory/__init__.py`**, which Python executes before any submodule
+     and which both entry points pass through, and `_env.py` must stay free of
+     any `lc_factory`/upstream import so `__init__` can reach it without
+     pulling the boundary.
+
+     **On a bump, re-check two things:** that `apply_dotenv` still skips keys
+     already present (if it starts overwriting, the guard is void), and that
+     nothing has moved an upstream import ahead of the reservation in
+     `__init__.py`. `tests/test_server_graph.py` pins the outcome in a
+     **subprocess** — an in-process test imports `lc_factory` before it can
+     seed a repository and is structurally incapable of failing — and carries a
+     negative control that removes the reservation and asserts the probe goes
+     red.
 
      Accepted consequence: the variable cannot be set from *any* `.env`,
      including the user's own global one. Separating a global `.env` from a
