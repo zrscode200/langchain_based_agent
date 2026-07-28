@@ -284,14 +284,30 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      any `lc_factory`/upstream import so `__init__` can reach it without
      pulling the boundary.
 
-     **On a bump, re-check two things:** that `apply_dotenv` still skips keys
-     already present (if it starts overwriting, the guard is void), and that
-     nothing has moved an upstream import ahead of the reservation in
-     `__init__.py`. `tests/test_server_graph.py` pins the outcome in a
-     **subprocess** — an in-process test imports `lc_factory` before it can
-     seed a repository and is structurally incapable of failing — and carries a
-     negative control that removes the reservation and asserts the probe goes
-     red.
+     **On a bump, re-check three things:**
+     1. `apply_dotenv` still skips keys already present in `os.environ` — if it
+        starts overwriting, the guard is void.
+     2. Nothing has moved an upstream import ahead of the reservation in
+        `__init__.py`, and `_env.py` still imports only stdlib.
+     3. **Nothing imports `deepagents_code` before `lc_factory`.** The guard
+        assumes it wins the race, and that assumption reaches outside this
+        package: an upstream release registering a langgraph plugin or entry
+        point that imports `deepagents_code` would defeat it, as would a
+        `sitecustomize`/`.pth`, or embedding `lc_factory` in an application
+        that already imported upstream. Verified clear at this pin — the
+        generated workspace (`checkpointer.py`, `langgraph.json`) has no
+        upstream import and no pre-import hook. **No test can cover this**,
+        because any test imports `lc_factory` first, which is the assumption
+        itself.
+
+     `tests/test_server_graph.py` pins the outcome in a **subprocess** — an
+     in-process test imports `lc_factory` before it can seed a repository and is
+     structurally incapable of failing — across both process shapes (client:
+     cwd is the repo; server: cwd is a private temp dir and the repo arrives via
+     `DEEPAGENTS_CODE_SERVER_CWD`), each with a negative control that removes
+     the reservation and asserts the probe goes red. The two shapes traverse
+     different upstream code, and the server shape is the one that was
+     exploitable.
 
      Accepted consequence: the variable cannot be set from *any* `.env`,
      including the user's own global one. Separating a global `.env` from a

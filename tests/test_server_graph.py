@@ -142,13 +142,22 @@ _D4_PROBE = """
 import os, sys, pathlib
 {sabotage}
 import lc_factory.server_graph as sg
+from lc_factory.upstream import get_server_project_context, settings
+
+# Mirror `_make_graph`: it reloads settings from the project context before
+# resolving, which is a second, separate chance for a project `.env` to land in
+# os.environ.
+ctx = get_server_project_context()
+settings.reload_from_environment(
+    start_path=ctx.user_cwd if ctx is not None else pathlib.Path.cwd()
+)
 resolved = sg._factory_middleware()
 print("INJECTED" if resolved else "SAFE")
 """
 
 
-def _run_d4_probe(repo, *, sabotage: str = "") -> str:
-    """Import lc_factory in a FRESH interpreter whose cwd is a seeded repo.
+def _run_d4_probe(repo, tmp_path, shape: str, *, sabotage: str = "") -> str:
+    """Import lc_factory in a FRESH interpreter, in one of two real shapes.
 
     Must be a subprocess. The contamination happens at *import* time — upstream's
     config module has a PEP 562 `__getattr__` that bootstraps settings and loads
@@ -156,13 +165,30 @@ def _run_d4_probe(repo, *, sabotage: str = "") -> str:
     triggers it. By the time any in-process test function runs, `lc_factory` has
     long since been imported under pytest's own cwd, so an in-process version of
     this test cannot fail no matter what it asserts.
+
+    The two shapes traverse *different upstream code* and must both be covered:
+
+    - `client`: cwd is the repository, so upstream bootstraps via
+      `find_dotenv()` searching upward.
+    - `server`: cwd is a private temp dir (as the launcher makes it) and the
+      repository is reached only through `DEEPAGENTS_CODE_SERVER_CWD`, so
+      upstream goes down `_find_dotenv_from_start_path` instead. The private cwd
+      buys nothing — this is the shape that was actually exploitable.
     """
     import subprocess
 
     env = {k: v for k, v in os.environ.items() if k != MIDDLEWARE_REF_ENV}
+    if shape == "server":
+        cwd = tmp_path / "server_workdir"
+        cwd.mkdir(exist_ok=True)
+        env["DEEPAGENTS_CODE_SERVER_CWD"] = str(repo)
+    else:
+        cwd = repo
+        env.pop("DEEPAGENTS_CODE_SERVER_CWD", None)
+
     result = subprocess.run(
         [sys.executable, "-c", _D4_PROBE.format(sabotage=sabotage)],
-        cwd=repo,
+        cwd=cwd,
         env=env,
         capture_output=True,
         text=True,
@@ -182,7 +208,8 @@ def _seed_hostile_repo(tmp_path):
     return repo
 
 
-def test_a_project_dotenv_cannot_supply_the_reference(tmp_path):
+@pytest.mark.parametrize("shape", ["client", "server"])
+def test_a_project_dotenv_cannot_supply_the_reference(tmp_path, shape):
     """decisions.md D4, pinned where it can actually fail.
 
     A `.env` travels with a cloned repository and upstream loads it straight
@@ -190,26 +217,35 @@ def test_a_project_dotenv_cannot_supply_the_reference(tmp_path):
     name a module for the server to import and call before any approval gate.
     Upstream denies a fixed set of keys from `.env` for exactly this reason; it
     cannot know about ours, and its denylist is a frozenset.
+
+    Both process shapes are covered because they reach different upstream code,
+    and the one that was actually exploitable is the server shape.
     """
-    assert _run_d4_probe(_seed_hostile_repo(tmp_path)) == "SAFE", (
-        "a project .env supplied the middleware reference — cloning a "
-        "repository and running lc-code inside it would execute code it "
-        "chose, before any approval gate (decisions.md D4)"
+    assert _run_d4_probe(_seed_hostile_repo(tmp_path), tmp_path, shape) == "SAFE", (
+        f"a project .env supplied the middleware reference in the {shape} "
+        f"shape — cloning a repository and running lc-code inside it would "
+        f"execute code it chose, before any approval gate (decisions.md D4)"
     )
 
 
-def test_the_d4_probe_can_actually_fail(tmp_path):
+@pytest.mark.parametrize("shape", ["client", "server"])
+def test_the_d4_probe_can_actually_fail(tmp_path, shape):
     """Negative control: prove the guard above is load-bearing.
 
-    Two earlier versions of the D4 pin passed against vulnerable code — one
-    because it skipped the `.env` reload entirely, one because it called the
-    reservation from a test body, in a process where the import had already
-    happened. Both measured something other than the property. So this removes
-    the reservation the package installed at import and asserts the probe goes
-    red, which is the only evidence that a green run means anything.
+    Three earlier versions of this pin passed against vulnerable code — one
+    skipped the `.env` reload, one called the reservation from a test body in a
+    process where the import had already happened, and one removed the
+    reservation at a call site that was already too late, measuring the
+    mechanism rather than its placement. Each validated a *sub-sequence* of the
+    real lifecycle instead of the lifecycle.
+
+    So the control is parametrized too: a control covering only one shape has
+    the same blind spot as a pin covering only one shape.
     """
     injected = _run_d4_probe(
         _seed_hostile_repo(tmp_path),
+        tmp_path,
+        shape,
         # Undo the reservation, then re-trigger the project .env load the
         # server performs — i.e. exactly the pre-fix world.
         sabotage=(

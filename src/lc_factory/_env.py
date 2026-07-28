@@ -60,5 +60,20 @@ def reserve_middleware_ref_env() -> None:
     export — not from any ``.env``, including the user's own global one.
     Separating a global ``.env`` from a project one needs upstream internals the
     import boundary deliberately does not reach for.
+
+    **Precondition, and it reaches beyond this package.** The guard holds only
+    while ``lc_factory`` is the first thing in the process to touch
+    ``deepagents_code``. If anything imports upstream first, the ``.env`` is
+    already loaded and this ``setdefault`` no-ops. Nothing does today — both
+    entry points go through this package, and the generated server workspace
+    (``checkpointer.py``, ``langgraph.json``) contains no upstream import and no
+    pre-import hook. What would break it: an upstream release registering a
+    langgraph plugin or entry point that imports ``deepagents_code``, a
+    ``sitecustomize``/``.pth`` in the user's environment, or embedding
+    ``lc_factory`` in an application that already imported upstream.
+
+    **No test can detect this**, because any test imports ``lc_factory`` first —
+    which is the very assumption being made. It is a bump-time check, recorded
+    in ``UPGRADING.md``.
     """
     os.environ.setdefault(MIDDLEWARE_REF_ENV, "")
