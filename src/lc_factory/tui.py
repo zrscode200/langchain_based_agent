@@ -15,6 +15,7 @@ the graph factory pluggable would remove the rebind entirely.
 from __future__ import annotations
 
 from lc_factory import launch
+from lc_factory.server_graph import reserve_middleware_ref_env
 from lc_factory.upstream import server_manager_module
 from lc_factory.upstream_cli import cli_main
 
@@ -28,5 +29,11 @@ def main() -> None:
     That is intended for the `lc-code` console script; library callers that
     need upstream's original behavior back must restore it themselves.
     """
+    # Before `cli_main`, because the client's own settings bootstrap loads a
+    # `.env` searching upward from the cwd, and whatever it lands in
+    # `os.environ` is relayed to the server subprocess. Claiming the slot here
+    # is what stops a cloned repository's committed `.env` from naming code for
+    # the server to import (decisions.md D4).
+    reserve_middleware_ref_env()
     server_manager_module._scaffold_workspace = launch.scaffold_workspace  # noqa: SLF001
     cli_main()

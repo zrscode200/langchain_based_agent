@@ -220,6 +220,30 @@ def test_profile_extra_middleware_names_are_all_reserved():
     )
 
 
+@pytest.mark.parametrize(
+    "supplied",
+    [
+        lambda probe: {probe},
+        lambda probe: {"first": {probe}},
+        lambda probe: frozenset({probe}),
+    ],
+)
+def test_unordered_collections_are_rejected(supplied):
+    """Order is the seam's contract; a set silently randomizes it.
+
+    Set iteration order varies with `PYTHONHASHSEED`, so a pair of middleware
+    with an outer/inner relationship would flip between server restarts with
+    nothing downstream noticing. `{MyMiddleware()}` is also the natural typo
+    for a phase mapping.
+
+    Checked here rather than only at the transport, so the two documented ways
+    to use the feature — the Python API and `LC_FACTORY_MIDDLEWARE` — agree on
+    what input is legal.
+    """
+    with pytest.raises(ValueError, match="unordered"):
+        _normalize_injected_middleware(supplied(_Probe("probe")))
+
+
 def test_non_middleware_entries_are_rejected_at_normalization():
     """Shape errors must surface before any setup work, with a real message."""
     for bad in (None, "not-middleware", object()):

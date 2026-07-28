@@ -6,7 +6,15 @@ import os
 
 import pytest
 
-_ISOLATED_ENV_PREFIXES = ("LANGSMITH_", "LANGCHAIN_", "DEEPAGENTS_CODE_")
+_ISOLATED_ENV_PREFIXES = (
+    "LANGSMITH_",
+    "LANGCHAIN_",
+    "DEEPAGENTS_CODE_",
+    # A maintainer dogfooding with `export LC_FACTORY_MIDDLEWARE=...` would
+    # otherwise inject their own middleware into every composition the suite
+    # builds — including the parity baseline, which must match v0 exactly.
+    "LC_FACTORY_",
+)
 
 
 @pytest.fixture(autouse=True)

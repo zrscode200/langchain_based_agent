@@ -141,6 +141,50 @@ def test_bad_middleware_reference_fails_startup_loudly(tmp_path):
     )
 
 
+def test_seam_validation_failure_also_reaches_the_client(tmp_path):
+    """A reference that resolves but composes illegally must still be loud.
+
+    The other failure test covers the *early* path — the reference itself is
+    broken, so `server_graph` raises and prints the startup error directly.
+    This covers the late path: the reference resolves fine and it is
+    `create_factory_agent`'s own reserved-name guard that rejects it, which
+    must surface through upstream's graph-factory error barrier instead of
+    dying in the subprocess log. Nothing else in the suite crosses that
+    boundary, and it is the one guarding the approval gate.
+    """
+    home = _make_home(tmp_path)
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+
+    child_env = _headless_env(home)
+    child_env["LC_FACTORY_MIDDLEWARE"] = (
+        "lc_factory._testing_middleware:build_reserved_name_middleware"
+    )
+
+    result = subprocess.run(
+        [
+            str(_lc_code()),
+            "--timeout", "60",
+            "-M", "itest:fake",
+            "-q", "--no-stream",
+            "-n", "say hello",
+        ],
+        cwd=workdir,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+
+    assert result.returncode != 0, (
+        "middleware colliding with the SDK's approval gate composed anyway"
+    )
+    combined = result.stdout + result.stderr
+    assert "HumanInTheLoopMiddleware" in combined, (
+        f"the seam's rejection never reached the client: {combined[-2000:]}"
+    )
+
+
 def test_headless_write_file_round_trip(tmp_path):
     home = _make_home(tmp_path)
     workdir = tmp_path / "workdir"

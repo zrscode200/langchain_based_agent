@@ -76,15 +76,10 @@ from deepagents_code.auto_mode import (
 # --- client machinery reused by the micro-launcher and TUI entry ---
 from deepagents_code.client.launch import server_manager as server_manager_module
 from deepagents_code.client.launch.server import (
-    _EPHEMERAL_PORT,
     ServerProcess,
-    emit_preserved_log_notices,
     generate_langgraph_json,
 )
 from deepagents_code.client.launch.server_manager import (
-    _capture_project_context,
-    _preflight_validate_mcp_config,
-    _set_or_clear_server_env,
     _write_checkpointer,
     start_server_and_get_agent,
 )
@@ -242,7 +237,6 @@ __all__ = [
     "ServerProcess",
     "ShellAllowListMiddleware",
     "STARTUP_ERROR_MARKER",
-    "_EPHEMERAL_PORT",
     "_FALLBACK_ARTIFACTS_ROOT",
     "_MEMORY_READONLY_SYSTEM_PROMPT",
     "_AsyncExecutableBackend",
@@ -257,7 +251,6 @@ __all__ = [
     "_artifacts_root",
     "_build_graph_factory",
     "_build_tools",
-    "_capture_project_context",
     "_create_cli_compaction_middleware",
     "_create_goal_criteria_agent",
     "_create_rubric_grader_tools",
@@ -267,14 +260,12 @@ __all__ = [
     "_inject_fs_tools_into_subagents",
     "_normalize_rubric_grader_context_tools",
     "_offload_fallback_root",
-    "_preflight_validate_mcp_config",
     "_resolve_ptc_option",
     "_rubric_grader_read_file_prefix",
     "_rubric_grader_repository_tool_names",
     "_rubric_grader_system_prompt",
     "_rubric_interrupt_on",
     "_sanitize_agent_message_name",
-    "_set_or_clear_server_env",
     "_write_checkpointer",
     "config",
     "configure_langsmith_secret_redaction",
@@ -284,7 +275,6 @@ __all__ = [
     "create_model",
     "create_sandbox",
     "discover_plugins",
-    "emit_preserved_log_notices",
     "gated_mcp_tool_names",
     "generate_langgraph_json",
     "get_default_working_dir",

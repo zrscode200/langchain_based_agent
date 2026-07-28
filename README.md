@@ -4,9 +4,9 @@ Agent factory layer over the LangChain ecosystem (LangGraph + deepagents).
 
 `lc_factory` recomposes `deepagents_code.create_cli_agent` (the "v0"
 baseline) into an owned assembly over a **pinned** `deepagents-code`
-dependency: our factory function, our `make_graph`, and a micro-launcher,
-composing upstream's importable pieces. Products consume this layer; it is
-not itself a product.
+dependency: our factory function, our `make_graph`, and our workspace
+scaffolding, composing upstream's importable pieces. Products consume this
+layer; it is not itself a product.
 
 ## Architecture rules
 
@@ -30,24 +30,78 @@ lc-code                       # the dcode TUI, wired to the factory graph
 Bumping the upstream pin follows [`UPGRADING.md`](UPGRADING.md) — the parity
 suite gates it.
 
+## Middleware injection
+
+The factory's first capability beyond v0. `create_cli_agent` has no middleware
+parameter and a fixed stack order; `create_factory_agent` accepts caller
+middleware at documented positions:
+
+```python
+from lc_factory.assembly import create_factory_agent
+
+agent, backend = create_factory_agent(
+    model="anthropic:claude-sonnet-4-6",
+    assistant_id="my-agent",
+    middleware=[MyMiddleware()],                 # default phase
+    # ...or address phases explicitly:
+    # middleware={"first": [Outer()], "last": [Inner()]},
+)
+```
+
+Three phases — `first`, `before_verification` (default), `last` — each anchored
+to middleware the factory always builds, so a phase boundary does not move when
+configuration toggles other middleware on or off.
+
+> **Position is an onion.** Earlier phases are *outermost*: their `before_*`
+> hooks run first and their `after_*` hooks run **last**. To have the final say
+> on the way out, use `first`.
+
+To use it from a running `lc-code` session, point an environment variable at a
+zero-argument factory the server can import:
+
+```sh
+export LC_FACTORY_MIDDLEWARE="my_package.agent_setup:build_middleware"
+lc-code
+```
+
+`my_package` must be **installed in the same environment as `lc_factory`**.
+The server runs in a subprocess with `PYTHONPATH` stripped and a private
+working directory, so a module that is merely on your shell's path will not
+be importable there.
+
+It must also be a real shell export. Resolving the reference imports and
+executes that module inside the server process, so `lc_factory` claims the
+variable before any `.env` file can set it — otherwise a committed `.env` in a
+repository you cloned could name code to run on `lc-code` startup. That
+deliberately rules out `.env` as a source, including your own global one.
+
+Injected middleware reaches the main agent only; subagents, the goal-criteria
+agent, and the rubric grader keep their own stacks.
+
 ## Planned deltas over v0
 
-Ratified backlog (content chosen per iteration): middleware injection seam,
-configurable verification, archetype presets, headless eval harness.
+Ratified backlog (content chosen per iteration): ~~middleware injection
+seam~~ (done), configurable verification, archetype presets, headless eval
+harness.
 
 ## Status
 
-**Group 1 (Factory Skeleton) complete.** The factory reaches parity with v0:
-the ported assembly, its own `make_graph`, and a micro-launcher run under the
-upstream deepagents-code TUI and headless CLI via the `lc-code` entry point.
-Group 1 deliberately adds no behavioral deltas — the divergence inventory in
-[`UPGRADING.md`](UPGRADING.md) is exhaustive and structural only.
+**Groups 1 and 2 complete.** Group 1 built the skeleton — the ported assembly,
+its own `make_graph`, and scaffolding that runs under the upstream TUI and
+headless CLI via `lc-code` — at exact parity with v0. Group 2 added the
+middleware injection seam and the transport that carries it into a live
+session.
 
-Verified: composition parity against v0 across a config matrix (with negative
-controls), import-boundary integrity, a live headless session through the
-real upstream client, and an in-process proof that upstream's launcher
-serves the factory graph.
+Parity is now a *documented-divergence* contract rather than plain equality:
+the default composition stays byte-identical to v0 (the parity suite proves
+this unmodified), and every deliberate divergence is enumerated in
+[`UPGRADING.md`](UPGRADING.md).
 
-Not yet verified by automation: the interactive Textual TUI in a terminal,
-the approval-interrupt path end-to-end (proven once manually), and rubric
-verdicts with a real model.
+Verified: composition parity against v0 across a config matrix with negative
+controls; seam placement in the final composed stack plus hook ordering proven
+by execution; import-boundary integrity; and live headless sessions covering
+both a successful injection and a startup failure on a bad reference.
+
+Not yet verified by automation: the interactive Textual TUI in a terminal, the
+approval-interrupt path end-to-end (proven once manually), and rubric verdicts
+with a real model.

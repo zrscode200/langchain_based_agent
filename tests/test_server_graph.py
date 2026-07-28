@@ -12,12 +12,15 @@ the transport only exists across a process boundary.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from lc_factory.server_graph import (
     MIDDLEWARE_REF_ENV,
     _factory_middleware,
     _resolve_middleware_ref,
+    reserve_middleware_ref_env,
 )
 
 
@@ -134,20 +137,49 @@ def test_the_transport_survives_the_upstream_server_env_filter(monkeypatch):
     assert "PYTHONPATH" not in _build_server_env()
 
 
-def test_no_project_local_file_can_supply_the_reference(tmp_path, monkeypatch):
-    """The reference is user-scoped by construction — pinned behaviorally.
+def test_a_project_dotenv_cannot_supply_the_reference(tmp_path, monkeypatch):
+    """decisions.md D4, pinned against the real `_make_graph` sequence.
 
-    decisions.md D4 binds this: resolving a config-named module executes it in
-    the server process, so a project-local source would let an untrusted
-    repository run code merely because `lc-code` was launched inside it.
+    A `.env` travels with a cloned repository, and upstream loads it straight
+    into `os.environ` — so without a guard, `git clone && lc-code` lets the
+    repo name a module for the server to import and call before any approval
+    gate. Upstream denies a fixed set of keys from `.env` for exactly this
+    reason; it cannot know about ours, and its denylist is a frozenset.
 
-    The safe property is the *absence* of a feature, so this seeds a directory
-    with every plausible project-local config shape someone might later wire
-    up, and asserts none of them is consulted.
+    An earlier version of this test seeded the files but called
+    `_factory_middleware()` in isolation — it never ran the
+    `settings.reload_from_environment` that `_make_graph` performs two lines
+    earlier, so it passed while the invariant was broken. This one reproduces
+    the real order, which is the only version that can fail.
+    """
+    from lc_factory.upstream import settings
+
+    monkeypatch.delenv(MIDDLEWARE_REF_ENV, raising=False)
+    ref = "lc_factory._testing_middleware:build_marker_middleware"
+    (tmp_path / ".env").write_text(
+        f"{MIDDLEWARE_REF_ENV}={ref}\n"
+        f"LC_FACTORY_TEST_MIDDLEWARE_MARKER={tmp_path / 'pwned.txt'}\n"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    reserve_middleware_ref_env()          # what server_graph does at import
+    settings.reload_from_environment(start_path=tmp_path)  # what _make_graph does
+
+    assert _factory_middleware() is None, (
+        "a project .env supplied the middleware reference — cloning a "
+        "repository and running lc-code inside it would execute code it "
+        "chose, before any approval gate (decisions.md D4)"
+    )
+
+
+def test_other_project_local_shapes_are_not_consulted_either(tmp_path, monkeypatch):
+    """No file-based source exists at all — the safe property is an absence.
+
+    Bounded by construction: this enumerates the shapes someone might plausibly
+    wire up later, not every conceivable filename.
     """
     monkeypatch.delenv(MIDDLEWARE_REF_ENV, raising=False)
     ref = "lc_factory._testing_middleware:build_marker_middleware"
-    (tmp_path / ".env").write_text(f"{MIDDLEWARE_REF_ENV}={ref}\n")
     (tmp_path / "lc_factory.toml").write_text(f'middleware = "{ref}"\n')
     (tmp_path / ".lc-factory").write_text(ref)
     (tmp_path / "pyproject.toml").write_text(
@@ -155,10 +187,41 @@ def test_no_project_local_file_can_supply_the_reference(tmp_path, monkeypatch):
     )
     monkeypatch.chdir(tmp_path)
 
-    assert _factory_middleware() is None, (
-        "a project-local file supplied the middleware reference — entering an "
-        "untrusted repository would now execute its code (decisions.md D4)"
+    assert _factory_middleware() is None
+
+
+def test_reservation_makes_the_variable_unsettable_from_a_dotenv(tmp_path, monkeypatch):
+    """Pin the mechanism, not just the outcome.
+
+    The guard works because upstream's `apply_dotenv` skips keys already in
+    `os.environ`. If that precedence ever changes, the outcome test above still
+    needs to fail for a comprehensible reason — this says which assumption broke.
+    """
+    from lc_factory.upstream import settings
+
+    monkeypatch.delenv(MIDDLEWARE_REF_ENV, raising=False)
+    (tmp_path / ".env").write_text(f"{MIDDLEWARE_REF_ENV}=evil_pkg:pwn\n")
+    monkeypatch.chdir(tmp_path)
+
+    reserve_middleware_ref_env()
+    assert os.environ[MIDDLEWARE_REF_ENV] == ""
+    settings.reload_from_environment(start_path=tmp_path)
+    assert os.environ[MIDDLEWARE_REF_ENV] == "", (
+        "upstream's .env loader no longer skips keys already present in "
+        "os.environ — the reservation guard is void and a project .env can "
+        "again name code for the server to import"
     )
+
+
+def test_a_shell_export_still_works(tmp_path, monkeypatch):
+    """The reservation must not break the legitimate path it protects."""
+    monkeypatch.setenv(
+        MIDDLEWARE_REF_ENV,
+        "lc_factory._testing_middleware:build_marker_middleware",
+    )
+    reserve_middleware_ref_env()  # setdefault must not clobber a real value
+    resolved = _factory_middleware()
+    assert [item.name for item in resolved] == ["LcFactoryMarkerMiddleware"]
 
 
 def test_no_module_writes_the_reference_into_the_environment():
@@ -175,6 +238,23 @@ def test_no_module_writes_the_reference_into_the_environment():
     import lc_factory
 
     _MUTATORS = {"setdefault", "update", "pop", "popitem", "clear", "__setitem__"}
+
+    def _is_the_reservation(node: ast.Call) -> bool:
+        """Allow exactly `os.environ.setdefault(MIDDLEWARE_REF_ENV, "")`.
+
+        The reservation is the guard itself, not a hole in it: it claims the
+        slot with an EMPTY value, which reads as unset, so it can only ever
+        prevent a `.env` from supplying a reference — never supply one.
+        Anything that puts a real value in is still an offender.
+        """
+        return (
+            node.func.attr == "setdefault"
+            and len(node.args) == 2
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "MIDDLEWARE_REF_ENV"
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value == ""
+        )
 
     def _is_environ(node: ast.AST) -> bool:
         """True for `os.environ` and for a bare `environ` from `from os import`."""
@@ -197,6 +277,8 @@ def test_no_module_writes_the_reference_into_the_environment():
             # Reads (`get`, `copy`, ...) are fine and deliberately not listed.
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if _is_environ(node.func.value) and node.func.attr in _MUTATORS:
+                    if _is_the_reservation(node):
+                        continue
                     offenders.append(
                         f"{path.name}:{node.lineno} (environ.{node.func.attr})"
                     )

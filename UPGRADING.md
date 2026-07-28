@@ -26,7 +26,7 @@ tags before touching anything:
 | `deepagents_code/agent.py` (`create_cli_agent` body) | `src/lc_factory/assembly.py` |
 | `deepagents_code/server_graph.py` (`_make_graph`) | `src/lc_factory/server_graph.py` |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace`, `_write_pyproject`) | `src/lc_factory/launch.py` — **the live surface; re-apply changes here** |
-| `deepagents_code/client/launch/server_manager.py` (`start_server_and_get_agent`) | `src/lc_factory/launch.py` — standalone launcher, currently **unused in production** (the TUI seam routes through upstream's own). Re-apply only if you intend to keep it; otherwise consider deleting it rather than carrying the maintenance. |
+| `deepagents_code/client/launch/server_manager.py` (`start_server_and_get_agent`) | *Nothing* — a standalone port of this was deleted at the Group 2 closeout. It had no production caller (the TUI seam routes through upstream's own) and owed re-application on every bump. **Nothing to re-apply.** |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace` global) | `src/lc_factory/tui.py` — **rebind seam, re-verify every bump** |
 | `deepagents/graph.py` (`_apply_custom_middleware`, the core/tail split) | `src/lc_factory/assembly.py` — the injection seam's **positional contract** depends on it: our block must keep landing contiguous and order-preserving, and the SDK's reserved name set (core, tail, and harness-profile extras) must not gain a member. `tests/test_seam.py` |
 | `langchain/agents/factory.py` (hook wiring, duplicate-name check) | `src/lc_factory/assembly.py` — the seam documents `before_*` forward / `after_*` reversed. A reversal inverts every phase guarantee. `tests/test_seam.py` |
@@ -229,6 +229,11 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    - phase `last` — after `ReliableRubricMiddleware` is appended, followed by
      the single `_validate_injected_middleware` call.
 
+   `_validate_injected_middleware` runs on every composition, not only when
+   middleware is injected: its duplicate-name half also guards the factory's
+   own stack, and its message distinguishes the two cases — a collision with
+   nothing injected is a port defect, most likely surfacing during a bump.
+
    Each phase anchors to *unconditional* middleware so its boundary does not
    move with configuration. One documented exception: with `fs_tools` set, the
    factory's own `FilesystemMiddleware` shares a name with the SDK's and is
@@ -250,12 +255,31 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      denylist** — a switch to prefix filtering, or the addition of an
      `LC_`/non-`DEEPAGENTS` sweep, would silently sever the transport and the
      agent would compose without the caller's middleware.
-   - **Security invariant:** the reference is read from the user-scoped process
-     environment only. Resolving it imports and executes that module inside the
-     server process, so a project-local source would let an untrusted
-     repository run code merely because `lc-code` was launched inside it. Do
-     not add a file-based source without an explicit trust design
-     (decisions.md D4). `tests/test_server_graph.py` pins the absence of one.
+   - **Security invariant:** the reference must come from a real shell export.
+     Resolving it imports and executes that module inside the server process,
+     so a project-local source would let an untrusted repository run code
+     merely because `lc-code` was launched inside it (decisions.md D4).
+
+     This is *enforced*, not merely unimplemented, and the enforcement is
+     load-bearing: upstream loads `.env` files straight into `os.environ` on
+     two paths that both precede resolution — the client's settings bootstrap
+     searches upward from the cwd, and the server's
+     `settings.reload_from_environment` re-reads the project directory. Either
+     would otherwise let a committed `.env` name the module. Upstream keeps its
+     own denylist of keys that "turn `.env` loading into code execution", but
+     it is a `frozenset` and cannot know about ours.
+
+     `server_graph.reserve_middleware_ref_env()` therefore claims the slot with
+     an empty value at `server_graph` import and at the top of `tui.main()`,
+     exploiting the fact that upstream's `apply_dotenv` skips keys already
+     present in `os.environ`. **On a bump, re-check that skip** — if
+     `apply_dotenv` starts overwriting existing keys, the guard is void.
+     `tests/test_server_graph.py` pins the outcome, the mechanism, and that a
+     shell export still works.
+
+     Accepted consequence: the variable cannot be set from *any* `.env`,
+     including the user's own global one. Separating a global `.env` from a
+     project one needs upstream internals we do not reach for.
    - `_resolve_middleware_ref` converts every failure **it detects** —
      malformed value, an import that fails or itself raises, missing or
      unreadable attribute, non-callable, a factory that raises, an unordered
@@ -311,8 +335,15 @@ be re-verified on a bump:
 - Upstream's private `_scaffold_workspace` is public `scaffold_workspace`.
 - `_default_package_project_root` probes two ancestor levels for
   `pyproject.toml` (src layout) rather than upstream's fixed `parent.parent`.
-- `start_factory_server_and_get_agent` drops upstream's third return slot
-  (an always-`None` MCP session manager placeholder).
+- The module scaffolds only. A standalone launcher
+  (`start_factory_server_and_get_agent` / `factory_server_session`) was ported
+  in Group 1 and **deleted at the Group 2 closeout** — no production caller,
+  and it duplicated upstream code we would have owed re-application on every
+  bump. Its removal also retired five boundary re-exports
+  (`_EPHEMERAL_PORT`, `_capture_project_context`,
+  `_preflight_validate_mcp_config`, `_set_or_clear_server_env`,
+  `emit_preserved_log_notices`), four of them private and therefore
+  unprotected — so the bump tripwire no longer fails on names nothing uses.
 
 **Import timing** (no behavioral effect, but a real difference):
 - `lc_factory.server_graph` imports the boundary at module scope, which

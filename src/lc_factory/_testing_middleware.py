@@ -59,6 +59,27 @@ def build_marker_middleware() -> list[AgentMiddleware]:
     return [_MarkerMiddleware()]
 
 
+def build_reserved_name_middleware() -> list[AgentMiddleware]:
+    """Return middleware that collides with an SDK-reserved name.
+
+    Exercises the *late* validation path across the process boundary: this
+    resolves cleanly, so it is `create_factory_agent`'s own guard that must
+    reject it, and that rejection has to reach the client through upstream's
+    graph-factory error barrier rather than dying in a subprocess log.
+
+    Returns:
+        A single middleware named for the SDK's approval gate — which, before
+        the seam guarded the SDK tail, silently replaced it.
+    """
+
+    class _Impostor(AgentMiddleware):
+        @property
+        def name(self) -> str:
+            return "HumanInTheLoopMiddleware"
+
+    return [_Impostor()]
+
+
 def build_phase_keyed_middleware() -> dict[str, list[AgentMiddleware]]:
     """Return the marker middleware addressed to an explicit phase.
 

@@ -4,9 +4,14 @@
 ``deepagents_code.agent.create_cli_agent`` (``agent.py:2155-2989`` at monorepo
 ``8da0ccb13``, authored against deepagents-code==0.1.47 and unchanged
 through 0.1.48), with every upstream import routed
-through :mod:`lc_factory.upstream`. Wave 1.2 rule: byte-equivalent semantics
-to v0 — zero behavioral deltas beyond the import indirection. The middleware
-injection seam and the other ratified deltas land in later iterations.
+through :mod:`lc_factory.upstream`.
+
+**One deliberate behavioral delta**: the middleware injection seam
+(``middleware=``, Group 2), which is inert unless used — the default
+composition stays byte-identical to v0, and ``tests/test_parity.py`` proves it
+unmodified. Its four splice points are marked ``# SEAM``; see ``UPGRADING.md``
+for the full divergence inventory. Everything else here is line-faithful, and
+the remaining ratified deltas land in later iterations.
 
 Pin-bump discipline: diff upstream's ``agent.py`` between tags, re-apply
 mechanical changes here, and let the parity suite guard the composed
@@ -20,6 +25,7 @@ import os
 import warnings
 from collections import Counter
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
@@ -214,6 +220,17 @@ def _normalize_injected_middleware(
         return resolved
 
     def _checked(items: Sequence[AgentMiddleware[Any, Any]], phase: str) -> list[Any]:
+        # Order IS the seam's contract, and set iteration order varies with
+        # PYTHONHASHSEED between runs. Accepting one would turn a documented
+        # position into a coin flip that nothing downstream notices, and
+        # `{MyMiddleware()}` is the natural typo for a phase mapping.
+        if isinstance(items, AbstractSet):
+            msg = (
+                f"Middleware for phase {phase!r} was given as an unordered "
+                f"{type(items).__name__}; composition order is part of the "
+                f"seam's contract. Use a list or tuple."
+            )
+            raise ValueError(msg)
         # Materialize BEFORE inspecting: a generator, `map`, or any one-shot
         # iterable would otherwise be consumed by the check and compose as
         # empty — a silent drop, which is the exact failure the phase-key check
@@ -281,13 +298,21 @@ def _validate_injected_middleware(
 
     counts = Counter(item.name for item in agent_middleware)
     if duplicates := sorted(name for name, count in counts.items() if count > 1):
-        # The factory's own middleware are distinct by construction, so any
-        # duplicate necessarily involves an injection. langchain rejects this
-        # too, but with a message that names nothing.
+        # langchain rejects duplicates too, but with a message that names
+        # nothing. Attribute correctly: with no injection the collision is
+        # between the factory's own middleware, which is a port defect (most
+        # likely surfacing during a pin bump) — telling that maintainer to
+        # rename "the injected middleware" would send them looking for
+        # something that does not exist.
+        remedy = (
+            "Override `.name` on the injected middleware."
+            if injected_names
+            else "Nothing was injected, so this is a collision inside the "
+            "factory's own stack — check the port against upstream."
+        )
         msg = (
             f"Duplicate middleware name(s) in the composed stack: {duplicates}. "
-            f"Every middleware needs a unique `.name`. Override `.name` on the "
-            f"injected middleware."
+            f"Every middleware needs a unique `.name`. {remedy}"
         )
         raise ValueError(msg)
 
