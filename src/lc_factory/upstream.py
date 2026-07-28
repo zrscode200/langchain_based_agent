@@ -28,6 +28,10 @@ from deepagents.middleware.subagents import (
 )
 
 # --- langchain core ---
+# `AgentMiddleware` is a RUNTIME export, not type-only: the injection seam's
+# public API is defined in terms of it, and `_testing_middleware` subclasses it
+# at runtime — which the boundary rule requires it do through this module.
+from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core._api import suppress_langchain_beta_warning
 
 # NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here —
@@ -173,7 +177,6 @@ TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
     ("deepagents.middleware.subagents", "CompiledSubAgent"),
     ("deepagents.middleware.subagents", "SubAgent"),
     ("langchain.agents.middleware", "InterruptOnConfig"),
-    ("langchain.agents.middleware.types", "AgentMiddleware"),
     ("langchain.tools", "BaseTool"),
     ("langchain_core.language_models", "BaseChatModel"),
     ("langgraph.checkpoint.base", "BaseCheckpointSaver"),
@@ -198,7 +201,6 @@ if TYPE_CHECKING:
     from deepagents.middleware.async_subagents import AsyncSubAgent
     from deepagents.middleware.subagents import CompiledSubAgent, SubAgent
     from langchain.agents.middleware import InterruptOnConfig
-    from langchain.agents.middleware.types import AgentMiddleware
     from langchain.tools import BaseTool
     from langchain_core.language_models import BaseChatModel
     from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -206,10 +208,11 @@ if TYPE_CHECKING:
     from deepagents_code.mcp_tools import MCPServerInfo
     from deepagents_code.plugins.adapters.skills import CodeSkillSource
 
-# Runtime surface only: TYPE_CHECKING-only re-exports (AgentMiddleware,
-# BaseTool, Pregel, ...) are intentionally NOT in __all__ — they exist solely
-# for type checkers, and the boundary-integrity test getattr-sweeps this list.
+# Runtime surface only: TYPE_CHECKING-only re-exports (BaseTool, Pregel, ...)
+# are intentionally NOT in __all__ — they exist solely for type checkers, and
+# the boundary-integrity test getattr-sweeps this list.
 __all__ = [
+    "AgentMiddleware",
     "AskUserMiddleware",
     "AsyncApprovalHITLMiddleware",
     "AutoModeHITLMiddleware",

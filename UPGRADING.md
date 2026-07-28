@@ -30,6 +30,7 @@ tags before touching anything:
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace` global) | `src/lc_factory/tui.py` — **rebind seam, re-verify every bump** |
 | `deepagents/graph.py` (`_apply_custom_middleware`, the core/tail split) | `src/lc_factory/assembly.py` — the injection seam's **positional contract** depends on it: our block must keep landing contiguous and order-preserving, and the SDK's reserved name set (core, tail, and harness-profile extras) must not gain a member. `tests/test_seam.py` |
 | `langchain/agents/factory.py` (hook wiring, duplicate-name check) | `src/lc_factory/assembly.py` — the seam documents `before_*` forward / `after_*` reversed. A reversal inverts every phase guarantee. `tests/test_seam.py` |
+| `deepagents_code/client/launch/server.py` (`_build_server_env` denylist) | `src/lc_factory/server_graph.py` — the `LC_FACTORY_MIDDLEWARE` transport works only because filtering is denylist-based, not prefix-based. Prefix filtering would sever it silently. |
 
 Everything else is consumed as a library through `src/lc_factory/upstream.py`,
 which is the single inventory of upstream symbols we depend on — including
@@ -234,6 +235,61 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    hoisted by the SDK's merge ahead of the `first` phase.
    `tests/test_seam.py` asserts placement in the final composed stack, so a
    re-application that moves a site fails there.
+
+2. **Factory-reference transport** (`LC_FACTORY_MIDDLEWARE`, wave 2.2). The
+   server subprocess resolves `"module.path:callable"` from the environment and
+   passes the result to `create_factory_agent(middleware=...)`. Inert when the
+   variable is unset.
+
+   - Lives in `src/lc_factory/server_graph.py` (`_resolve_middleware_ref`,
+     `_factory_middleware`, and the resolve call in `_make_graph`).
+   - **Deliberately outside `ServerConfig`.** The upstream
+     `DEEPAGENTS_CODE_SERVER_*` contract stays byte-identical; the variable
+     reaches the subprocess only because `_build_server_env` filters by an
+     explicit key denylist rather than by prefix. **On a bump, re-check that
+     denylist** — a switch to prefix filtering, or the addition of an
+     `LC_`/non-`DEEPAGENTS` sweep, would silently sever the transport and the
+     agent would compose without the caller's middleware.
+   - **Security invariant:** the reference is read from the user-scoped process
+     environment only. Resolving it imports and executes that module inside the
+     server process, so a project-local source would let an untrusted
+     repository run code merely because `lc-code` was launched inside it. Do
+     not add a file-based source without an explicit trust design
+     (decisions.md D4). `tests/test_server_graph.py` pins the absence of one.
+   - `_resolve_middleware_ref` converts every failure **it detects** —
+     malformed value, an import that fails or itself raises, missing or
+     unreadable attribute, non-callable, a factory that raises, an unordered
+     `set` return, and an unusable return (notably `None`, i.e. a forgotten
+     `return`) — into one `ValueError` whose message names the variable.
+     `_make_graph` catches that and emits a `STARTUP_ERROR_MARKER` startup
+     failure. The single conversion point is deliberate: upstream's
+     `_build_graph_factory` barrier would also catch a stray exception and fail
+     startup, but the user would see e.g. a bare `TypeError` with nothing
+     connecting it to a variable they set outside the app.
+
+     Validation failures raised *later* by `create_factory_agent` (unknown
+     phase, non-middleware entries, reserved or duplicate names) are **not**
+     funnelled through here — they are self-describing and reach the user via
+     that same upstream barrier.
+   - **Second-order dependency on the server cwd.** The server runs
+     `python -m langgraph_cli` with `cwd=work_dir`, and `-m` puts cwd on
+     `sys.path[0]`. Today `launch.py` uses a private `mkdtemp`, so nothing
+     untrusted is importable and the user-scoped invariant holds. If `work_dir`
+     ever became the user's project directory, a globally exported
+     `LC_FACTORY_MIDDLEWARE=mymw:build` would resolve `mymw.py` out of whatever
+     repository the user happened to be in — exactly the shadowing the
+     `PYTHONPATH` strip exists to prevent. Re-check on any change to how the
+     server working directory is chosen.
+
+3. **`src/lc_factory/_testing_middleware.py`** — test support shipped inside
+   the package, mirroring upstream's own `_testing_models` / `_fake_models`.
+   Needed because `_build_server_env` strips `PYTHONPATH` from the server
+   interpreter, leaving an installed package as the only place the integration
+   test can put a fixture the subprocess will import. (The server's own cwd is
+   also on `sys.path`, but it is a private `mkdtemp` the CLI path gives no hook
+   to write into — and relying on it would make an untrusted-cwd import path
+   load bearing. See that module's docstring.) Nothing in `lc_factory` imports
+   it.
 
 **Structural divergences** — what makes the recomposition possible. Each must
 be re-verified on a bump:

@@ -17,8 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import importlib
 import logging
+import os
 import sys
+from collections.abc import Iterable
+from collections.abc import Set as AbstractSet
 from typing import Any
 
 from lc_factory.upstream import (
@@ -40,6 +44,140 @@ logger = logging.getLogger(__name__)
 
 _sandbox_cm: Any = None
 _sandbox_backend: Any = None
+
+MIDDLEWARE_REF_ENV = "LC_FACTORY_MIDDLEWARE"
+"""Env var naming a zero-argument callable that supplies factory middleware.
+
+Format is ``"module.path:callable"`` — the same shape upstream already uses for
+``graph_ref``, ``checkpointer_path``, and model ``class_path``. The callable's
+return value is passed straight to ``create_factory_agent(middleware=...)``, so
+it may be a bare sequence or a phase-keyed mapping; choosing phases stays in
+Python rather than being encoded into a string.
+
+This variable is read from the **user-scoped process environment only**, which
+is what makes the transport safe. Resolving it imports and executes the named
+module inside the server process, so a project-local source would mean that
+entering an untrusted repository and running ``lc-code`` executes that
+repository's code before any approval gate. Do not add a file-based source
+without an explicit trust design (decisions.md D4).
+
+Deliberately outside ``ServerConfig``: upstream's ``DEEPAGENTS_CODE_SERVER_*``
+contract stays byte-identical, and ``_build_server_env`` relays this variable
+to the subprocess on every start and restart because it filters by an explicit
+denylist rather than by prefix.
+"""
+
+
+def _resolve_middleware_ref(ref: str) -> Any:  # noqa: ANN401
+    """Import and call the factory-middleware reference named by ``ref``.
+
+    Args:
+        ref: A ``"module.path:callable"`` string.
+
+    Returns:
+        Whatever the referenced callable returns, to be handed to
+        ``create_factory_agent(middleware=...)`` unchanged.
+
+    Raises:
+        ValueError: For every failure THIS function detects — malformed
+            reference, an import that fails or itself raises, a missing or
+            unreadable attribute, a non-callable target, a factory that raises,
+            or a return value that is not usable as middleware. Each is
+            converted to this one type with the variable named, because it is
+            set outside the app and nothing else in the traceback would point
+            at it. Raised rather than warned so startup fails loudly: booting
+            without the caller's middleware would serve a differently composed
+            agent, silently.
+
+            Failures raised *later*, by `create_factory_agent` validating the
+            middleware itself (unknown phase, non-middleware entries, reserved
+            or duplicate names), are not funnelled through here. They are
+            self-describing and reach the user through upstream's own
+            graph-factory error barrier.
+    """
+    module_name, separator, attribute = ref.partition(":")
+    if not separator or not module_name or not attribute:
+        msg = (
+            f"{MIDDLEWARE_REF_ENV} must be 'module.path:callable'; got {ref!r}."
+        )
+        raise ValueError(msg)
+    try:
+        module = importlib.import_module(module_name)
+    except Exception as exc:
+        # Not just ImportError: the named module runs at import, so it can
+        # raise anything. Attribution matters more than the class here.
+        msg = (
+            f"{MIDDLEWARE_REF_ENV}: cannot import module {module_name!r}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        raise ValueError(msg) from exc
+    try:
+        factory = getattr(module, attribute)
+    except AttributeError as exc:
+        msg = (
+            f"{MIDDLEWARE_REF_ENV}: module {module_name!r} has no attribute "
+            f"{attribute!r}."
+        )
+        raise ValueError(msg) from exc
+    except Exception as exc:
+        # A module-level PEP 562 `__getattr__` can raise anything at all.
+        msg = (
+            f"{MIDDLEWARE_REF_ENV}: reading {attribute!r} from {module_name!r} "
+            f"raised {type(exc).__name__}: {exc}"
+        )
+        raise ValueError(msg) from exc
+    if not callable(factory):
+        msg = f"{MIDDLEWARE_REF_ENV}: {ref!r} is not callable."
+        raise ValueError(msg)
+    try:
+        result = factory()
+    except Exception as exc:
+        # A factory that takes arguments is the common case here; without this
+        # the user sees a bare TypeError naming their function and nothing
+        # connecting it to the variable they set.
+        msg = f"{MIDDLEWARE_REF_ENV}: {ref!r} raised {type(exc).__name__}: {exc}"
+        raise ValueError(msg) from exc
+    if result is None:
+        msg = (
+            f"{MIDDLEWARE_REF_ENV}: {ref!r} returned None. A middleware factory "
+            f"must return a sequence of middleware or a phase-keyed mapping; a "
+            f"missing `return` is the usual cause. Returning nothing would "
+            f"otherwise boot an agent composed without your middleware."
+        )
+        raise ValueError(msg)
+    if isinstance(result, AbstractSet):
+        # Ordering IS the seam's contract, and set iteration order varies with
+        # PYTHONHASHSEED between server restarts. Accepting one would turn a
+        # documented position into a coin flip that nothing downstream notices.
+        # `{MyMiddleware()}` is also the natural typo for a phase mapping.
+        msg = (
+            f"{MIDDLEWARE_REF_ENV}: {ref!r} returned an unordered "
+            f"{type(result).__name__}; middleware order is the seam's "
+            f"contract. Return a list or a phase-keyed mapping."
+        )
+        raise ValueError(msg)
+    if not isinstance(result, Iterable) or isinstance(result, (str, bytes)):
+        msg = (
+            f"{MIDDLEWARE_REF_ENV}: {ref!r} returned "
+            f"{type(result).__name__}; expected a sequence of middleware or a "
+            f"phase-keyed mapping."
+        )
+        raise ValueError(msg)
+    return result
+
+
+def _factory_middleware() -> Any:  # noqa: ANN401
+    """Resolve caller-supplied middleware from the environment, if any.
+
+    Returns:
+        The referenced callable's result, or ``None`` when the variable is
+        unset or empty — which composes exactly as it did before the seam
+        existed.
+    """
+    ref = os.environ.get(MIDDLEWARE_REF_ENV, "").strip()
+    if not ref:
+        return None
+    return _resolve_middleware_ref(ref)
 
 
 def _print_startup_error(message: str) -> None:
@@ -75,6 +213,17 @@ async def _make_graph() -> Any:  # noqa: ANN401
     if project_context is not None:
         settings.reload_from_environment(start_path=project_context.user_cwd)
     configure_langsmith_secret_redaction()
+
+    # Resolved before the model is built so a bad reference fails in a second
+    # rather than after provider setup. A failure here must stop the server:
+    # booting without the caller's middleware would serve a differently
+    # composed agent than they asked for, silently.
+    try:
+        injected_middleware = _factory_middleware()
+    except ValueError as exc:
+        logger.exception("Invalid %s", MIDDLEWARE_REF_ENV)
+        _print_startup_error(str(exc))
+        sys.exit(1)
 
     # Offload to a worker thread: `create_model` does blocking disk IO for
     # some providers, which `blockbuster` rejects on the server event loop.
@@ -179,6 +328,7 @@ async def _make_graph() -> Any:  # noqa: ANN401
             async_subagents=async_subagents,
             goal_criteria_tools=read_only_context_tools,
             rubric_grader_tools=read_only_context_tools,
+            middleware=injected_middleware,
         )
         return agent
 
