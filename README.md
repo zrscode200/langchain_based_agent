@@ -27,6 +27,10 @@ uv run pytest -m integration  # live server round trip (slow)
 lc-code                       # the dcode TUI, wired to the factory graph
 ```
 
+For daily interactive use, model and approval setup, the baseline TUI dogfood
+pass, and optional middleware injection, see
+[`USING_LC_CODE.md`](USING_LC_CODE.md).
+
 Bumping the upstream pin follows [`UPGRADING.md`](UPGRADING.md) — the parity
 suite gates it.
 
