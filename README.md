@@ -109,3 +109,9 @@ both a successful injection and a startup failure on a bad reference.
 Not yet verified by automation: the interactive Textual TUI in a terminal, the
 approval-interrupt path end-to-end (proven once manually), and rubric verdicts
 with a real model.
+
+## License
+
+`lc_factory` is licensed under the [MIT License](LICENSE). Portions are derived
+from LangChain's MIT-licensed `deepagents` project; its copyright notice is
+retained in the license.

@@ -7,6 +7,8 @@ name = "lc_factory"
 version = "0.1.0"
 description = "Agent factory layer over the LangChain ecosystem: an owned recomposition of the deepagents-code assembly."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11,<4.0"
 dependencies = [
     # Upstream v0 baseline. The exact pin is deliberate: the factory
