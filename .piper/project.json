@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "project_id": "langchain_based_agent",
+  "display_name": "LangChain Based Agent",
+  "hub_lite": true
+}
