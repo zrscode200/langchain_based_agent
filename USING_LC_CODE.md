@@ -10,6 +10,122 @@ It is the user-facing entry point for:
   original `create_cli_agent`; and
 - optionally exercising the Group 2 middleware-injection seam.
 
+## First time using Deep Agents? Start here
+
+You do **not** need to install, launch, or learn `dcode` first. `uv sync`
+installs this project's pinned `deepagents-code` dependency, and `lc-code`
+launches that dependency's normal TUI against the factory constructor.
+
+The executable is named **`lc-code`**, with a hyphen. There is no `lc_code`
+shell command.
+
+The commands in this guide use a POSIX shell and work on macOS, Linux, and
+Windows through WSL.
+
+### 1. Check the prerequisites
+
+You need:
+
+- Git;
+- a terminal;
+- `uv`; and
+- a credential for a model provider supported by Deep Agents Code.
+
+Check whether `uv` is installed:
+
+```sh
+uv --version
+```
+
+If the command is unavailable, install `uv` on macOS or Linux:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Restart the terminal after installation. Other installation methods, including
+Windows PowerShell and Homebrew, are listed in the
+[official `uv` installation guide](https://docs.astral.sh/uv/getting-started/installation/).
+
+### 2. Clone and install `lc_factory`
+
+```sh
+git clone https://github.com/zrscode200/langchain_based_agent.git
+cd langchain_based_agent
+uv sync
+FACTORY_REPO="$PWD"
+```
+
+`uv sync` creates `.venv` and installs `lc-code`, the pinned Deep Agents Code
+TUI, and the rest of the project dependencies.
+
+Confirm the command is available:
+
+```sh
+"$FACTORY_REPO/.venv/bin/lc-code" --version
+```
+
+The output says `deepagents-code`. That is expected: `lc-code` deliberately
+reuses the shipped Deep Agents client.
+
+### 3. Launch from a safe practice workspace
+
+The agent works in the directory where you launch it. For a first test, use a
+disposable directory rather than this source repository:
+
+```sh
+mkdir -p /tmp/lc-factory-first-run
+cd /tmp/lc-factory-first-run
+unset LC_FACTORY_MIDDLEWARE
+"$FACTORY_REPO/.venv/bin/lc-code"
+```
+
+`unset LC_FACTORY_MIDDLEWARE` selects the no-injection Group 1 baseline. It is
+safe even if you have never configured middleware.
+
+### 4. Configure a model inside the TUI
+
+After the TUI opens:
+
+1. Enter `/auth`, choose your model provider, and follow the credential prompt.
+2. Enter `/model` and select a model available from that provider.
+3. Check the status bar. For this test, the approval mode should say
+   **Manual**. Press Shift+Tab or Ctrl+T until it does.
+4. Enter this read-only prompt:
+
+   ```text
+   Reply with exactly: lc-code connected
+   ```
+
+Receiving the reply confirms that the TUI, server, model, and factory-backed
+agent connected successfully.
+
+### 5. Test approval and rejection
+
+Enter:
+
+```text
+Create first-run.txt containing exactly factory tui ok, then read it back and
+confirm its contents.
+```
+
+When the write approval appears, press `y`. The agent should create and read
+the file.
+
+Next enter:
+
+```text
+Replace first-run.txt with exactly this should not land.
+```
+
+Press `n` when the replacement is proposed. Then ask the agent to read the file
+without changing it. It should still contain `factory tui ok`.
+
+Enter `/quit` to leave the TUI. You have now exercised `lc-code` through the
+same Deep Agents TUI surface as `dcode`, including one approved action and one
+rejected action. The detailed baseline procedure and pass criteria appear later
+in this guide.
+
 ## What changes, and what stays the same
 
 `lc-code` keeps the upstream client and replaces the graph construction behind
