@@ -19,7 +19,9 @@ import pytest
 
 from lc_factory.server_graph import (
     MIDDLEWARE_REF_ENV,
+    _STARTUP_ERROR_MARKER,
     _factory_middleware,
+    _print_startup_error,
     _resolve_middleware_ref,
     reserve_middleware_ref_env,
 )
@@ -111,6 +113,21 @@ def test_failures_name_the_variable(monkeypatch):
     monkeypatch.setenv(MIDDLEWARE_REF_ENV, "definitely_not_a_module:factory")
     with pytest.raises(ValueError, match=MIDDLEWARE_REF_ENV):
         _factory_middleware()
+
+
+def test_startup_error_marker_flattens_multiline_message(capsys):
+    """The parent parser consumes one marked line; keep the full human output."""
+    from deepagents_code.client.launch.server import _extract_startup_error_marker
+
+    _print_startup_error("first line\nsecond line")
+    stderr = capsys.readouterr().err
+
+    assert stderr.splitlines() == [
+        "first line",
+        "second line",
+        f"{_STARTUP_ERROR_MARKER}first line second line",
+    ]
+    assert _extract_startup_error_marker(stderr) == "first line second line"
 
 
 def test_the_transport_survives_the_upstream_server_env_filter(monkeypatch):

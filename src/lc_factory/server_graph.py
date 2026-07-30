@@ -179,8 +179,9 @@ def _print_startup_error(message: str) -> None:
         message: Concise startup failure to surface in the parent process.
     """
     print(message, file=sys.stderr)  # noqa: T201  # stderr fallback for logs
+    summary = " ".join(message.splitlines()).strip() or "<no message>"
     print(  # noqa: T201  # machine-readable marker consumed by server.py
-        f"{_STARTUP_ERROR_MARKER}{message}",
+        f"{_STARTUP_ERROR_MARKER}{summary}",
         file=sys.stderr,
     )
 
