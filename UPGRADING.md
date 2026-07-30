@@ -322,6 +322,11 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      `_build_graph_factory` barrier would also catch a stray exception and fail
      startup, but the user would see e.g. a bare `TypeError` with nothing
      connecting it to a variable they set outside the app.
+     `_print_startup_error` preserves the full message in human stderr but
+     flattens the machine-readable marker to one line because the parent
+     extractor consumes a single marked line. Upstream's ported helper assumes
+     hardcoded one-line messages; the factory-reference path can carry arbitrary
+     exception text.
 
      Validation failures raised *later* by `create_factory_agent` (unknown
      phase, non-middleware entries, reserved or duplicate names) are **not**
