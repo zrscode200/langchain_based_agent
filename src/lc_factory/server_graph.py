@@ -56,8 +56,12 @@ def _resolve_middleware_ref(ref: str) -> Any:  # noqa: ANN401
         ref: A ``"module.path:callable"`` string.
 
     Returns:
-        Whatever the referenced callable returns, to be handed to
-        ``create_factory_agent(middleware=...)`` unchanged.
+        The factory's result, normalized to a phase-keyed mapping of
+        materialized lists (``_normalize_injected_middleware`` output), to be
+        handed to ``create_factory_agent(middleware=...)``. Returning the
+        *original* would silently drop one-shot iterables: the validation
+        pass materializes them via ``list()``, so a generator would arrive
+        downstream already exhausted and compose as empty.
 
     Raises:
         ValueError: For every failure THIS function detects — malformed
@@ -150,14 +154,20 @@ def _resolve_middleware_ref(ref: str) -> Any:  # noqa: ANN401
     # after `create_model`, MCP discovery and sandbox creation have run, so a
     # one-character phase typo could spin up a remote sandbox before failing.
     # Re-raised with the variable named, since that is the knob at fault.
+    #
+    # Return the NORMALIZED result, not the original: normalization
+    # materializes one-shot iterables (`list()`), so a factory returning a
+    # generator would otherwise be consumed right here and compose as empty
+    # downstream — a silent drop, the exact failure this transport promises
+    # cannot happen. The normalized phase mapping is a valid `middleware=`
+    # input and re-normalizes idempotently in `create_factory_agent`.
     from lc_factory.assembly import _normalize_injected_middleware
 
     try:
-        _normalize_injected_middleware(result)
+        return _normalize_injected_middleware(result)
     except ValueError as exc:
         msg = f"{MIDDLEWARE_REF_ENV}: {ref!r} returned unusable middleware: {exc}"
         raise ValueError(msg) from exc
-    return result
 
 
 def _factory_middleware() -> Any:  # noqa: ANN401

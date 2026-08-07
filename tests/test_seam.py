@@ -268,6 +268,17 @@ def test_one_shot_iterables_are_not_silently_dropped(wrap):
     assert [item.name for item in keyed["first"]] == ["probe"]
 
 
+def test_non_iterable_phase_value_raises_the_documented_valueerror():
+    """A bare instance as a phase value — the natural typo — must raise the
+    documented ValueError, not `list()`'s TypeError: the transport's
+    attribution funnel catches ValueError only, so a TypeError would reach
+    the user as a bare message with nothing pointing at the variable they
+    set.
+    """
+    with pytest.raises(ValueError, match="not iterable"):
+        _normalize_injected_middleware({"first": _Probe("probe")})
+
+
 # --- placement in the final composed stack ---------------------------------
 
 
@@ -423,9 +434,12 @@ def test_injected_hitl_cannot_silently_replace_the_approval_gate(tmp_path):
     measured then, the gated tool set went from eleven entries (including
     `execute`, `write_file`, `edit_file`, `delete`, `task`) down to the
     caller's single tool, leaving shell execution and file writes unattended.
-    Since 0.1.52 the gate sits in the factory stack itself, where a same-name
-    injection would instead replace it via the SDK's in-list name merge — the
-    reserved-set guard still has to win first and name the stakes.
+    Since 0.1.52 the gate sits in the factory stack itself, and the measured
+    counterfactual changed shape: the SDK's merge only replaces names present
+    in its BASE, so without the guard a same-name injection now ends in
+    langchain's bare duplicate-name assertion — loud, but naming nothing.
+    The reserved-set guard still has to win first with an error that names
+    the stakes.
     """
     from langchain.agents.middleware import HumanInTheLoopMiddleware
 

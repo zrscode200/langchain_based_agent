@@ -460,6 +460,37 @@ def test_composition_parity_with_tracing(tmp_path, monkeypatch):
     )
 
 
+def test_composition_parity_auto_classifier_configured(tmp_path, monkeypatch):
+    """Auto mode with the classifier configured away from its defaults.
+
+    In the isolated suite environment `resolve_auto_classifier_model()`
+    returns `None` and `resolve_auto_classifier_timeout()` returns exactly
+    the constructor default, so the plain `auto_mode` case cannot see a port
+    that drops the 0.1.52 classifier kwargs — the drop fingerprints
+    identically. Configure both knobs away from their defaults so a dropped
+    kwarg diverges loudly.
+    """
+    monkeypatch.setenv(
+        "DEEPAGENTS_CODE_AUTO_CLASSIFIER_MODEL", "openai:parity-classifier-fixture"
+    )
+    monkeypatch.setenv("DEEPAGENTS_CODE_AUTO_CLASSIFIER_TIMEOUT", "7.5")
+
+    ours, v0 = _run_both({"auto_mode_enabled": True}, tmp_path)
+    fingerprint = _fingerprint(ours)
+    assert fingerprint == _fingerprint(v0)
+    # Guard the guard: both knobs must be observable in composed state, or
+    # this case has silently stopped covering what it claims to.
+    rendered = str(fingerprint["middleware"])
+    assert "parity-classifier-fixture" in rendered, (
+        "the classifier model spec is no longer observable in composed state "
+        "— this case no longer covers classifier_model threading"
+    )
+    assert "7.5" in rendered, (
+        "the classifier timeout is no longer observable in composed state — "
+        "this case no longer covers classifier_timeout_seconds threading"
+    )
+
+
 def test_composition_parity_without_large_results_route(tmp_path):
     """The healthy-machine artifacts shape: no `large_tool_results` route.
 

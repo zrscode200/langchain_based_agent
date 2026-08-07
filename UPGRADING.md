@@ -302,9 +302,11 @@ which is what `tests/test_parity.py` asserts *unmodified*):
         `sitecustomize`/`.pth`, or embedding `lc_factory` in an application
         that already imported upstream. Verified clear at this pin — the
         generated workspace (`checkpointer.py`, `langgraph.json`) has no
-        upstream import and no pre-import hook. **No test can cover this**,
-        because any test imports `lc_factory` first, which is the assumption
-        itself.
+        upstream import and no pre-import hook; those two workspace
+        sub-properties are now pinned by `tests/test_launch.py::
+        test_generated_workspace_cannot_preempt_the_reservation`. The
+        process-level precondition itself remains untestable: any test
+        imports `lc_factory` first, which is the assumption itself.
 
      `tests/test_server_graph.py` pins the outcome in a **subprocess** — an
      in-process test imports `lc_factory` before it can seed a repository and is
