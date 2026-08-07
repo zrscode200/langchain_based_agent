@@ -6,9 +6,10 @@ upstream breakage surfaces here first, and this file doubles as the divergence
 inventory. Private (underscore) upstream names carry no semver protection;
 they are the exact surface the parity suite guards.
 
-Verified against deepagents-code==0.1.48 / deepagents==0.7.0b2.
+Verified against deepagents-code==0.1.52 / deepagents==0.7.1.
 (The port was authored against 0.1.47 / monorepo commit 8da0ccb13; the
-0.1.48 bump required no changes here.)
+0.1.48 bump required no changes here. The 0.1.52 bump added the
+cost-tracking, server-hooks, and auto-classifier config symbols.)
 
 Layout mirrors the consumers: assembly (the ported ``create_cli_agent``),
 server graph, and launcher. Type-only names live in the TYPE_CHECKING block
@@ -93,12 +94,17 @@ from deepagents_code.config import (
     create_model,
     get_langsmith_project_name,
     is_memory_auto_save_enabled,
+    resolve_auto_classifier_model,
     restore_user_tracing_api_keys,
     restore_user_tracing_env,
     settings,
 )
-from deepagents_code.config_manifest import resolve_recursion_limit
+from deepagents_code.config_manifest import (
+    resolve_auto_classifier_timeout,
+    resolve_recursion_limit,
+)
 from deepagents_code.configurable_model import ConfigurableModelMiddleware
+from deepagents_code.cost_tracking import CostTrackingMiddleware
 
 # --- verification pipeline (goals -> criteria -> rubric) ---
 from deepagents_code.goal_rubric import (
@@ -111,6 +117,7 @@ from deepagents_code.goal_rubric import (
     create_goal_criteria_fallback_agent,
 )
 from deepagents_code.goal_tools import GoalToolsMiddleware
+from deepagents_code.hooks.server_middleware import ServerHooksMiddleware
 from deepagents_code.integrations.sandbox_factory import (
     create_sandbox,
     get_default_working_dir,
@@ -215,6 +222,7 @@ __all__ = [
     "CompositeBackend",
     "ConfigurableModelMiddleware",
     "CONVERSATION_HISTORY_DIRNAME",
+    "CostTrackingMiddleware",
     "FilesystemBackend",
     "FilesystemMiddleware",
     "FsToolName",
@@ -234,6 +242,7 @@ __all__ = [
     "ResumeStateMiddleware",
     "RuntimeSubAgent",
     "ServerConfig",
+    "ServerHooksMiddleware",
     "ServerProcess",
     "ShellAllowListMiddleware",
     "STARTUP_ERROR_MARKER",
@@ -286,6 +295,8 @@ __all__ = [
     "list_subagents",
     "load_async_subagents",
     "plugin_skill_sources",
+    "resolve_auto_classifier_model",
+    "resolve_auto_classifier_timeout",
     "resolve_recursion_limit",
     "restore_user_tracing_api_keys",
     "restore_user_tracing_env",

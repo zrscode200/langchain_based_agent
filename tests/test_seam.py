@@ -321,11 +321,17 @@ def test_first_phase_is_outermost_factory_middleware(tmp_path):
 
 def test_before_verification_sits_between_policy_and_the_verification_tail(tmp_path):
     names = _compose(tmp_path, middleware={"before_verification": [_Probe("probe")]})
-    # After the last context/policy middleware...
+    # After the last context/policy middleware — which since 0.1.52 includes
+    # the in-stack approval gate and server-owned hooks...
     assert names.index("LocalContextMiddleware") < names.index("probe")
-    # ...and immediately ahead of the verification tail.
-    assert names.index("probe") == names.index("CLICompactionMiddleware") - 1
-    assert names.index("probe") < names.index("ReliableRubricMiddleware")
+    assert names.index("HumanInTheLoopMiddleware") < names.index("probe")
+    assert names.index("ServerHooksMiddleware") < names.index("probe")
+    # ...and immediately ahead of the verification tail. The compaction
+    # middleware is no longer that tail's first member: renamed to
+    # `SummarizationMiddleware` in 0.1.52, it is hoisted into the SDK core's
+    # summarization slot by the name-based merge, so with no goal-criteria
+    # middleware in this config the tail begins at the rubric.
+    assert names.index("probe") == names.index("ReliableRubricMiddleware") - 1
 
 
 def test_last_phase_is_innermost_factory_middleware(tmp_path):
@@ -334,7 +340,12 @@ def test_last_phase_is_innermost_factory_middleware(tmp_path):
     assert names.index("ReliableRubricMiddleware") == names.index("probe") - 1
     # ...but still ahead of the SDK tail, which stays unaddressable.
     assert names.index("probe") < names.index("AnthropicPromptCachingMiddleware")
-    assert names.index("probe") < names.index("HumanInTheLoopMiddleware")
+    # The approval gate left the SDK tail in 0.1.52: upstream now installs
+    # HITL inside the factory stack, ahead of the verification tail, so
+    # `last` middleware sits after it in list order. Pinned so a future
+    # upstream move of the gate fails here instead of silently changing the
+    # documented contract again.
+    assert names.index("HumanInTheLoopMiddleware") < names.index("probe")
 
 
 def test_bare_sequence_matches_explicit_default_phase(tmp_path):
@@ -403,15 +414,18 @@ def test_sdk_collision_raises_instead_of_silently_replacing(tmp_path):
 
 
 def test_injected_hitl_cannot_silently_replace_the_approval_gate(tmp_path):
-    """Regression: the SDK tail holds the approval gate, and it is replaceable.
+    """Regression: the approval gate is name-addressable and replaceable.
 
     Injecting langchain's stock `HumanInTheLoopMiddleware` is the most natural
-    thing a caller might do with this parameter. Before the guard covered the
-    SDK *tail* as well as its core, this composed with no error and swapped the
-    factory's approval gate for the caller's — measured at this pin, the gated
-    tool set went from eleven entries (including `execute`, `write_file`,
-    `edit_file`, `delete`, `task`) down to the caller's single tool, leaving
-    shell execution and file writes unattended.
+    thing a caller might do with this parameter. When the gate lived in the SDK
+    tail (pre-0.1.49), a guard that covered only the SDK core composed this
+    with no error and swapped the factory's approval gate for the caller's —
+    measured then, the gated tool set went from eleven entries (including
+    `execute`, `write_file`, `edit_file`, `delete`, `task`) down to the
+    caller's single tool, leaving shell execution and file writes unattended.
+    Since 0.1.52 the gate sits in the factory stack itself, where a same-name
+    injection would instead replace it via the SDK's in-list name merge — the
+    reserved-set guard still has to win first and name the stakes.
     """
     from langchain.agents.middleware import HumanInTheLoopMiddleware
 

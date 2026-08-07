@@ -135,6 +135,7 @@ recomposition strategy is measured rather than guessed.
 | Bump | Port changes needed | Notes |
 |---|---|---|
 | 0.1.47 → 0.1.48 | **none** | `agent.py` changed only in the agent-directory discovery helpers (~lines 1105-1271), far outside the ported region. `auto_mode.py` changed classifier failure wording only. `server_graph.py` and `server_manager.py` byte-identical. Upstream also migrated legacy hooks to v2 events — inherited free. |
+| 0.1.48 → 0.1.52 (SDK 0.7.0b2 → 0.7.1) | **yes — first real re-application** | 7 hunks in the ported region: `auto_classifier_model` threaded end-to-end (new `ServerConfig` field → `_make_graph` → assembly); `CostTrackingMiddleware` on the main and nested subagent stacks; server-owned Hooks v2 `ServerHooksMiddleware` on both stacks (GA in 0.1.52); HITL restructure (`interrupt_on` now always `{}`, approval gate moved from the SDK tail into the factory stack); `_make_graph` settings bootstrap moved off the event loop via `asyncio.to_thread`. Boundary grew 4 symbols. Stack-shape fallout: compaction renamed to `SummarizationMiddleware` and hoists into the SDK core slot; `last` no longer precedes HITL — 2 seam tests re-pinned, seam docs updated. **`tests/test_parity.py` passed unmodified.** SDK `_apply_custom_middleware` untouched; `_build_server_env` denylist, `apply_dotenv` skip-if-present, scaffold rebind seam, and private-mkdtemp work_dir all re-verified. Drift injection still turns parity red. Under an hour end to end. |
 
 ## Validating the tripwire itself
 
@@ -235,9 +236,14 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    nothing injected is a port defect, most likely surfacing during a bump.
 
    Each phase anchors to *unconditional* middleware so its boundary does not
-   move with configuration. One documented exception: with `fs_tools` set, the
-   factory's own `FilesystemMiddleware` shares a name with the SDK's and is
-   hoisted by the SDK's merge ahead of the `first` phase.
+   move with configuration. Two documented exceptions, both the SDK's
+   name-based merge hoisting a factory middleware into an SDK-default slot:
+   the compaction middleware (named `SummarizationMiddleware` since 0.1.52)
+   always rides the SDK core's summarization slot, and with `fs_tools` set the
+   factory's own `FilesystemMiddleware` is hoisted ahead of the `first` phase.
+   Since 0.1.52 the approval gate also lives in the factory stack (AutoMode or
+   AsyncApproval HITL, ahead of the verification tail) rather than in the SDK
+   tail, so `last` middleware sits after HITL in list order.
    `tests/test_seam.py` asserts placement in the final composed stack, so a
    re-application that moves a site fails there.
 
