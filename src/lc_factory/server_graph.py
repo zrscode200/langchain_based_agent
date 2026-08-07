@@ -1,7 +1,8 @@
 """Server-side graph entry point for ``langgraph dev`` (factory edition).
 
-Port of ``deepagents_code.server_graph`` (monorepo ``8da0ccb13``) whose only
-semantic change is that the agent graph is built by
+Port of ``deepagents_code.server_graph`` (monorepo ``8da0ccb13``, re-applied
+for 0.1.52's off-loop settings bootstrap) whose only semantic change is that
+the agent graph is built by
 :func:`lc_factory.assembly.create_factory_agent` instead of upstream's
 ``create_cli_agent``. Config parsing, tool assembly (including MCP discovery),
 and the cached graph-factory pattern are reused from upstream through the
@@ -27,6 +28,7 @@ from typing import Any
 
 from lc_factory._env import MIDDLEWARE_REF_ENV, reserve_middleware_ref_env
 from lc_factory.upstream import (
+    ProjectContext,
     STARTUP_ERROR_MARKER as _STARTUP_ERROR_MARKER,
     ServerConfig,
     _build_graph_factory,
@@ -201,10 +203,31 @@ async def _make_graph() -> Any:  # noqa: ANN401
     from lc_factory.assembly import create_factory_agent
 
     config = ServerConfig.from_env()
-    project_context = get_server_project_context()
 
-    if project_context is not None:
-        settings.reload_from_environment(start_path=project_context.user_cwd)
+    # Offload cwd/path resolution and the lazy settings bootstrap off the event
+    # loop. On Windows, `Path.resolve()` / `Path.cwd()` call `os.getcwd()`, which
+    # `blockbuster` rejects when invoked directly from the server loop (see
+    # issue #5043). Importing `deepagents_code.agent` / first `settings` access
+    # can also trigger `find_project_root()` -> `Path.cwd()`.
+    #
+    # Keep LangSmith redaction configuration on the server task: its fail-closed
+    # path calls `langsmith.configure(enabled=False)`, which sets both a global
+    # fallback and the current `_TRACING_ENABLED` ContextVar. `asyncio.to_thread`
+    # only updates a copied worker context, so a ContextVar disable there would
+    # not reach a parent tracing context that already has `enabled=True` (ContextVar
+    # wins over the global flag).
+    #
+    # Divergence from upstream's shape: the boundary is imported at module
+    # scope (see module docstring), so the worker returns only the resolved
+    # project context rather than upstream's tuple of lazily imported symbols.
+    def _resolve_project_context_and_settings() -> ProjectContext | None:
+        project_context = get_server_project_context()
+
+        if project_context is not None:
+            settings.reload_from_environment(start_path=project_context.user_cwd)
+        return project_context
+
+    project_context = await asyncio.to_thread(_resolve_project_context_and_settings)
     configure_langsmith_secret_redaction()
 
     # Resolved before the model is built so a bad reference fails in a second
@@ -314,6 +337,7 @@ async def _make_graph() -> Any:  # noqa: ANN401
             enable_interpreter=config.enable_interpreter,
             rubric_model=config.rubric_model,
             rubric_max_iterations=config.rubric_max_iterations,
+            auto_classifier_model=config.auto_classifier_model,
             recursion_limit=config.recursion_limit,
             mcp_server_info=mcp_server_info,
             cwd=project_context.user_cwd if project_context is not None else config.cwd,
