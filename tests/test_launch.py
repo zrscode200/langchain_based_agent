@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from importlib.metadata import version
 from pathlib import Path
@@ -22,6 +23,33 @@ def test_scaffold_workspace_targets_factory_graph(tmp_path):
     pyproject = (tmp_path / "pyproject.toml").read_text()
     assert "lc-factory-server-runtime" in pyproject
     assert "lc_factory" in pyproject
+
+
+def test_generated_workspace_cannot_preempt_the_reservation(tmp_path):
+    """D4 precondition, pinned (previously a manual bump-time check).
+
+    The reservation guard in `lc_factory/__init__.py` assumes no upstream
+    code runs in the server process before the graph module imports
+    `lc_factory`. Two workspace artifacts could break that silently on a pin
+    bump: `checkpointer.py` (imported by the langgraph loader — an upstream
+    import there would run the settings bootstrap, and load a repository
+    `.env`, ahead of the reservation) and an `env` key in `langgraph.json`
+    (langgraph loads that dotenv before importing the graph module, outside
+    the reservation's reach entirely).
+    """
+    launch.scaffold_workspace(tmp_path)
+
+    config = json.loads((tmp_path / "langgraph.json").read_text())
+    assert "env" not in config
+
+    tree = ast.parse((tmp_path / "checkpointer.py").read_text())
+    imported_roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported_roots.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported_roots.add(node.module.split(".")[0])
+    assert not imported_roots & {"deepagents", "deepagents_code"}
 
 
 def test_runtime_package_dependency_editable_root():

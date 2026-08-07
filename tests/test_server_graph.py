@@ -45,6 +45,25 @@ def _explodes():
     raise RuntimeError(msg)
 
 
+def _yields_middleware():
+    """A factory returning a one-shot iterable — legal seam input."""
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return (item for item in build_marker_middleware())
+
+
+def _yields_middleware_in_mapping():
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return {"first": (item for item in build_marker_middleware())}
+
+
+def _returns_bare_instance_in_mapping():
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return {"first": build_marker_middleware()[0]}
+
+
 def test_unset_variable_yields_no_injection(monkeypatch):
     """Absent configuration must compose exactly as it did before the seam."""
     monkeypatch.delenv(MIDDLEWARE_REF_ENV, raising=False)
@@ -64,7 +83,12 @@ def test_valid_reference_is_imported_and_called(monkeypatch):
         "lc_factory._testing_middleware:build_marker_middleware",
     )
     resolved = _factory_middleware()
-    assert [item.name for item in resolved] == ["LcFactoryMarkerMiddleware"]
+    # The transport returns the NORMALIZED phase mapping, not the factory's
+    # raw return: a bare sequence lands in the default phase. See
+    # test_one_shot_factory_results_are_materialized_not_dropped for why.
+    assert [item.name for item in resolved["before_verification"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
 
 
 def test_reference_may_return_a_phase_mapping(monkeypatch):
@@ -74,8 +98,28 @@ def test_reference_may_return_a_phase_mapping(monkeypatch):
         "lc_factory._testing_middleware:build_phase_keyed_middleware",
     )
     resolved = _factory_middleware()
-    assert list(resolved) == ["first"]
     assert [item.name for item in resolved["first"]] == ["LcFactoryMarkerMiddleware"]
+    assert resolved["before_verification"] == []
+    assert resolved["last"] == []
+
+
+def test_one_shot_factory_results_are_materialized_not_dropped():
+    """Regression: validation consumed the factory's one-shot return.
+
+    The resolve validated by normalizing — which materializes generators via
+    `list()` — then DISCARDED the normalized result and returned the exhausted
+    original, so a generator-returning factory booted a server with the
+    caller's middleware silently absent (every phase empty at the assembly).
+    The transport's whole contract is that this failure class is impossible.
+    The resolve must return the materialized normalization.
+    """
+    resolved = _resolve_middleware_ref(f"{__name__}:_yields_middleware")
+    assert [item.name for item in resolved["before_verification"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
+
+    keyed = _resolve_middleware_ref(f"{__name__}:_yields_middleware_in_mapping")
+    assert [item.name for item in keyed["first"]] == ["LcFactoryMarkerMiddleware"]
 
 
 @pytest.mark.parametrize(
@@ -96,6 +140,10 @@ def test_reference_may_return_a_phase_mapping(monkeypatch):
         # attributed to the variable rather than surfacing bare.
         (f"{__name__}:_needs_arguments", "raised TypeError"),
         (f"{__name__}:_explodes", "raised RuntimeError"),
+        # A bare instance as a phase value — the natural typo. `list()` raises
+        # TypeError, which the normalizer must convert to the documented
+        # ValueError or it would bypass this funnel and surface unattributed.
+        (f"{__name__}:_returns_bare_instance_in_mapping", "not iterable"),
     ],
 )
 def test_every_bad_reference_raises_rather_than_degrading(ref, expected):
@@ -327,7 +375,9 @@ def test_a_shell_export_still_works(tmp_path, monkeypatch):
     )
     reserve_middleware_ref_env()  # setdefault must not clobber a real value
     resolved = _factory_middleware()
-    assert [item.name for item in resolved] == ["LcFactoryMarkerMiddleware"]
+    assert [item.name for item in resolved["before_verification"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
 
 
 def test_no_module_writes_the_reference_into_the_environment():

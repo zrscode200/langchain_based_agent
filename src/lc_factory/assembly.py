@@ -243,8 +243,18 @@ def _normalize_injected_middleware(
         # Materialize BEFORE inspecting: a generator, `map`, or any one-shot
         # iterable would otherwise be consumed by the check and compose as
         # empty — a silent drop, which is the exact failure the phase-key check
-        # below exists to prevent.
-        items = list(items)
+        # below exists to prevent. Convert the non-iterable TypeError to the
+        # documented ValueError so the transport's env-var-attribution funnel
+        # (which catches ValueError only) still names the knob at fault.
+        try:
+            items = list(items)
+        except TypeError as exc:
+            msg = (
+                f"Middleware for phase {phase!r} is not iterable: got "
+                f"{type(items).__name__}. Pass a sequence of middleware — a "
+                f"bare middleware instance is the usual cause."
+            )
+            raise ValueError(msg) from exc
         # Shape is validated here rather than at the composition site so a bad
         # entry fails before any setup work, and with a message that says what
         # was wrong instead of an `AttributeError` on `.name` much later.
@@ -297,27 +307,33 @@ def _validate_injected_middleware(
         msg = (
             f"Injected middleware uses name(s) reserved by the deepagents SDK: "
             f"{colliding}. The SDK merges custom middleware by name against the "
-            f"stack it assembles around ours, so these would REPLACE the SDK's "
-            f"own middleware at its position instead of landing at the "
-            f"requested phase — silently removing scaffolding the agent depends "
-            f"on, up to and including the human approval gate. Override "
-            f"`.name` on the injected middleware."
+            f"base stack it assembles around ours: a name present in that base "
+            f"is silently REPLACED in place instead of landing at the requested "
+            f"phase, and a reserved name absent from the base at this pin ends "
+            f"in langchain's bare duplicate-name assertion, or lands with "
+            f"undocumented placement when its owner is not composed. Which "
+            f"outcome applies to which name is the SDK's to change per "
+            f"release, and a collision can disable load-bearing scaffolding — "
+            f"up to the human approval gate — so every reserved name is "
+            f"rejected here. Override `.name` on the injected middleware."
         )
         raise ValueError(msg)
 
     counts = Counter(item.name for item in agent_middleware)
     if duplicates := sorted(name for name, count in counts.items() if count > 1):
         # langchain rejects duplicates too, but with a message that names
-        # nothing. Attribute correctly: with no injection the collision is
-        # between the factory's own middleware, which is a port defect (most
-        # likely surfacing during a pin bump) — telling that maintainer to
-        # rename "the injected middleware" would send them looking for
-        # something that does not exist.
+        # nothing. Attribute correctly — by whether a duplicated name is
+        # actually among the injected ones, not by whether anything was
+        # injected at all: a factory self-collision (a port defect, most
+        # likely surfacing during a pin bump) alongside an innocent, cleanly
+        # named injection must not send the maintainer renaming middleware
+        # that is not the cause.
         remedy = (
             "Override `.name` on the injected middleware."
-            if injected_names
-            else "Nothing was injected, so this is a collision inside the "
-            "factory's own stack — check the port against upstream."
+            if injected_names & set(duplicates)
+            else "The duplicated name(s) are not among the injected ones, so "
+            "this is a collision inside the factory's own stack — check the "
+            "port against upstream."
         )
         msg = (
             f"Duplicate middleware name(s) in the composed stack: {duplicates}. "
