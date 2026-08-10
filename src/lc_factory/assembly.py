@@ -3,10 +3,11 @@
 ``create_factory_agent`` is a line-faithful port of
 ``deepagents_code.agent.create_cli_agent`` (``agent.py:2155-2989`` at monorepo
 ``8da0ccb13``, authored against deepagents-code==0.1.47, unchanged through
-0.1.48, and re-applied for 0.1.52's composition changes: cost tracking,
+0.1.48, re-applied for 0.1.52's composition changes: cost tracking,
 server-owned Hooks v2, the Auto classifier configuration, and the HITL
-restructure), with every upstream import routed
-through :mod:`lc_factory.upstream`.
+restructure, then unchanged again through 0.1.54 — upstream's ``agent.py``
+is byte-identical between 0.1.52 and 0.1.54), with every upstream import
+routed through :mod:`lc_factory.upstream`.
 
 **One deliberate behavioral delta**: the middleware injection seam
 (``middleware=``, Group 2), which is inert unless used — the default
