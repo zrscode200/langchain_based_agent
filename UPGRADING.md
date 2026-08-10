@@ -224,7 +224,9 @@ which is what `tests/test_parity.py` asserts *unmodified*):
 
 1. **Middleware injection seam** (`middleware=`, wave 2.1). The factory accepts
    caller-supplied middleware, which `create_cli_agent` structurally cannot.
-   Inert when omitted. **Four sites** in `assembly.py`, each marked `# SEAM` —
+   Inert when omitted. **Four sites** for *this* delta in `assembly.py`, each
+   marked `# SEAM` (deltas 3 and 4 add their own, so grep the marker rather
+   than counting on this number) —
    grep that marker to find them all when re-applying an upstream change:
    - `# SEAM (resolve)` — `_normalize_injected_middleware` near the top of the
      body. The three splices below all reference the binding it creates, so
@@ -452,7 +454,9 @@ be re-verified on a bump:
   `upstream.import_code_interpreter()` (laziness preserved).
 - The seam: the `middleware` parameter, `FactoryPhase`, `_PHASE_ORDER`,
   `_SDK_RESERVED_MIDDLEWARE_NAMES`, `_normalize_injected_middleware`,
-  `_validate_injected_middleware`, and the four `# SEAM` sites above.
+  `_validate_injected_middleware`, and every `# SEAM` site — main agent
+  (delta 1), subagents (delta 3), and rubric grader (delta 4). Grep the
+  marker; there are ten as of Group 3.
 
 **`launch.py`** (ported from `server_manager.py`):
 - `GRAPH_REF` targets `lc_factory.server_graph:make_graph` instead of

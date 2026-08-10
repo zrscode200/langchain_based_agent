@@ -80,8 +80,38 @@ variable before any `.env` file can set it — otherwise a committed `.env` in a
 repository you cloned could name code to run on `lc-code` startup. That
 deliberately rules out `.env` as a source, including your own global one.
 
-Injected middleware reaches the main agent only; subagents, the goal-criteria
-agent, and the rubric grader keep their own stacks.
+### Reaching delegated work
+
+`middleware=` covers the main agent. Two further parameters reach the stacks
+the factory composes for delegated work:
+
+```python
+agent, backend = create_factory_agent(
+    model="anthropic:claude-sonnet-4-6",
+    assistant_id="my-agent",
+    middleware=[MainOnly()],                       # main agent
+    subagent_middleware=[EverySubagent()],         # every subagent stack
+    rubric_grader_middleware=[GraderOnly()],       # the rubric grader
+)
+```
+
+Both use a two-phase vocabulary — `first` and `last`, defaulting to `last` —
+because neither stack has a verification tail. `last` is the deliberate
+default: on subagents it sits after the approval gate, and on the grader it
+sits inside the budget middlewares that bound grader spend, so both keep
+wrapping the injection.
+
+Two things worth knowing:
+
+- **Subagent middleware is spliced by reference**, so one instance is shared
+  across every subagent stack. Keep it stateless.
+- **The goal-criteria agent stays unreachable.** Upstream's
+  `_create_goal_criteria_agent` takes no middleware argument.
+
+`LC_FACTORY_MIDDLEWARE` still carries **main-agent middleware only**. Reaching
+the other targets from the environment needs its own variables and its own
+`.env` reservation guard, which is a security surface rather than a
+convenience — see `UPGRADING.md`.
 
 ## Planned deltas over v0
 
@@ -91,11 +121,12 @@ harness.
 
 ## Status
 
-**Groups 1 and 2 complete.** Group 1 built the skeleton — the ported assembly,
-its own `make_graph`, and scaffolding that runs under the upstream TUI and
-headless CLI via `lc-code` — at exact parity with v0. Group 2 added the
-middleware injection seam and the transport that carries it into a live
-session.
+**Groups 1–3 complete.** Group 1 built the skeleton — the ported assembly, its
+own `make_graph`, and scaffolding that runs under the upstream TUI and headless
+CLI via `lc-code` — at exact parity with v0. Group 2 added the middleware
+injection seam and the transport that carries it into a live session. Group 3
+extended that seam to the delegation targets the factory composes: subagent
+stacks and the rubric grader.
 
 Parity is now a *documented-divergence* contract rather than plain equality:
 the default composition stays byte-identical to v0 (the parity suite proves
@@ -103,9 +134,12 @@ this unmodified), and every deliberate divergence is enumerated in
 [`UPGRADING.md`](UPGRADING.md).
 
 Verified: composition parity against v0 across a config matrix with negative
-controls; seam placement in the final composed stack plus hook ordering proven
-by execution; import-boundary integrity; and live headless sessions covering
-both a successful injection and a startup failure on a bad reference.
+controls; seam placement in the final composed stack for all three targets —
+each observed at the point where its final order actually exists — plus hook
+ordering proven by execution; per-target guards derived from the real SDK
+stacks rather than assumed; import-boundary integrity; and live headless
+sessions covering both a successful injection and a startup failure on a bad
+reference.
 
 Not yet verified by automation: the interactive Textual TUI in a terminal, the
 approval-interrupt path end-to-end (proven once manually), and rubric verdicts
