@@ -12,7 +12,9 @@ routed through :mod:`lc_factory.upstream`.
 **One deliberate behavioral delta**: the middleware injection seam
 (``middleware=``, Group 2), which is inert unless used — the default
 composition stays byte-identical to v0, and ``tests/test_parity.py`` proves it
-unmodified. Its four splice points are marked ``# SEAM``; see ``UPGRADING.md``
+unmodified. Every splice and resolve point is marked ``# SEAM`` — grep that
+marker rather than trusting a count, since Group 3 added targets; see
+``UPGRADING.md``
 for the full divergence inventory. Everything else here is line-faithful, and
 the remaining ratified deltas land in later iterations.
 
@@ -982,9 +984,12 @@ def create_factory_agent(
             non-`None` `sandbox`, when `settings.interpreter_ptc` contains
             unknown tool names, when `interpreter_ptc="all"` is used
             without `auto_approve` or `interpreter_ptc_acknowledge_unsafe`,
-            when `middleware` names an unknown phase, or when injected
-            middleware collides by `.name` with the SDK's base stack or with
-            another middleware in the composed stack.
+            when any of `middleware`, `subagent_middleware`, or
+            `rubric_grader_middleware` names an unknown phase or carries an
+            entry that is not usable as middleware, when injected main-agent or
+            subagent middleware claims a name the deepagents SDK reserves, or
+            when any composed stack — main, subagent, or rubric grader — ends
+            up with a duplicate `.name`.
     """
     tools = tools or []
     mcp_tools = tuple(mcp_tools or ())

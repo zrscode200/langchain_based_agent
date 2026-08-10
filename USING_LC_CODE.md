@@ -477,13 +477,25 @@ a project or global `.env` file, because resolving it imports and executes
 Python code during server startup, before an approval screen could protect
 that action. Only point it at code you trust.
 
-Injected middleware:
+Injected middleware through this variable:
 
-- applies to the main agent only;
-- does not automatically wrap subagents, the goal-criteria agent, or the rubric
-  grader;
+- applies to the **main agent only**;
 - must have unique, non-reserved middleware names; and
 - fails startup loudly when the reference or returned value is invalid.
+
+Subagents and the rubric grader can also receive middleware, but **only through
+the Python API** — `create_factory_agent(subagent_middleware=...,
+rubric_grader_middleware=...)`. There is no environment variable for them.
+
+That is a deliberate limit, not an oversight. Resolving a reference imports and
+executes the named module inside the server process, so every such variable
+needs the same `.env` reservation guard `LC_FACTORY_MIDDLEWARE` has — otherwise
+a committed `.env` in a cloned repository could name code to run at startup.
+Adding variables is therefore a security change requiring its own review, not a
+convenience toggle.
+
+The goal-criteria agent cannot receive middleware by any route: upstream's
+constructor takes no middleware argument.
 
 Return to the baseline after the session:
 
