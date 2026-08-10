@@ -134,6 +134,41 @@ _PHASE_ORDER: tuple[FactoryPhase, ...] = ("first", "before_verification", "last"
 _DEFAULT_PHASE: FactoryPhase = "before_verification"
 """Phase used when ``middleware`` is given as a bare sequence."""
 
+SubagentPhase = Literal["first", "last"]
+"""Where caller-supplied middleware is spliced into each *subagent* stack.
+
+Deliberately a smaller vocabulary than `FactoryPhase`: subagent stacks have no
+goal-criteria/rubric verification tail, so `'before_verification'` would name a
+boundary that does not exist. The two phases here are the edges of the factory's
+own subagent block, which is never empty — `CostTrackingMiddleware(nested=True)`
+and `ServerHooksMiddleware` are appended unconditionally — so neither boundary
+moves with configuration.
+"""
+
+_SUBAGENT_PHASE_ORDER: tuple[SubagentPhase, ...] = ("first", "last")
+"""Subagent phases in stack order.
+
+- ``first`` — ahead of every factory subagent middleware, including the
+  approval gate. Outermost of the factory block.
+- ``last`` — after every factory subagent middleware, still ahead of the SDK's
+  own subagent tail (harness-profile extras, prompt caching), which is not
+  addressable from here.
+
+Both sit *inside* the block the SDK splices ahead of its tail: `graph.py`
+captures `_subagent_core_names` before appending profile extras, so the whole
+factory block — injections included — lands ahead of them.
+"""
+
+_DEFAULT_SUBAGENT_PHASE: SubagentPhase = "last"
+"""Phase used when ``subagent_middleware`` is given as a bare sequence.
+
+``last`` rather than ``first``, mirroring the main agent's
+``before_verification`` default: the caller's middleware lands *after* every
+middleware that installs approval policy, hooks, and the memory guard. A caller
+who wants to sit outside the approval gate has to ask for ``first`` explicitly,
+which is the safer direction for a default on a delegated stack.
+"""
+
 _SDK_RESERVED_MIDDLEWARE_NAMES = frozenset(
     {
         # Core, ahead of the factory block.
@@ -203,12 +238,126 @@ silent replacement. This matches the stance already taken for
 """
 
 
+def _checked_middleware(
+    items: Sequence[AgentMiddleware[Any, Any]], phase: str
+) -> list[Any]:
+    """Validate and materialize one phase's middleware sequence.
+
+    Shared by the main-agent and subagent normalizers so both documented
+    surfaces agree on what input is legal.
+
+    Args:
+        items: Caller-supplied sequence for this phase.
+        phase: Phase name, used only in error messages.
+
+    Returns:
+        The materialized list.
+
+    Raises:
+        ValueError: For an unordered collection, a non-iterable, or an entry
+            that is not usable as middleware.
+    """
+    # Order IS the seam's contract, and set iteration order varies with
+    # PYTHONHASHSEED between runs. Accepting one would turn a documented
+    # position into a coin flip that nothing downstream notices, and
+    # `{MyMiddleware()}` is the natural typo for a phase mapping.
+    if isinstance(items, AbstractSet):
+        msg = (
+            f"Middleware for phase {phase!r} was given as an unordered "
+            f"{type(items).__name__}; composition order is part of the "
+            f"seam's contract. Use a list or tuple."
+        )
+        raise ValueError(msg)
+    # Materialize BEFORE inspecting: a generator, `map`, or any one-shot
+    # iterable would otherwise be consumed by the check and compose as
+    # empty — a silent drop, which is the exact failure the phase-key check
+    # below exists to prevent. Convert the non-iterable TypeError to the
+    # documented ValueError so the transport's env-var-attribution funnel
+    # (which catches ValueError only) still names the knob at fault.
+    try:
+        items = list(items)
+    except TypeError as exc:
+        msg = (
+            f"Middleware for phase {phase!r} is not iterable: got "
+            f"{type(items).__name__}. Pass a sequence of middleware — a "
+            f"bare middleware instance is the usual cause."
+        )
+        raise ValueError(msg) from exc
+    # Shape is validated here rather than at the composition site so a bad
+    # entry fails before any setup work, and with a message that says what
+    # was wrong instead of an `AttributeError` on `.name` much later.
+    for item in items:
+        if not isinstance(getattr(item, "name", None), str):
+            msg = (
+                f"Injected middleware for phase {phase!r} must be "
+                f"AgentMiddleware instances with a string `.name`; got "
+                f"{item!r}."
+            )
+            raise ValueError(msg)
+    return items
+
+
+def _normalize_for_phases(
+    middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[str, Sequence[AgentMiddleware[Any, Any]]]
+    | None,
+    *,
+    phase_order: tuple[str, ...],
+    default_phase: str,
+    argument: str,
+) -> dict[Any, list[AgentMiddleware[Any, Any]]]:
+    """Resolve caller middleware into one list per phase of a given vocabulary.
+
+    Args:
+        middleware: A bare sequence (assigned to ``default_phase``) or a mapping
+            keyed by phase. ``None`` yields empty lists.
+        phase_order: The valid phases, in stack order.
+        default_phase: Phase used for a bare sequence.
+        argument: Parameter name, used in the unknown-phase error so a caller
+            addressing the wrong target sees which knob they got wrong.
+
+    Returns:
+        Mapping of every phase in ``phase_order`` to its middleware list.
+
+    Raises:
+        ValueError: When a mapping contains an unknown phase key, or when an
+            entry is not usable as middleware.
+    """
+    resolved: dict[Any, list[AgentMiddleware[Any, Any]]] = {
+        phase: [] for phase in phase_order
+    }
+    if middleware is None:
+        return resolved
+
+    if isinstance(middleware, Mapping):
+        # Fail fast on shape: a typo'd phase key would otherwise be silently
+        # dropped, and the caller's middleware would never be composed at all.
+        if unknown := sorted(str(key) for key in middleware if key not in resolved):
+            msg = (
+                f"Unknown middleware phase(s) {unknown} for {argument!r}. "
+                f"Valid phases: {list(phase_order)}."
+            )
+            raise ValueError(msg)
+        for phase, items in middleware.items():
+            resolved[phase].extend(_checked_middleware(items, phase))
+    else:
+        resolved[default_phase].extend(
+            _checked_middleware(middleware, default_phase)
+        )
+    return resolved
+
+
 def _normalize_injected_middleware(
     middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None,
 ) -> dict[FactoryPhase, list[AgentMiddleware[Any, Any]]]:
     """Resolve the ``middleware`` argument into one list per phase.
+
+    Main-agent entry point. Kept as a distinct named function because
+    `lc_factory.server_graph` imports it to normalize the
+    `LC_FACTORY_MIDDLEWARE` transport's return value, and its behavior is
+    pinned by that module's tests.
 
     Args:
         middleware: Caller-supplied middleware — a bare sequence (assigned to
@@ -223,66 +372,40 @@ def _normalize_injected_middleware(
         ValueError: When a mapping contains a key that is not a known phase, or
             when an entry is not usable as middleware.
     """
-    resolved: dict[FactoryPhase, list[AgentMiddleware[Any, Any]]] = {
-        phase: [] for phase in _PHASE_ORDER
-    }
-    if middleware is None:
-        return resolved
+    return _normalize_for_phases(
+        middleware,
+        phase_order=_PHASE_ORDER,
+        default_phase=_DEFAULT_PHASE,
+        argument="middleware",
+    )
 
-    def _checked(items: Sequence[AgentMiddleware[Any, Any]], phase: str) -> list[Any]:
-        # Order IS the seam's contract, and set iteration order varies with
-        # PYTHONHASHSEED between runs. Accepting one would turn a documented
-        # position into a coin flip that nothing downstream notices, and
-        # `{MyMiddleware()}` is the natural typo for a phase mapping.
-        if isinstance(items, AbstractSet):
-            msg = (
-                f"Middleware for phase {phase!r} was given as an unordered "
-                f"{type(items).__name__}; composition order is part of the "
-                f"seam's contract. Use a list or tuple."
-            )
-            raise ValueError(msg)
-        # Materialize BEFORE inspecting: a generator, `map`, or any one-shot
-        # iterable would otherwise be consumed by the check and compose as
-        # empty — a silent drop, which is the exact failure the phase-key check
-        # below exists to prevent. Convert the non-iterable TypeError to the
-        # documented ValueError so the transport's env-var-attribution funnel
-        # (which catches ValueError only) still names the knob at fault.
-        try:
-            items = list(items)
-        except TypeError as exc:
-            msg = (
-                f"Middleware for phase {phase!r} is not iterable: got "
-                f"{type(items).__name__}. Pass a sequence of middleware — a "
-                f"bare middleware instance is the usual cause."
-            )
-            raise ValueError(msg) from exc
-        # Shape is validated here rather than at the composition site so a bad
-        # entry fails before any setup work, and with a message that says what
-        # was wrong instead of an `AttributeError` on `.name` much later.
-        for item in items:
-            if not isinstance(getattr(item, "name", None), str):
-                msg = (
-                    f"Injected middleware for phase {phase!r} must be "
-                    f"AgentMiddleware instances with a string `.name`; got "
-                    f"{item!r}."
-                )
-                raise ValueError(msg)
-        return items
 
-    if isinstance(middleware, Mapping):
-        # Fail fast on shape: a typo'd phase key would otherwise be silently
-        # dropped, and the caller's middleware would never be composed at all.
-        if unknown := sorted(str(key) for key in middleware if key not in resolved):
-            msg = (
-                f"Unknown middleware phase(s): {unknown}. "
-                f"Valid phases: {list(_PHASE_ORDER)}."
-            )
-            raise ValueError(msg)
-        for phase, items in middleware.items():
-            resolved[phase].extend(_checked(items, phase))
-    else:
-        resolved[_DEFAULT_PHASE].extend(_checked(middleware, _DEFAULT_PHASE))
-    return resolved
+def _normalize_subagent_middleware(
+    middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[SubagentPhase, Sequence[AgentMiddleware[Any, Any]]]
+    | None,
+) -> dict[SubagentPhase, list[AgentMiddleware[Any, Any]]]:
+    """Resolve the ``subagent_middleware`` argument into one list per phase.
+
+    Args:
+        middleware: Caller-supplied middleware for every subagent stack — a
+            bare sequence (assigned to `_DEFAULT_SUBAGENT_PHASE`) or a mapping
+            keyed by `SubagentPhase`. ``None`` yields empty lists, keeping
+            subagent composition byte-identical to v0.
+
+    Returns:
+        Mapping of every phase in `_SUBAGENT_PHASE_ORDER` to its list.
+
+    Raises:
+        ValueError: When a mapping contains an unknown phase key, or when an
+            entry is not usable as middleware.
+    """
+    return _normalize_for_phases(
+        middleware,
+        phase_order=_SUBAGENT_PHASE_ORDER,
+        default_phase=_DEFAULT_SUBAGENT_PHASE,
+        argument="subagent_middleware",
+    )
 
 
 def _validate_injected_middleware(
@@ -343,6 +466,93 @@ def _validate_injected_middleware(
         raise ValueError(msg)
 
 
+def _validate_subagent_reserved_names(
+    injected: Mapping[SubagentPhase, Sequence[AgentMiddleware[Any, Any]]],
+) -> None:
+    """Reject subagent middleware claiming a name the SDK owns on that stack.
+
+    Subagent specs go through the *same* name-based merge as the main stack:
+    `graph.py` builds a subagent base (`FilesystemMiddleware`, summarization,
+    `PatchToolCallsMiddleware`, optional `SkillsMiddleware`, then harness-profile
+    extras and prompt caching) and calls `_apply_custom_middleware` on it with
+    the spec's `middleware`. A collision is therefore replaced in place at the
+    SDK's position instead of landing at the requested phase — silently, exactly
+    as on the main agent.
+
+    The subagent base is a strict *subset* of `_SDK_RESERVED_MIDDLEWARE_NAMES`
+    (it has no `SubAgentMiddleware`, `AsyncSubAgentMiddleware`,
+    `MemoryMiddleware`, or `HumanInTheLoopMiddleware` — the factory passes
+    `interrupt_on={}` precisely so the SDK appends no stock HITL). Reusing the
+    main constant therefore **over-rejects**, refusing a few names the subagent
+    base could not actually own. That is the deliberate direction: over-rejection
+    is an explicit error the caller can work around by renaming, while
+    under-rejection silently replaces SDK scaffolding. It also matches the
+    model-independent stance already taken for harness-profile names.
+
+    `tests/test_seam.py` derives the real subagent base from the SDK and asserts
+    it stays a subset of the constant, so an upstream addition that this guard
+    would miss fails there rather than opening a hole.
+
+    Args:
+        injected: Per-phase caller middleware from
+            `_normalize_subagent_middleware`.
+
+    Raises:
+        ValueError: When injected subagent middleware claims a reserved name.
+    """
+    injected_names = {item.name for items in injected.values() for item in items}
+    if colliding := sorted(injected_names & _SDK_RESERVED_MIDDLEWARE_NAMES):
+        msg = (
+            f"Injected subagent middleware uses name(s) reserved by the "
+            f"deepagents SDK: {colliding}. Subagent specs go through the same "
+            f"name-based merge as the main agent, so a reserved name is "
+            f"silently REPLACED in place on every subagent stack instead of "
+            f"landing at the requested phase — including middleware that backs "
+            f"filesystem tools and compaction. The guarded set is the main "
+            f"stack's, which is a superset of the subagent base, so a few names "
+            f"are refused that only the main stack could own; renaming is the "
+            f"fix either way. Override `.name` on the injected middleware."
+        )
+        raise ValueError(msg)
+
+
+def _validate_subagent_stack(
+    subagent_stack: Sequence[AgentMiddleware[Any, Any]],
+    injected_names: AbstractSet[str],
+) -> None:
+    """Reject duplicate names inside one composed subagent stack.
+
+    Runs per subagent rather than once, because the stacks are not identical:
+    `ConfigurableModelMiddleware` is present only without an explicit model,
+    stall recovery only when headless, the shell allow-list only when
+    restrictive, and the memory guard only with memory enabled. A name that is
+    unique against one subagent's stack can collide on another's.
+
+    Args:
+        subagent_stack: One composed subagent middleware list, injections
+            included.
+        injected_names: Names supplied via `subagent_middleware`, used only to
+            attribute the failure correctly.
+
+    Raises:
+        ValueError: When any name appears twice in the composed stack.
+    """
+    counts = Counter(item.name for item in subagent_stack)
+    if duplicates := sorted(name for name, count in counts.items() if count > 1):
+        remedy = (
+            "Override `.name` on the injected subagent middleware."
+            if injected_names & set(duplicates)
+            else "The duplicated name(s) are not among the injected ones, so "
+            "this is a collision inside the factory's own subagent stack — "
+            "check the port against upstream."
+        )
+        msg = (
+            f"Duplicate middleware name(s) in a composed subagent stack: "
+            f"{duplicates}. Every middleware needs a unique `.name`. {remedy}"
+        )
+        raise ValueError(msg)
+
+
 def create_factory_agent(
     model: str | BaseChatModel,
     assistant_id: str,
@@ -377,6 +587,9 @@ def create_factory_agent(
     rubric_grader_tools: Sequence[BaseTool | Callable[..., Any]] | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]]
+    | None = None,
+    subagent_middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[SubagentPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
 ) -> tuple[Pregel[Any, Any, Any, Any], CompositeBackend]:
     """Create a CLI-configured agent with flexible options.
@@ -565,10 +778,10 @@ def create_factory_agent(
                 no longer in it — HITL sits inside the factory stack, before
                 this phase.
 
-            Injected middleware reaches the **main agent only**. Subagents
-            (including `general-purpose`), the goal-criteria agent, and the
-            rubric grader keep their own stacks, so work delegated through
-            `task` is not covered by anything injected here.
+            This parameter reaches the **main agent only**. To cover work
+            delegated through `task`, use `subagent_middleware`. The
+            goal-criteria agent remains unreachable: upstream's
+            `_create_goal_criteria_agent` takes no middleware argument.
 
             Every injected middleware needs a `.name` that is unique in the
             composed stack and is not one the deepagents SDK may use for its
@@ -583,6 +796,44 @@ def create_factory_agent(
             override `.name` on your instance. The guard is deliberately
             model-independent, so it also refuses names that could only
             collide on a model you are not using.
+        subagent_middleware: Caller-supplied middleware spliced into **every**
+            subagent stack the factory composes, including the synthesized
+            `general-purpose` subagent.
+
+            Same two input forms as `middleware`, but a smaller phase
+            vocabulary — subagent stacks have no verification tail:
+
+            ```python
+            create_factory_agent(..., subagent_middleware=[MyMiddleware()])
+            create_factory_agent(..., subagent_middleware={"first": [Outer()]})
+            ```
+
+            - `'first'`: ahead of every factory subagent middleware, including
+                the approval gate.
+            - `'last'` (default): after every factory subagent middleware,
+                still ahead of the SDK's own subagent tail. The default is the
+                later position on purpose — a caller wanting to sit outside the
+                approval gate must ask for `'first'` explicitly.
+
+            `None` (default) composes subagents exactly as v0 does.
+
+            !!! warning "One instance, every subagent"
+
+                The middleware objects you pass are spliced into each
+                subagent's stack **by reference**, so a single instance is
+                shared across all of them. Middleware holding per-agent state
+                will see that state shared; construct stateless middleware, or
+                key any state by something available at runtime.
+
+            Async subagents are unaffected — they run on their own remote
+            backend and never receive the local stack.
+
+            Names are guarded the same way as `middleware`: subagent specs go
+            through the SDK's name-based merge too (`_apply_custom_middleware`
+            against a subagent base), so a reserved name would be silently
+            replaced rather than land at the requested phase. The guarded set
+            is the main stack's, which is a superset of the subagent base — a
+            few names are refused that only the main stack could own.
 
 
     Returns:
@@ -606,6 +857,17 @@ def create_factory_agent(
     # SEAM (resolve): up front, so a bad phase key or entry fails before any
     # setup work. The three splice sites below depend on this binding.
     injected_middleware = _normalize_injected_middleware(middleware)
+    # SEAM (resolve, subagents): same reasoning, and the reserved-name check
+    # runs here too rather than at the per-subagent splice — a collision is a
+    # property of the caller's input, not of any one subagent, so failing here
+    # keeps it ahead of directory creation and subagent discovery.
+    injected_subagent_middleware = _normalize_subagent_middleware(subagent_middleware)
+    _validate_subagent_reserved_names(injected_subagent_middleware)
+    _injected_subagent_names = {
+        item.name
+        for items in injected_subagent_middleware.values()
+        for item in items
+    }
     if auto_mode_enabled and (not interactive or sandbox is not None):
         logger.warning(
             "Classifier-backed Auto is unavailable outside the local interactive "
@@ -689,7 +951,11 @@ def create_factory_agent(
     ) -> list[AgentMiddleware[Any, Any]]:
         from lc_factory.upstream import CostTrackingMiddleware
 
-        middleware: list[AgentMiddleware[Any, Any]] = []
+        middleware: list[AgentMiddleware[Any, Any]] = [
+            # SEAM (subagent phase "first"): ahead of every factory subagent
+            # middleware, including the approval gate.
+            *injected_subagent_middleware["first"],
+        ]
         if resolved_interrupt_on is not None:
             middleware.append(AsyncApprovalHITLMiddleware(resolved_interrupt_on))
         if not has_explicit_model:
@@ -731,6 +997,12 @@ def create_factory_agent(
                     [settings.get_user_agent_md_path(assistant_id)]
                 )
             )
+        # SEAM (subagent phase "last"): after every factory subagent
+        # middleware, still ahead of the SDK's own subagent tail.
+        middleware.extend(injected_subagent_middleware["last"])
+        # Validated per stack, not once: subagent stacks differ by
+        # configuration, so a name unique against one can collide on another.
+        _validate_subagent_stack(middleware, _injected_subagent_names)
         return middleware
 
     for subagent_meta in list_subagents(
@@ -749,11 +1021,15 @@ def create_factory_agent(
         }
         if model_spec:
             subagent["model"] = model_spec
-        subagent_middleware = _subagent_cli_middleware(
+        # Named `subagent_stack`, not `subagent_middleware` as upstream has it:
+        # that name is now the factory's own parameter, and rebinding it here
+        # would shadow it for the rest of the body. Deliberate divergence,
+        # recorded in UPGRADING.md.
+        subagent_stack = _subagent_cli_middleware(
             has_explicit_model=has_explicit_model,
         )
-        if subagent_middleware:
-            subagent["middleware"] = subagent_middleware
+        if subagent_stack:
+            subagent["middleware"] = subagent_stack
         if resolved_interrupt_on is not None:
             # The async-aware stock-compatible middleware above owns approval
             # routing. A declarative subagent with no `interrupt_on` inherits

@@ -355,7 +355,54 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      `PYTHONPATH` strip exists to prevent. Re-check on any change to how the
      server working directory is chosen.
 
-3. **`src/lc_factory/_testing_middleware.py`** — test support shipped inside
+3. **Subagent seam reach** (`subagent_middleware=`, wave 3.1, Group 3). Caller
+   middleware on every subagent stack the factory composes, including the
+   synthesized `general-purpose` one. Inert when omitted. Async subagents are
+   unaffected — they never receive the local stack.
+
+   - **Own phase vocabulary**, deliberately smaller than the main agent's:
+     `SubagentPhase` is `first`/`last` only, because subagent stacks have no
+     verification tail and `before_verification` would name a boundary that
+     does not exist. Default is `last` — the later, less privileged position.
+   - **Two `# SEAM (subagent ...)` sites**, both inside
+     `_subagent_cli_middleware`: `first` in the list initializer, `last`
+     immediately before the per-stack validation and `return`.
+   - Supporting symbols: `_SUBAGENT_PHASE_ORDER`, `_DEFAULT_SUBAGENT_PHASE`,
+     `_normalize_subagent_middleware`, `_validate_subagent_reserved_names`,
+     `_validate_subagent_stack`.
+   - **The guard is a different problem from the main stack's**, and the
+     difference is the whole reason this is its own parameter. Subagent specs
+     *are* name-merged — `graph.py` calls
+     `_apply_custom_middleware(subagent_base, spec["middleware"],
+     core_names=...)` — so the silent-replacement hazard is real, but against a
+     **different base** (`FilesystemMiddleware`, summarization,
+     `PatchToolCallsMiddleware`, optional `SkillsMiddleware`, profile extras,
+     prompt caching). That base is a strict subset of
+     `_SDK_RESERVED_MIDDLEWARE_NAMES`, so the constant is reused and
+     **over-rejects** by design. `tests/test_seam.py` derives the real base and
+     asserts the subset relation, so an upstream addition fails there.
+   - Duplicate checking runs **per composed subagent stack**, not once:
+     subagent stacks differ by configuration (`ConfigurableModelMiddleware`
+     only without an explicit model, stall recovery only headless, shell
+     allow-list only when restrictive, memory guard only with memory), so a
+     name unique against one can collide on another.
+   - **Injected instances are spliced by reference**, so one object is shared
+     across every subagent stack. Documented in the parameter's docstring and
+     pinned by identity assertion in `tests/test_seam.py`.
+   - **Not reachable from `LC_FACTORY_MIDDLEWARE`** — the transport still feeds
+     `middleware=` only. API-only until wave 3.3 decides otherwise.
+   - **On a bump, re-check:** that `graph.py` still merges subagent specs via
+     `_apply_custom_middleware` with `core_names` (if it stops, the position
+     guarantee changes), and that the derived subagent base is still a subset
+     of the reserved constant. Both are test-pinned; they fail in
+     `tests/test_seam.py` rather than silently.
+   - **Local rename in the ported region:** upstream's
+     `subagent_middleware = _subagent_cli_middleware(...)` is `subagent_stack`
+     here, because `subagent_middleware` is now the factory's own parameter and
+     rebinding it would shadow it for the rest of the body. Mechanical to
+     re-apply; keep the rename.
+
+4. **`src/lc_factory/_testing_middleware.py`** — test support shipped inside
    the package, mirroring upstream's own `_testing_models` / `_fake_models`.
    Needed because `_build_server_env` strips `PYTHONPATH` from the server
    interpreter, leaving an installed package as the only place the integration

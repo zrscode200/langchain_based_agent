@@ -42,8 +42,14 @@ def test_factory_only_parameters_are_keyword_only_and_default_off():
     ours = inspect.signature(create_factory_agent).parameters
     v0 = inspect.signature(upstream.create_cli_agent).parameters
 
+    # An explicit registry, not a count: adding a factory-only parameter must be
+    # a deliberate edit here, so an accidental one fails rather than widening
+    # the factory's surface silently.
     added = sorted(set(ours) - set(v0))
-    assert added == ["middleware"], f"undeclared factory-only parameters: {added}"
+    assert added == [
+        "middleware",
+        "subagent_middleware",
+    ], f"undeclared factory-only parameters: {added}"
     for name in added:
         assert ours[name].kind is inspect.Parameter.KEYWORD_ONLY, (
             f"{name}: factory-only parameters must be keyword-only"

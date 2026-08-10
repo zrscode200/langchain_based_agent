@@ -6,10 +6,18 @@ that injected middleware lands where the seam promises, and that the two ways
 the SDK's name-based merge can mis-handle an injection are rejected loudly
 instead of silently mis-composing.
 
-Observation point: the parity suite intercepts `create_deep_agent`, which sees
-only the factory's own block. Placement is a property of the *final* stack, so
-these tests intercept `deepagents.graph.create_agent` — one level deeper, after
-the SDK has merged its base stack, our block, and its tail.
+Observation points — three, because "the final stack" means something different
+per target, and picking the wrong one makes a placement assertion vacuous:
+
+- `deepagents.graph.create_agent` (main agent). The parity suite intercepts
+  `create_deep_agent`, which sees only the factory's own block; placement is a
+  property of the *final* stack, so these tests go one level deeper, after the
+  SDK has merged its base, our block, and its tail.
+- `deepagents.graph._apply_custom_middleware` (subagents, wave 3.1). Subagent
+  stacks are merged there and stored on the processed spec, so neither
+  `create_deep_agent` nor `create_agent` interception ever sees the result.
+- `langchain.agents.create_agent` on a minimal graph, for the hook-ordering
+  law itself — isolated from the factory stack's own side effects.
 """
 
 from __future__ import annotations
@@ -20,7 +28,9 @@ from langchain.agents.middleware.types import AgentMiddleware
 from lc_factory.assembly import (
     _PHASE_ORDER,
     _SDK_RESERVED_MIDDLEWARE_NAMES,
+    _SUBAGENT_PHASE_ORDER,
     _normalize_injected_middleware,
+    _normalize_subagent_middleware,
     _validate_injected_middleware,
 )
 
@@ -519,4 +529,303 @@ def test_stack_order_is_an_onion_before_forward_after_reversed():
         "middleware hook direction changed: the seam documents `first` as "
         "outermost (before_* first, after_* LAST). If this reverses, every "
         "phase guarantee in create_factory_agent's docstring is backwards."
+    )
+
+
+# --- wave 3.1: subagent targeting ------------------------------------------
+#
+# Observation point differs again. Subagent stacks are merged by the SDK at
+# `graph.py:699` — `_apply_custom_middleware(subagent_base, spec["middleware"],
+# core_names=...)` — and the merged list is stored on the processed spec, so
+# neither `create_deep_agent` nor `create_agent` interception sees it. These
+# tests spy on that merge directly, which is the only place the *final*
+# subagent order exists.
+
+
+def _subagent_merges(tmp_path, **kwargs) -> list[dict[str, list[str]]]:
+    """Compose a factory agent; return every SUBAGENT middleware merge.
+
+    Each entry is `{"base": [...], "custom": [...], "result": [...]}` of
+    middleware names. Subagent calls are discriminated from the main-stack call
+    by the absence of `SubAgentMiddleware` in the SDK base — the main stack has
+    one, a subagent stack cannot.
+    """
+    import deepagents.graph as sdk_graph
+    from deepagents_code._fake_models import _ToolBindingFakeModel
+
+    from lc_factory.assembly import create_factory_agent
+
+    captured: list[dict[str, list[str]]] = []
+    real_apply = sdk_graph._apply_custom_middleware
+
+    def spy(base, custom, *args, **kw):
+        result = real_apply(base, custom, *args, **kw)
+        base_names = [m.name for m in base]
+        if "SubAgentMiddleware" not in base_names:
+            captured.append(
+                {
+                    "base": base_names,
+                    "custom": [m.name for m in custom],
+                    "result": [m.name for m in result],
+                    # Objects too, so identity contracts can be asserted
+                    # without depending on how many subagents exist on disk.
+                    "objects": list(result),
+                }
+            )
+        return result
+
+    sdk_graph._apply_custom_middleware = spy
+    try:
+        create_factory_agent(
+            model=_ToolBindingFakeModel(messages=iter([])),
+            assistant_id="lc-factory-subagent-seam",
+            cwd=tmp_path,
+            **kwargs,
+        )
+    finally:
+        sdk_graph._apply_custom_middleware = real_apply
+    assert captured, (
+        "no subagent middleware merge was observed; the discriminator or the "
+        "SDK's subagent assembly moved, so these assertions would be vacuous"
+    )
+    # Guard the discriminator in the OTHER direction too. Non-emptiness only
+    # proves we captured something; it does not prove we captured the right
+    # thing. If the main-stack merge ever stopped carrying `SubAgentMiddleware`
+    # in its base it would be misclassified here, and every assertion below
+    # would silently be about the main agent instead.
+    for merge in captured:
+        leaked = {"GoalToolsMiddleware", "ReliableRubricMiddleware"} & set(
+            merge["result"]
+        )
+        assert not leaked, (
+            f"main-stack middleware {sorted(leaked)} appeared in a merge "
+            "classified as a subagent's — the discriminator is wrong and these "
+            "assertions are about the wrong stack"
+        )
+    return captured
+
+
+# --- normalization ---
+
+
+def test_subagent_none_normalizes_to_empty_phases():
+    resolved = _normalize_subagent_middleware(None)
+    assert set(resolved) == set(_SUBAGENT_PHASE_ORDER)
+    assert all(not items for items in resolved.values())
+
+
+def test_subagent_bare_sequence_defaults_to_last_not_first():
+    """The default is the LATER position, unlike a naive 'prepend' reading.
+
+    A caller who wants to sit outside the subagent approval gate has to ask for
+    `first` explicitly; that is the safer default on a delegated stack.
+    """
+    probe = _Probe("probe")
+    resolved = _normalize_subagent_middleware([probe])
+    assert resolved["last"] == [probe]
+    assert not resolved["first"]
+
+
+def test_subagent_mapping_is_keyed_by_phase():
+    first, last = _Probe("a"), _Probe("b")
+    resolved = _normalize_subagent_middleware({"first": [first], "last": [last]})
+    assert resolved["first"] == [first]
+    assert resolved["last"] == [last]
+
+
+def test_subagent_vocabulary_rejects_main_only_phase():
+    """`before_verification` is a main-agent phase and must not silently work.
+
+    Subagent stacks have no goal-criteria/rubric tail, so accepting the name
+    would document a boundary that does not exist.
+    """
+    with pytest.raises(ValueError, match="Unknown middleware phase") as excinfo:
+        _normalize_subagent_middleware({"before_verification": [_Probe("p")]})
+    assert "subagent_middleware" in str(excinfo.value)
+    assert "before_verification" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "supplied",
+    [lambda p: {p}, lambda p: {"first": {p}}, lambda p: frozenset({p})],
+)
+def test_subagent_unordered_collections_are_rejected(supplied):
+    with pytest.raises(ValueError, match="unordered"):
+        _normalize_subagent_middleware(supplied(_Probe("probe")))
+
+
+@pytest.mark.parametrize("wrap", [list, tuple, iter, lambda i: (m for m in i)])
+def test_subagent_one_shot_iterables_are_not_silently_dropped(wrap):
+    probe = _Probe("probe")
+    resolved = _normalize_subagent_middleware(wrap([probe]))
+    assert [m.name for m in resolved["last"]] == ["probe"]
+
+
+def test_subagent_non_middleware_entries_are_rejected():
+    for bad in (None, "not-middleware", object()):
+        with pytest.raises(ValueError, match="must be AgentMiddleware"):
+            _normalize_subagent_middleware([bad])
+
+
+# --- the guard, derived from the real SDK subagent base ---
+
+
+def test_subagent_sdk_base_is_covered_by_the_reserved_names_constant(tmp_path):
+    """Derive the real subagent base; the guard must already cover it.
+
+    The subagent base is a strict subset of the main stack's reserved set, so
+    reusing that constant over-rejects rather than under-rejects. This keeps
+    that claim honest: an upstream release adding subagent-base middleware NOT
+    in the constant fails here instead of opening a silent-replacement hole.
+    """
+    merges = _subagent_merges(tmp_path, subagent_middleware=[_Probe("probe")])
+    derived = {name for merge in merges for name in merge["base"]}
+    assert derived, "derived an empty subagent base; this case is vacuous"
+    # Guard the guard: the base must contain the middleware whose replacement
+    # would actually hurt, or this case stops covering the failure it exists for.
+    assert "FilesystemMiddleware" in derived
+    assert derived <= _SDK_RESERVED_MIDDLEWARE_NAMES, (
+        "the SDK subagent base gained middleware the seam does not guard: "
+        f"{sorted(derived - _SDK_RESERVED_MIDDLEWARE_NAMES)}. An injection "
+        "using one of those names would silently replace it on every subagent."
+    )
+
+
+def test_subagent_reserved_name_collision_is_rejected(tmp_path):
+    with pytest.raises(ValueError, match="reserved by the deepagents SDK"):
+        _subagent_merges(
+            tmp_path, subagent_middleware=[_Probe("FilesystemMiddleware")]
+        )
+
+
+def test_subagent_collision_message_names_the_subagent_parameter(tmp_path):
+    """A caller with both knobs set must learn which one is at fault."""
+    with pytest.raises(ValueError, match="Injected subagent middleware") as excinfo:
+        _subagent_merges(
+            tmp_path, subagent_middleware=[_Probe("PatchToolCallsMiddleware")]
+        )
+    assert "PatchToolCallsMiddleware" in str(excinfo.value)
+
+
+def test_subagent_duplicate_against_the_factory_stack_is_rejected(tmp_path):
+    """Duplicates are caught per composed subagent stack, not just per input."""
+    with pytest.raises(ValueError, match="Duplicate middleware name") as excinfo:
+        _subagent_merges(
+            tmp_path, subagent_middleware=[_Probe("ServerHooksMiddleware")]
+        )
+    assert "subagent" in str(excinfo.value).lower()
+
+
+# --- placement in the final merged subagent stack ---
+
+
+def test_no_subagent_injection_leaves_subagent_stacks_unchanged(tmp_path):
+    """The subagent seam is inert unless used."""
+    baseline = [m["result"] for m in _subagent_merges(tmp_path)]
+    assert [
+        m["result"] for m in _subagent_merges(tmp_path, subagent_middleware=None)
+    ] == baseline
+    assert [
+        m["result"] for m in _subagent_merges(tmp_path, subagent_middleware=[])
+    ] == baseline
+    assert [
+        m["result"] for m in _subagent_merges(tmp_path, subagent_middleware={})
+    ] == baseline
+
+
+def test_subagent_first_phase_leads_the_factory_block(tmp_path):
+    for merge in _subagent_merges(
+        tmp_path, subagent_middleware={"first": [_Probe("probe")]}
+    ):
+        names = merge["result"]
+        assert "probe" in names
+        # Ahead of every factory subagent middleware...
+        assert names.index("probe") < names.index("CostTrackingMiddleware")
+        assert names.index("probe") < names.index("ServerHooksMiddleware")
+        # ...but behind the SDK base, which the seam cannot address.
+        assert names.index("FilesystemMiddleware") < names.index("probe")
+
+
+def test_subagent_last_phase_trails_the_factory_block(tmp_path):
+    for merge in _subagent_merges(
+        tmp_path, subagent_middleware={"last": [_Probe("probe")]}
+    ):
+        names = merge["result"]
+        assert names.index("CostTrackingMiddleware") < names.index("probe")
+        assert names.index("ServerHooksMiddleware") < names.index("probe")
+
+
+def test_subagent_phases_compose_in_order(tmp_path):
+    for merge in _subagent_merges(
+        tmp_path,
+        subagent_middleware={"first": [_Probe("p-first")], "last": [_Probe("p-last")]},
+    ):
+        names = merge["result"]
+        assert names.index("p-first") < names.index("p-last")
+
+
+def test_subagent_injection_reaches_general_purpose(tmp_path):
+    """The synthesized `general-purpose` spec is a second call site.
+
+    dcode always supplies its own GP spec, so the SDK's auto-created-GP
+    inheritance path never fires — the injection must reach it through the
+    factory's own construction or delegation via `task` escapes the seam.
+    """
+    merges = _subagent_merges(
+        tmp_path, subagent_middleware=[_Probe("probe")]
+    )
+    assert merges, "no subagent stacks composed"
+    assert all("probe" in merge["result"] for merge in merges), (
+        "at least one subagent stack — most likely the synthesized "
+        "general-purpose one — did not receive the injection"
+    )
+
+
+def test_injected_subagent_middleware_cannot_displace_the_approval_gate(tmp_path):
+    """The `L2` risk, asserted directly.
+
+    Injected middleware must not be able to remove or replace the subagent
+    approval gate. `HumanInTheLoopMiddleware` is the name
+    `AsyncApprovalHITLMiddleware` reports, so a same-name injection is the
+    natural attack shape; the reserved guard must refuse it before composition.
+    """
+    with pytest.raises(ValueError, match="reserved by the deepagents SDK"):
+        _subagent_merges(
+            tmp_path, subagent_middleware=[_Probe("HumanInTheLoopMiddleware")]
+        )
+    # And a legitimate injection must leave the gate in place, at its position.
+    for merge in _subagent_merges(
+        tmp_path, subagent_middleware={"first": [_Probe("probe")]}
+    ):
+        names = merge["result"]
+        assert "HumanInTheLoopMiddleware" in names, (
+            "the subagent approval gate vanished from the composed stack"
+        )
+
+
+def test_subagent_middleware_is_spliced_by_reference_not_copied(tmp_path):
+    """Pins the documented contract, since it is a footgun if unnoticed.
+
+    The caller's instance is spliced into every subagent stack **by
+    reference**, so state on it is shared across subagents. The docstring warns
+    about this; asserting it here means a future change to per-subagent
+    construction has to update both.
+
+    Asserted by object identity rather than by composing two subagents: the
+    isolated test environment has an empty HOME, so only the synthesized
+    `general-purpose` subagent exists. A count-based version of this test would
+    skip in exactly the environment that runs it — dead coverage that looks
+    like a passing suite.
+    """
+    probe = _Probe("probe")
+    merges = _subagent_merges(tmp_path, subagent_middleware=[probe])
+
+    placed = [
+        obj for merge in merges for obj in merge["objects"] if obj.name == "probe"
+    ]
+    assert placed, "the injected middleware never reached a subagent stack"
+    assert all(obj is probe for obj in placed), (
+        "the injected middleware was copied rather than spliced by reference — "
+        "the shared-state warning in create_factory_agent's docstring is now "
+        "wrong, or per-subagent construction changed"
     )
