@@ -32,7 +32,8 @@ pass, and optional middleware injection, see
 [`USING_LC_CODE.md`](USING_LC_CODE.md).
 
 Bumping the upstream pin follows [`UPGRADING.md`](UPGRADING.md) — the parity
-suite gates it.
+suite gates it. Every bump so far, and what each cost, is recorded in
+[`VERSION_BUMPS.md`](VERSION_BUMPS.md).
 
 ## Middleware injection
 
