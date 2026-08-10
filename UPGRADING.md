@@ -402,7 +402,37 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      rebinding it would shadow it for the rest of the body. Mechanical to
      re-apply; keep the rename.
 
-4. **`src/lc_factory/_testing_middleware.py`** — test support shipped inside
+4. **Rubric grader seam reach** (`rubric_grader_middleware=`, wave 3.2,
+   Group 3). Caller middleware on the rubric grader's own stack. Inert when
+   omitted. `GraderPhase` is `first`/`last`; default `last`.
+
+   - **Two `# SEAM (grader ...)` sites**, both around the `grader_middleware`
+     list: `first` in the list initializer, `last` immediately before
+     `_validate_grader_stack` and the `ReliableRubricMiddleware` construction.
+   - **The default phase is load-bearing, not stylistic.** Earlier is
+     outermost, so `last` keeps the three budget middlewares
+     (`_ContextToolCallBudgetMiddleware`, `_WebSearchBudgetMiddleware`,
+     `_CriteriaContextBudgetMiddleware`) wrapping the injection and therefore
+     still counting what it causes. `first` places middleware outside those
+     bounds — legitimate, but opt-in.
+   - **No reserved-name guard here, deliberately.** Unlike the main and
+     subagent stacks, the grader is not assembled by `create_deep_agent`:
+     `ReliableRubricMiddleware` forwards the list verbatim to langchain's
+     `create_agent`, so there is no SDK base for a name to silently replace.
+     Applying `_SDK_RESERVED_MIDDLEWARE_NAMES` here would enforce a rule whose
+     reason does not exist on this target. `tests/test_seam.py` pins the
+     asymmetry, so unifying the guards has to be a decision rather than a
+     tidy-up.
+   - **Validation runs at composition time, not lazily.** The grader *agent* is
+     built and cached on first grading (`_ensure_grader`); a lazy-only check
+     would surface a bad injection mid-evaluation instead of at boot.
+   - **Test coupling to re-check on a bump:** `tests/test_seam.py` reads the
+     private `ReliableRubricMiddleware._grader_middleware` to observe the
+     composed stack. The import boundary does not cover upstream *attributes*,
+     only the class, so a rename would not fail `test_boundary.py`. The helper
+     asserts the attribute exists with a message saying where to re-point.
+
+5. **`src/lc_factory/_testing_middleware.py`** — test support shipped inside
    the package, mirroring upstream's own `_testing_models` / `_fake_models`.
    Needed because `_build_server_env` strips `PYTHONPATH` from the server
    interpreter, leaving an installed package as the only place the integration

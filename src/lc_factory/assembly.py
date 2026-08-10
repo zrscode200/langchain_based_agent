@@ -159,6 +159,34 @@ captures `_subagent_core_names` before appending profile extras, so the whole
 factory block — injections included — lands ahead of them.
 """
 
+GraderPhase = Literal["first", "last"]
+"""Where caller-supplied middleware is spliced into the rubric grader stack.
+
+Same two-phase shape as `SubagentPhase`, for the same reason — the grader has
+no verification tail of its own — but a distinct type because the stacks are
+distinct and a caller addressing the wrong one should get a clear error rather
+than a silent no-op.
+"""
+
+_GRADER_PHASE_ORDER: tuple[GraderPhase, ...] = ("first", "last")
+"""Grader phases in stack order.
+
+The factory's grader block is never empty — three budget middlewares
+(`_ContextToolCallBudgetMiddleware`, `_WebSearchBudgetMiddleware`,
+`_CriteriaContextBudgetMiddleware`) are unconditional — so both boundaries are
+well defined regardless of configuration.
+"""
+
+_DEFAULT_GRADER_PHASE: GraderPhase = "last"
+"""Phase used when ``rubric_grader_middleware`` is given as a bare sequence.
+
+``last`` puts the caller's middleware *inside* the budget middlewares, which is
+the direction that keeps grader cost bounded: earlier is outermost, so budgets
+at the front still wrap — and therefore still count — whatever the injection
+does. ``first`` places it outside them, which is legitimate but has to be asked
+for.
+"""
+
 _DEFAULT_SUBAGENT_PHASE: SubagentPhase = "last"
 """Phase used when ``subagent_middleware`` is given as a bare sequence.
 
@@ -408,6 +436,34 @@ def _normalize_subagent_middleware(
     )
 
 
+def _normalize_grader_middleware(
+    middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[GraderPhase, Sequence[AgentMiddleware[Any, Any]]]
+    | None,
+) -> dict[GraderPhase, list[AgentMiddleware[Any, Any]]]:
+    """Resolve the ``rubric_grader_middleware`` argument into one list per phase.
+
+    Args:
+        middleware: Caller-supplied middleware for the rubric grader stack — a
+            bare sequence (assigned to `_DEFAULT_GRADER_PHASE`) or a mapping
+            keyed by `GraderPhase`. ``None`` yields empty lists, keeping grader
+            composition byte-identical to v0.
+
+    Returns:
+        Mapping of every phase in `_GRADER_PHASE_ORDER` to its list.
+
+    Raises:
+        ValueError: When a mapping contains an unknown phase key, or when an
+            entry is not usable as middleware.
+    """
+    return _normalize_for_phases(
+        middleware,
+        phase_order=_GRADER_PHASE_ORDER,
+        default_phase=_DEFAULT_GRADER_PHASE,
+        argument="rubric_grader_middleware",
+    )
+
+
 def _validate_injected_middleware(
     agent_middleware: Sequence[AgentMiddleware[Any, Any]],
     injected: Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]],
@@ -516,6 +572,56 @@ def _validate_subagent_reserved_names(
         raise ValueError(msg)
 
 
+def _validate_grader_stack(
+    grader_stack: Sequence[AgentMiddleware[Any, Any]],
+    injected_names: AbstractSet[str],
+) -> None:
+    """Reject duplicate names in the composed rubric-grader stack.
+
+    **Deliberately narrower than the subagent guard, because the hazard is
+    genuinely different.** The grader is not built by `create_deep_agent`:
+    `ReliableRubricMiddleware` passes this list straight to langchain's
+    `create_agent` (`reliable_rubric.py`, `_ensure_grader`). There is no SDK
+    base stack to name-merge against, so the silent in-place replacement that
+    drives `_SDK_RESERVED_MIDDLEWARE_NAMES` cannot happen here. Reusing that
+    constant would refuse names for a reason that does not apply to this
+    target, which is worse than useless — it teaches the wrong model of why the
+    guard exists.
+
+    What *can* happen is langchain's own duplicate-name assertion, which names
+    nothing. So this checks uniqueness and attributes the failure.
+
+    Runs at factory composition time even though the grader agent is
+    constructed lazily and cached on first grading. A lazy-only check would
+    surface a bad injection in the middle of a rubric evaluation rather than at
+    boot, which is the failure mode this whole seam exists to prevent.
+
+    Args:
+        grader_stack: The composed grader middleware list, injections included.
+        injected_names: Names supplied via `rubric_grader_middleware`, used only
+            to attribute the failure correctly.
+
+    Raises:
+        ValueError: When any name appears twice in the composed stack.
+    """
+    counts = Counter(item.name for item in grader_stack)
+    if duplicates := sorted(name for name, count in counts.items() if count > 1):
+        remedy = (
+            "Override `.name` on the injected grader middleware."
+            if injected_names & set(duplicates)
+            else "The duplicated name(s) are not among the injected ones, so "
+            "this is a collision inside the factory's own grader stack — check "
+            "the port against upstream."
+        )
+        msg = (
+            f"Duplicate middleware name(s) in the composed rubric-grader "
+            f"stack: {duplicates}. Every middleware needs a unique `.name`; "
+            f"langchain's own check would otherwise fail at first grading with "
+            f"a message naming nothing. {remedy}"
+        )
+        raise ValueError(msg)
+
+
 def _validate_subagent_stack(
     subagent_stack: Sequence[AgentMiddleware[Any, Any]],
     injected_names: AbstractSet[str],
@@ -590,6 +696,9 @@ def create_factory_agent(
     | None = None,
     subagent_middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[SubagentPhase, Sequence[AgentMiddleware[Any, Any]]]
+    | None = None,
+    rubric_grader_middleware: Sequence[AgentMiddleware[Any, Any]]
+    | Mapping[GraderPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
 ) -> tuple[Pregel[Any, Any, Any, Any], CompositeBackend]:
     """Create a CLI-configured agent with flexible options.
@@ -834,6 +943,31 @@ def create_factory_agent(
             replaced rather than land at the requested phase. The guarded set
             is the main stack's, which is a superset of the subagent base — a
             few names are refused that only the main stack could own.
+        rubric_grader_middleware: Caller-supplied middleware spliced into the
+            rubric grader's own stack.
+
+            Same two input forms, same two phases as `subagent_middleware`:
+
+            - `'first'`: **outside** the factory's budget middlewares.
+            - `'last'` (default): inside them.
+
+            The default matters here. Earlier is outermost, so budget
+            middlewares at the front still wrap — and therefore still count —
+            whatever the injection does. `'first'` places middleware outside
+            `_ContextToolCallBudgetMiddleware`, `_WebSearchBudgetMiddleware`,
+            and `_CriteriaContextBudgetMiddleware`, which bound how much the
+            grader can spend inspecting the repository and the web. That is a
+            legitimate position, but it has to be asked for.
+
+            `None` (default) composes the grader exactly as v0 does.
+
+            Unlike `middleware` and `subagent_middleware`, **no SDK reserved
+            names apply**: the grader is built by langchain's `create_agent`
+            with this list passed through verbatim, so there is no SDK base
+            stack for a name to silently replace. Only uniqueness within the
+            composed grader stack is required, and it is checked at factory
+            construction — not lazily when the grader is first built — so a bad
+            injection fails at boot rather than mid-evaluation.
 
 
     Returns:
@@ -867,6 +1001,13 @@ def create_factory_agent(
         item.name
         for items in injected_subagent_middleware.values()
         for item in items
+    }
+    # SEAM (resolve, grader): no reserved-name pass — the grader stack has no
+    # SDK base to be replaced against (see `_validate_grader_stack`). Shape
+    # errors still fail here, ahead of any setup work.
+    injected_grader_middleware = _normalize_grader_middleware(rubric_grader_middleware)
+    _injected_grader_names = {
+        item.name for items in injected_grader_middleware.values() for item in items
     }
     if auto_mode_enabled and (not interactive or sandbox is not None):
         logger.warning(
@@ -1523,6 +1664,9 @@ def create_factory_agent(
     )
 
     grader_middleware: list[AgentMiddleware[Any, Any]] = [
+        # SEAM (grader phase "first"): outside the budget middlewares. Opt-in
+        # only — the default phase is "last", which keeps budgets wrapping.
+        *injected_grader_middleware["first"],
         _ContextToolCallBudgetMiddleware(
             # `read_file` is bounded separately by the grader's in-tool
             # working-directory counter, which excludes offloaded-result reads.
@@ -1548,6 +1692,12 @@ def create_factory_agent(
                 )
             )
         )
+    # SEAM (grader phase "last"): after every factory grader middleware.
+    grader_middleware.extend(injected_grader_middleware["last"])
+    # Validated here, at composition time. The grader AGENT is built lazily and
+    # cached on first grading, so a lazy-only check would surface a bad
+    # injection mid-evaluation instead of at boot.
+    _validate_grader_stack(grader_middleware, _injected_grader_names)
 
     # Rubric-driven self-evaluation. The middleware is a no-op until a
     # `rubric` is supplied on invocation state, so installing it is safe.
