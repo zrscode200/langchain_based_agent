@@ -1,0 +1,172 @@
+# Version bump record
+
+Every upstream pin bump, what it cost, and how that cost was established.
+
+This exists to answer one question with evidence instead of intuition: **is
+recomposition over a pinned dependency actually cheaper than a fork?**
+`decisions.md` D3 made that bet explicitly — a fork pays at merge time,
+recomposition pays at upgrade time, and upgrade-time cost was judged
+preferable. Every row below is a data point on that bet, so each entry records
+the *measured* cost rather than an impression of it.
+
+The procedure itself lives in [`UPGRADING.md`](UPGRADING.md). This file is the
+history; that file is the method. Keep them separate — the procedure should
+stay a constant-length document no matter how many bumps accumulate.
+
+## Summary
+
+| Date | `deepagents-code` | `deepagents` | Port changes | Effort | Commit |
+|---|---|---|---|---|---|
+| 2026-08-10 | 0.1.52 → **0.1.54** | 0.7.1 → **0.7.5** | **none** (proven) | <30 min | `cb43e40` |
+| 2026-08-06 | 0.1.48 → **0.1.52** | 0.7.0b2 → **0.7.1** | **7 hunks re-applied** | ~1 hr | `304f8a8` |
+| 2026-07-27 | 0.1.47 → **0.1.48** | 0.7.0b2 (held) | **none** (inferred) | ~15 min | `45c40bd` |
+
+Two free bumps and one real re-application across five upstream releases. The
+re-application was the meaningful test, and it came in at about an hour for a
+three-arc delta — which is the number D3 should be judged on.
+
+---
+
+## 2026-08-10 — 0.1.52 → 0.1.54 (SDK 0.7.1 → 0.7.5) — `cb43e40`
+
+**Verdict: free. Zero port changes.**
+
+Run deliberately before Group 3 Entry, following the recorded practice of
+bumping while the port is line-faithful so any breakage is unambiguously
+upstream's change rather than our divergence.
+
+**Delta-read method — new, and the durable part of this entry.** Instead of
+downloading the sdist and reading hunk ranges, the read ran off a local
+monorepo clone and compared **blob hashes** between the `deepagents-code==0.1.52`
+and `==0.1.54` tags, then cross-checked each file byte-identical to the
+installed wheel. That upgrades "the changed lines look like they missed our
+region" into "the file is provably unchanged." Cheaper than the sdist
+procedure and strictly stronger. Prefer it whenever a monorepo clone is
+available; fall back to the sdist diff otherwise.
+
+**Ported / coupled files — all byte-identical between tags:** `agent.py`,
+`server_graph.py`, `client/launch/server_manager.py`,
+`client/launch/server.py`, SDK `graph.py`. SDK `profiles/` untouched, so the
+harness-profile middleware name union is unchanged and
+`_SDK_RESERVED_MIDDLEWARE_NAMES` still covers it.
+
+**Changed upstream, all consumed as library through the boundary:**
+
+| Module | Δ | What |
+|---|---|---|
+| `config.py` | +180/−9 | MCP shutdown-race log filtering, terminal trace metadata |
+| `cost_tracking.py` | +690/−3 | pricing coverage, local fallback overrides |
+| `hooks/server_middleware.py` | +282/−48 | `PostToolUseFailure` routing, no post-tool hook replay |
+| `config_manifest.py` | +43/−1 | — |
+| `offload_middleware.py` | +4/−2 | archive routing preserved |
+| SDK `middleware/filesystem.py` | +285 | delete-permission semantics |
+| SDK `backends/protocol.py` | +23 | new `ExecuteArtifact` on `ToolMessage.artifact` |
+
+Transitive: `langgraph-checkpoint-sqlite` 3.1.0 → 3.1.1. No symbol named by
+`upstream.py` moved.
+
+**Guard re-checks:** D4 #1 verified in source — `config.py:392` still reads
+`if value is None or key in os.environ: continue`, so the reservation guard's
+mechanism holds. #2 and #3 unchanged: no upstream import moved ahead of the
+reservation, and no new entry point imports `deepagents_code` first.
+
+**Verification:** boundary 5, smoke 3, parity **25/25 with the suite
+unmodified**, seam 53, full default **124**, integration **4**. Drift injection
+(shell allow-list widening) still reddens parity — 2 failed / 23 passed.
+
+**Review gate:** none. Judged below threshold: zero source composition delta,
+and the verification battery is stronger evidence than reviewing two docstring
+diffs. Recorded as a deliberate call, not skipped debt.
+
+**Watch, not yet live:** SDK `filesystem.py`'s delete-permission work is gated
+on `self._permissions`, and dcode still passes no filesystem `permissions`
+(`agent.py` unchanged), so `assembly.py`'s `fs_tools` NOTE about threading
+`_permissions` stays accurate — but it is one upstream decision away from
+mattering. Re-read it next bump.
+
+---
+
+## 2026-08-06 — 0.1.48 → 0.1.52 (SDK 0.7.0b2 → 0.7.1) — `304f8a8`
+
+**Verdict: re-application owed. 7 hunks in the ported region. The real test of D3.**
+
+Three upstream arcs landed in the ported region at once:
+
+- **Hooks v2 GA** — `ServerHooksMiddleware` on the main and nested subagent
+  stacks, plus the **HITL restructure**: `interrupt_on` to the SDK is now
+  always `{}` and the approval middleware is appended in-stack, so
+  `PreToolUse` resolves before approval routing.
+- **Session cost tracking** — `CostTrackingMiddleware` on both stacks.
+- **Auto classifier configuration** — `auto_classifier_model` threaded
+  end-to-end: new `ServerConfig` field → `_make_graph` → assembly.
+
+Plus `_make_graph`'s settings bootstrap moving off the event loop via
+`asyncio.to_thread`. The import boundary grew 4 symbols.
+
+**Stack-shape fallout:** compaction was renamed to `SummarizationMiddleware`
+and now hoists into the SDK core's summarization slot by name-based merge; and
+HITL left the SDK tail, so the seam's `last` phase no longer precedes the
+approval gate. Two seam tests re-pinned and the seam docs updated.
+**`tests/test_parity.py` passed unmodified** — the delta stayed opt-in.
+
+**Verification:** boundary 5, parity **24/24 unmodified**, seam 52, full 119,
+integration 4; drift injection still red. `_apply_custom_middleware`,
+`_build_server_env` denylist, `apply_dotenv` skip-if-present, scaffold rebind
+seam, and private-`mkdtemp` `work_dir` all re-verified.
+
+**Review gate:** reviewer subagent, `pass-with-notes`. Finding 1 fixed
+pre-commit; finding 2 became `G2-TRANSPORT-EVENTLOOP-WATCH`; finding 3 noted.
+
+**What it said about D3:** about an hour, end to end, for a five-release
+three-arc delta that touched composition directly — with the parity suite
+proving the result rather than hope. That is the number the recomposition bet
+should be judged on, and it is favorable.
+
+---
+
+## 2026-07-27 — 0.1.47 → 0.1.48 (SDK 0.7.0b2 held) — `45c40bd`
+
+**Verdict: free. Zero port changes.**
+
+Run deliberately at the Group 1 checkpoint, while the port was still fully
+line-faithful — the cheapest possible conditions, chosen so the machinery
+built in Group 1 got exercised for real before any delta existed.
+
+`agent.py` did change, but only in the agent-directory discovery helpers
+(~lines 1105-1271), outside the ported `create_cli_agent` region (~2155-2989).
+`auto_mode.py` changed classifier failure-message wording. `server_graph.py`
+and `server_manager.py` were byte-identical. `deepagents` stayed at 0.7.0b2.
+
+**Verification:** boundary tripwire green (all 90 runtime + 13 type-only
+symbols resolve), parity green across the matrix, 38 unit + 1 integration
+green, `lc-code` reports 0.1.48. Drift injection re-run to confirm the suite
+still fails when it should.
+
+**Free capability:** upstream migrated legacy hooks to v2 events (#4971) —
+which had been on the future-group watch list as "would arrive free if
+upstream wires it." It did, retiring that item and removing hook-shaped
+capabilities from the delta backlog.
+
+**Honest caveat recorded at the time:** this bump was easy in a way a *fork*
+would also have found easy — upstream's churn simply did not overlap our
+region. It proved the machinery answers the question fast, not that
+recomposition is cheaper. That had to wait for 0.1.52.
+
+---
+
+## Adding an entry
+
+Append a new dated section at the top, add a row to the summary table, and
+keep these fields so bumps stay comparable:
+
+- **Verdict** — free, or re-application owed (with hunk count).
+- **Delta-read method** — and whether "free" was *proven* (blob identity) or
+  *inferred* (hunk ranges missed the region). These are not equally strong.
+- **What changed** in the ported region, and what was inherited free.
+- **Guard re-checks** — the three D4 checks, the SDK merge semantics, the
+  `_build_server_env` denylist, the scaffold rebind seam.
+- **Verification** — suite counts, and explicitly whether `test_parity.py`
+  needed editing. If it did, a delta stopped being opt-in; that is a finding,
+  not a chore.
+- **Effort**, wall-clock. This is the D3 measurement; do not omit it.
+- **Watches** carried forward.
