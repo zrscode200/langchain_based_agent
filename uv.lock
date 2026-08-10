@@ -444,7 +444,7 @@ wheels = [
 
 [[package]]
 name = "deepagents"
-version = "0.7.1"
+version = "0.7.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain" },
@@ -455,9 +455,9 @@ dependencies = [
     { name = "packaging" },
     { name = "wcmatch" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/88/e3/00c98c6b677ba89270b09dcb950848c794d507168b3dc53fa4d5cfb6a2e3/deepagents-0.7.1.tar.gz", hash = "sha256:a556a8af8dac84ee5708d7e97752eda40d613d19e25cc79b7d0e8c728da03c40", size = 270546, upload-time = "2026-07-30T20:34:26.045Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/83/2f/7b010aaf7f39e9da9ce8dc574902126220cac6c41205bf122e3a27b7fcec/deepagents-0.7.5.tar.gz", hash = "sha256:ed44e956ed8e4ccd57203b9925c530707cdb815ffb56fe8ceb9b5b63d45a20c1", size = 273937, upload-time = "2026-08-06T14:05:36.317Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/72/1b/3306ab2f544e08ea33852f92d0fb3ab8fbf437c84e5f58189f0e4f895087/deepagents-0.7.1-py3-none-any.whl", hash = "sha256:cbcfb856e95ecc8a969b9d036b1d6b760524ca9a5b83f00e53ae568ddebfd343", size = 297359, upload-time = "2026-07-30T20:34:24.846Z" },
+    { url = "https://files.pythonhosted.org/packages/df/c9/d4778dd09aaeb03b9653bb2be8591f3b7179ec5757a467f46e97627bccca/deepagents-0.7.5-py3-none-any.whl", hash = "sha256:a1be73d150929c5e826d67a05af6277748f25e4b53ae530b3fb1454df9e3ca95", size = 300778, upload-time = "2026-08-06T14:05:35.121Z" },
 ]
 
 [[package]]
@@ -476,7 +476,7 @@ wheels = [
 
 [[package]]
 name = "deepagents-code"
-version = "0.1.52"
+version = "0.1.54"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
@@ -515,9 +515,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "uuid-utils" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e3/f0/05bb3d3cc2a3fdc3555838837b7698bbaaf9dd3f9df6dc6d43830f1124a4/deepagents_code-0.1.52.tar.gz", hash = "sha256:dcb47c7873fa1da2f34d8b49216f8bf9b87ca32fd0a1bec84a50f293cf0efbf4", size = 3544060, upload-time = "2026-08-04T19:13:19.453Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/13/73b26241ff14ac7460a184feb714abaf18110aa80615d5f9f5e97446c0e1/deepagents_code-0.1.54.tar.gz", hash = "sha256:74df86f91a11d5dbace943d1c747bf67a2354670416c343a6e909133feecaf27", size = 3714578, upload-time = "2026-08-07T15:45:01.176Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/26/a7fc4c7f1e2fdebb1570bbbda74cd551998ff6ea43250ea1b6b089d755e6/deepagents_code-0.1.52-py3-none-any.whl", hash = "sha256:a3fe4cbe9b65df53dcf79598867a7c00a39a5d043e98b9b532634845a0df0ee9", size = 1638710, upload-time = "2026-08-04T19:13:17.106Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/69/a6c6319e4b9e15f14efdde4752d00db81d1921ec7297f8d75596fc2802ef/deepagents_code-0.1.54-py3-none-any.whl", hash = "sha256:fbfd0fc31caf5a8b0f1ff4ddea4da0de7837b0ffd3e6a222118c6480c99671ae", size = 1702554, upload-time = "2026-08-07T15:44:59.325Z" },
 ]
 
 [[package]]
@@ -1252,16 +1252,16 @@ wheels = [
 
 [[package]]
 name = "langgraph-checkpoint-sqlite"
-version = "3.1.0"
+version = "3.1.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "langgraph-checkpoint" },
     { name = "sqlite-vec" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e3/ea/83917c2369acf8a10a894d4247655fd063c07924ba5bc4e83c85d2eaeded/langgraph_checkpoint_sqlite-3.1.0.tar.gz", hash = "sha256:f926916ebc1b985d802cc9c820026036e84db9d910d62c97b57e4ba64f67d5ae", size = 147902, upload-time = "2026-05-12T03:34:52.503Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/54/b1/26fef7572c4fce0322740ef3fcee471510028355d4d4c1d800f0fd432d73/langgraph_checkpoint_sqlite-3.1.1.tar.gz", hash = "sha256:6fcb20db4c37ef7aad52f29b539eb98c38e2dad6fab7c2446a2a9db24f37a70e", size = 146805, upload-time = "2026-07-30T19:19:37.516Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/07/b342811a16327900af2747c752ea19676172fcddf9b592cc384031076623/langgraph_checkpoint_sqlite-3.1.0-py3-none-any.whl", hash = "sha256:cc9b40df0076feae8a9ad42ae713621b148b00ac23adc09dc1dc66090a46e5ad", size = 38587, upload-time = "2026-05-12T03:34:51.231Z" },
+    { url = "https://files.pythonhosted.org/packages/f5/b9/e458601a1718337839bcfeec9d1b27b8b16ce135be2bd50ed0395d33a878/langgraph_checkpoint_sqlite-3.1.1-py3-none-any.whl", hash = "sha256:8505c54c94a658080525d7e6780fdd4e0c078ff2566b30d399c02cc9f9af1c63", size = 40785, upload-time = "2026-07-30T19:19:36.424Z" },
 ]
 
 [[package]]
@@ -1382,8 +1382,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "deepagents", specifier = "==0.7.1" },
-    { name = "deepagents-code", specifier = "==0.1.52" },
+    { name = "deepagents", specifier = "==0.7.5" },
+    { name = "deepagents-code", specifier = "==0.1.54" },
 ]
 
 [package.metadata.requires-dev]
