@@ -6,7 +6,7 @@ that injected middleware lands where the seam promises, and that the two ways
 the SDK's name-based merge can mis-handle an injection are rejected loudly
 instead of silently mis-composing.
 
-Observation points — three, because "the final stack" means something different
+Observation points — four, because "the final stack" means something different
 per target, and picking the wrong one makes a placement assertion vacuous:
 
 - `deepagents.graph.create_agent` (main agent). The parity suite intercepts
@@ -16,6 +16,10 @@ per target, and picking the wrong one makes a placement assertion vacuous:
 - `deepagents.graph._apply_custom_middleware` (subagents, wave 3.1). Subagent
   stacks are merged there and stored on the processed spec, so neither
   `create_deep_agent` nor `create_agent` interception ever sees the result.
+- `ReliableRubricMiddleware._grader_middleware` on the composed instance
+  (rubric grader, wave 3.2). The grader list is forwarded verbatim to
+  `create_agent` only when the grader is first built, which never happens in
+  these tests, so the instance attribute is what the grader will get.
 - `langchain.agents.create_agent` on a minimal graph, for the hook-ordering
   law itself — isolated from the factory stack's own side effects.
 """
@@ -829,3 +833,144 @@ def test_subagent_middleware_is_spliced_by_reference_not_copied(tmp_path):
         "the shared-state warning in create_factory_agent's docstring is now "
         "wrong, or per-subagent construction changed"
     )
+
+
+# --- wave 3.2: rubric grader targeting -------------------------------------
+#
+# Fourth observation point, and the simplest one: the grader stack is a plain
+# list handed to `ReliableRubricMiddleware`, which forwards it verbatim to
+# langchain's `create_agent` when the grader is first built. Reading it off the
+# composed middleware instance therefore sees exactly what the grader will get.
+
+
+def _grader_stack(tmp_path, **kwargs) -> list[str]:
+    """Compose a factory agent; return the rubric grader's middleware names."""
+    import deepagents.graph as sdk_graph
+    from deepagents_code._fake_models import _ToolBindingFakeModel
+
+    from lc_factory.assembly import create_factory_agent
+
+    captured: dict[str, list[AgentMiddleware]] = {}
+    real_create_agent = sdk_graph.create_agent
+
+    def spy(*args, **kw):
+        captured["middleware"] = list(kw.get("middleware") or [])
+        return real_create_agent(*args, **kw)
+
+    sdk_graph.create_agent = spy
+    try:
+        create_factory_agent(
+            model=_ToolBindingFakeModel(messages=iter([])),
+            assistant_id="lc-factory-grader-seam",
+            cwd=tmp_path,
+            **kwargs,
+        )
+    finally:
+        sdk_graph.create_agent = real_create_agent
+
+    rubric = [
+        m for m in captured["middleware"] if m.name == "ReliableRubricMiddleware"
+    ]
+    assert rubric, "no ReliableRubricMiddleware composed; this case is vacuous"
+    # `_grader_middleware` is a private upstream attribute, and the import
+    # boundary does not cover it — `upstream.py` re-exports the class, not its
+    # internals, so a rename would reach us as a bare AttributeError from deep
+    # inside a helper rather than as a boundary failure. Assert it explicitly
+    # so a bump gets a sentence instead of a stack trace.
+    assert hasattr(rubric[0], "_grader_middleware"), (
+        "ReliableRubricMiddleware no longer exposes `_grader_middleware`; the "
+        "grader seam's observation point moved. Find where the grader stack is "
+        "stored now and re-point `_grader_stack` — do not delete these tests."
+    )
+    return [m.name for m in rubric[0]._grader_middleware]
+
+
+def test_grader_none_normalizes_to_empty_phases():
+    from lc_factory.assembly import _GRADER_PHASE_ORDER, _normalize_grader_middleware
+
+    resolved = _normalize_grader_middleware(None)
+    assert set(resolved) == set(_GRADER_PHASE_ORDER)
+    assert all(not items for items in resolved.values())
+
+
+def test_grader_bare_sequence_defaults_to_last():
+    """Default is inside the budget middlewares, so budgets still wrap."""
+    from lc_factory.assembly import _normalize_grader_middleware
+
+    probe = _Probe("probe")
+    resolved = _normalize_grader_middleware([probe])
+    assert resolved["last"] == [probe]
+    assert not resolved["first"]
+
+
+def test_grader_vocabulary_rejects_main_only_phase():
+    from lc_factory.assembly import _normalize_grader_middleware
+
+    with pytest.raises(ValueError, match="Unknown middleware phase") as excinfo:
+        _normalize_grader_middleware({"before_verification": [_Probe("p")]})
+    assert "rubric_grader_middleware" in str(excinfo.value)
+
+
+def test_no_grader_injection_leaves_the_grader_stack_unchanged(tmp_path):
+    baseline = _grader_stack(tmp_path)
+    assert _grader_stack(tmp_path, rubric_grader_middleware=None) == baseline
+    assert _grader_stack(tmp_path, rubric_grader_middleware=[]) == baseline
+    assert _grader_stack(tmp_path, rubric_grader_middleware={}) == baseline
+    # Guard the guard: the budget middlewares must actually be present, or the
+    # position assertions below are meaningless.
+    assert "_ContextToolCallBudgetMiddleware" in baseline
+
+
+def test_grader_first_phase_sits_outside_the_budget_middlewares(tmp_path):
+    names = _grader_stack(
+        tmp_path, rubric_grader_middleware={"first": [_Probe("probe")]}
+    )
+    assert names.index("probe") < names.index("_ContextToolCallBudgetMiddleware")
+
+
+def test_grader_last_phase_sits_inside_the_budget_middlewares(tmp_path):
+    """The default position: budgets stay outermost, so they still wrap.
+
+    Earlier is outermost, so a budget middleware ahead of the injection
+    continues to observe and count what the injection causes. This is why
+    `last` is the default rather than `first`.
+    """
+    names = _grader_stack(tmp_path, rubric_grader_middleware=[_Probe("probe")])
+    assert names.index("_ContextToolCallBudgetMiddleware") < names.index("probe")
+    assert names.index("_WebSearchBudgetMiddleware") < names.index("probe")
+    assert names.index("_CriteriaContextBudgetMiddleware") < names.index("probe")
+
+
+def test_grader_duplicate_name_is_rejected_at_composition_not_lazily(tmp_path):
+    """The grader AGENT is built lazily; the guard must not be.
+
+    `ReliableRubricMiddleware._ensure_grader` constructs and caches the grader
+    on first grading. A guard that only ran there would surface a bad injection
+    in the middle of a rubric evaluation. Composing here never grades, so the
+    fact that this raises at all is the assertion.
+    """
+    with pytest.raises(ValueError, match="composed rubric-grader stack") as excinfo:
+        _grader_stack(
+            tmp_path,
+            rubric_grader_middleware=[_Probe("_WebSearchBudgetMiddleware")],
+        )
+    assert "_WebSearchBudgetMiddleware" in str(excinfo.value)
+
+
+def test_grader_does_not_reject_sdk_reserved_names(tmp_path):
+    """A deliberate asymmetry with the main and subagent guards.
+
+    `_SDK_RESERVED_MIDDLEWARE_NAMES` exists because `create_deep_agent` merges
+    by name against a base it assembles, so a collision silently replaces SDK
+    middleware. The grader has no such base — `ReliableRubricMiddleware` hands
+    its list straight to langchain's `create_agent` — so refusing those names
+    here would enforce a rule for a reason that does not apply, and teach a
+    future reader the wrong model of why the guard exists.
+
+    Pinned so that "make the guards consistent" is a conscious decision rather
+    than a tidy-up.
+    """
+    names = _grader_stack(
+        tmp_path, rubric_grader_middleware=[_Probe("FilesystemMiddleware")]
+    )
+    assert "FilesystemMiddleware" in names
