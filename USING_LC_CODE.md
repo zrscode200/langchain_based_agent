@@ -479,20 +479,40 @@ that action. Only point it at code you trust.
 
 Injected middleware through this variable:
 
-- applies to the **main agent only**;
 - must have unique, non-reserved middleware names; and
 - fails startup loudly when the reference or returned value is invalid.
 
-Subagents and the rubric grader can also receive middleware, but **only through
-the Python API** — `create_factory_agent(subagent_middleware=...,
-rubric_grader_middleware=...)`. There is no environment variable for them.
+### Reaching subagents and the rubric grader
 
-That is a deliberate limit, not an oversight. Resolving a reference imports and
-executes the named module inside the server process, so every such variable
-needs the same `.env` reservation guard `LC_FACTORY_MIDDLEWARE` has — otherwise
-a committed `.env` in a cloned repository could name code to run at startup.
-Adding variables is therefore a security change requiring its own review, not a
-convenience toggle.
+The same variable covers all three targets. Return a **target-keyed** mapping
+instead of a plain sequence:
+
+```python
+def build_middleware():
+    return {
+        "main":      [AuditMain()],
+        "subagents": [AuditDelegated()],   # every subagent, incl. general-purpose
+        "grader":    [AuditGrader()],      # the rubric grader
+    }
+```
+
+Each target's value may be a bare sequence or a phase-keyed mapping. Phases
+differ per target — the main agent has `first` / `before_verification` /
+`last`, while subagents and the grader have only `first` / `last`, since
+neither has a verification tail.
+
+Omitting a target leaves it composed exactly as before. The older forms still
+work: a bare sequence or a phase-keyed mapping both address the main agent.
+
+A mapping that mixes target keys with phase keys is **rejected**, not guessed —
+composing an agent you did not ask for is the failure this variable's error
+handling exists to prevent.
+
+One variable rather than one per target is deliberate. Resolving a reference
+imports and executes the named module inside the server process, so each
+additional variable would need its own `.env` reservation guard — otherwise a
+committed `.env` in a cloned repository could name code to run at startup.
+Reusing this one adds no new attack surface.
 
 The goal-criteria agent cannot receive middleware by any route: upstream's
 constructor takes no middleware argument.

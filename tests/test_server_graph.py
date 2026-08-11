@@ -83,12 +83,17 @@ def test_valid_reference_is_imported_and_called(monkeypatch):
         "lc_factory._testing_middleware:build_marker_middleware",
     )
     resolved = _factory_middleware()
-    # The transport returns the NORMALIZED phase mapping, not the factory's
-    # raw return: a bare sequence lands in the default phase. See
-    # test_one_shot_factory_results_are_materialized_not_dropped for why.
-    assert [item.name for item in resolved["before_verification"]] == [
+    # The transport returns NORMALIZED middleware per target, not the factory's
+    # raw return: a bare sequence still means the main agent, default phase.
+    # See test_one_shot_factory_results_are_materialized_not_dropped for why
+    # normalization happens here rather than downstream.
+    assert [item.name for item in resolved["main"]["before_verification"]] == [
         "LcFactoryMarkerMiddleware"
     ]
+    # And the other targets stay empty, so an unaddressed target composes
+    # exactly as it did before this variable existed.
+    assert all(not items for items in resolved["subagents"].values())
+    assert all(not items for items in resolved["grader"].values())
 
 
 def test_reference_may_return_a_phase_mapping(monkeypatch):
@@ -98,9 +103,10 @@ def test_reference_may_return_a_phase_mapping(monkeypatch):
         "lc_factory._testing_middleware:build_phase_keyed_middleware",
     )
     resolved = _factory_middleware()
-    assert [item.name for item in resolved["first"]] == ["LcFactoryMarkerMiddleware"]
-    assert resolved["before_verification"] == []
-    assert resolved["last"] == []
+    main = resolved["main"]
+    assert [item.name for item in main["first"]] == ["LcFactoryMarkerMiddleware"]
+    assert main["before_verification"] == []
+    assert main["last"] == []
 
 
 def test_one_shot_factory_results_are_materialized_not_dropped():
@@ -114,12 +120,14 @@ def test_one_shot_factory_results_are_materialized_not_dropped():
     The resolve must return the materialized normalization.
     """
     resolved = _resolve_middleware_ref(f"{__name__}:_yields_middleware")
-    assert [item.name for item in resolved["before_verification"]] == [
+    assert [item.name for item in resolved["main"]["before_verification"]] == [
         "LcFactoryMarkerMiddleware"
     ]
 
     keyed = _resolve_middleware_ref(f"{__name__}:_yields_middleware_in_mapping")
-    assert [item.name for item in keyed["first"]] == ["LcFactoryMarkerMiddleware"]
+    assert [item.name for item in keyed["main"]["first"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
 
 
 @pytest.mark.parametrize(
@@ -375,7 +383,7 @@ def test_a_shell_export_still_works(tmp_path, monkeypatch):
     )
     reserve_middleware_ref_env()  # setdefault must not clobber a real value
     resolved = _factory_middleware()
-    assert [item.name for item in resolved["before_verification"]] == [
+    assert [item.name for item in resolved["main"]["before_verification"]] == [
         "LcFactoryMarkerMiddleware"
     ]
 
@@ -447,3 +455,106 @@ def test_no_module_writes_the_reference_into_the_environment():
         f"environment write, narrow this test to allowlist that key — do not "
         f"delete it."
     )
+
+
+# --- SEAM-REACH-TRANSPORT: target-keyed returns ----------------------------
+#
+# Group 3 gave the factory `subagent_middleware=` and
+# `rubric_grader_middleware=`, but `server_graph` passed neither, so `lc-code`
+# — the only caller of `create_factory_agent` outside tests — could not reach
+# them. decisions.md D4 rejects exactly that library-only shape. These cover
+# the fix: one variable, target-keyed, no new `.env` surface.
+
+
+def _targets_all_three():
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return {
+        "main": build_marker_middleware(),
+        "subagents": {"first": build_marker_middleware()},
+        "grader": build_marker_middleware(),
+    }
+
+
+def _targets_subagents_only():
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return {"subagents": build_marker_middleware()}
+
+
+def _targets_mixed_with_phase_keys():
+    """The ambiguous shape: target keys and phase keys at the same level."""
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return {"main": build_marker_middleware(), "first": build_marker_middleware()}
+
+
+def _targets_unknown_key():
+    from lc_factory._testing_middleware import build_marker_middleware
+
+    return {"criteria": build_marker_middleware()}
+
+
+def test_target_keyed_return_reaches_every_target():
+    resolved = _resolve_middleware_ref(f"{__name__}:_targets_all_three")
+    assert [m.name for m in resolved["main"]["before_verification"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
+    assert [m.name for m in resolved["subagents"]["first"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
+    # Each target keeps its OWN default phase: `last` for subagents and grader,
+    # `before_verification` for the main agent. A shared default would quietly
+    # move injections on two of the three.
+    assert [m.name for m in resolved["grader"]["last"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
+
+
+def test_addressing_one_target_leaves_the_others_inert():
+    resolved = _resolve_middleware_ref(f"{__name__}:_targets_subagents_only")
+    assert [m.name for m in resolved["subagents"]["last"]] == [
+        "LcFactoryMarkerMiddleware"
+    ]
+    assert all(not items for items in resolved["main"].values())
+    assert all(not items for items in resolved["grader"].values())
+
+
+def test_mixing_target_and_phase_keys_is_rejected_not_guessed():
+    """The whole disambiguation rests on the two key sets being disjoint.
+
+    A mapping using both is genuinely ambiguous, and guessing would compose an
+    agent the caller did not ask for — silently. That is the failure class this
+    transport exists to prevent, so it must be an error.
+    """
+    with pytest.raises(ValueError, match="mixing target keys") as excinfo:
+        _resolve_middleware_ref(f"{__name__}:_targets_mixed_with_phase_keys")
+    assert MIDDLEWARE_REF_ENV in str(excinfo.value)
+    assert "first" in str(excinfo.value)
+
+
+def test_unknown_key_falls_through_to_main_and_names_valid_phases():
+    """A non-target key is treated as a (bad) phase key for the main agent.
+
+    `criteria` is the plausible wrong guess — the goal-criteria agent is not a
+    target and cannot be, since upstream gives it no middleware parameter. The
+    error must say so by listing what IS valid rather than silently dropping it.
+    """
+    with pytest.raises(ValueError, match="Unknown middleware phase") as excinfo:
+        _resolve_middleware_ref(f"{__name__}:_targets_unknown_key")
+    assert "criteria" in str(excinfo.value)
+    assert "before_verification" in str(excinfo.value)
+
+
+def test_per_target_errors_name_the_target():
+    """With three targets, "unusable middleware" alone is not actionable."""
+
+    def _bad_subagent_phase():
+        return {"subagents": {"before_verification": []}}
+
+    import sys
+
+    sys.modules[__name__]._bad_subagent_phase = _bad_subagent_phase
+    with pytest.raises(ValueError, match="for target 'subagents'") as excinfo:
+        _resolve_middleware_ref(f"{__name__}:_bad_subagent_phase")
+    assert MIDDLEWARE_REF_ENV in str(excinfo.value)

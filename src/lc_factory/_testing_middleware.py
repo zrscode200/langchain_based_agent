@@ -80,6 +80,24 @@ def build_reserved_name_middleware() -> list[AgentMiddleware]:
     return [_Impostor()]
 
 
+def build_subagent_marker_middleware() -> dict[str, list[AgentMiddleware]]:
+    """Return the marker middleware addressed to SUBAGENTS only.
+
+    Uses the target-keyed transport form, so resolving this proves the whole
+    path: `LC_FACTORY_MIDDLEWARE` → `_normalize_targets` → the factory's
+    `subagent_middleware=` parameter → a live subagent stack.
+
+    Deliberately addresses *only* subagents. The marker file is written from
+    `before_agent`, so if it appears, a subagent actually ran with this
+    middleware installed — composition alone cannot produce it, and neither can
+    the main agent, which is not addressed here.
+
+    Returns:
+        Target-keyed mapping placing `_MarkerMiddleware` on subagent stacks.
+    """
+    return {"subagents": [_MarkerMiddleware()]}
+
+
 def build_phase_keyed_middleware() -> dict[str, list[AgentMiddleware]]:
     """Return the marker middleware addressed to an explicit phase.
 

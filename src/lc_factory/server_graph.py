@@ -22,7 +22,7 @@ import importlib
 import logging
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from collections.abc import Set as AbstractSet
 from typing import Any
 
@@ -56,11 +56,12 @@ def _resolve_middleware_ref(ref: str) -> Any:  # noqa: ANN401
         ref: A ``"module.path:callable"`` string.
 
     Returns:
-        The factory's result, normalized to a phase-keyed mapping of
-        materialized lists (``_normalize_injected_middleware`` output), to be
-        handed to ``create_factory_agent(middleware=...)``. Returning the
-        *original* would silently drop one-shot iterables: the validation
-        pass materializes them via ``list()``, so a generator would arrive
+        The factory's result, normalized to ``{"main": ..., "subagents": ...,
+        "grader": ...}`` — one phase mapping of materialized lists per target,
+        each ready for the matching ``create_factory_agent`` parameter. See
+        `_normalize_targets` for the accepted input shapes. Returning the
+        *original* would silently drop one-shot iterables: normalization
+        materializes them via ``list()``, so a generator would arrive
         downstream already exhausted and compose as empty.
 
     Raises:
@@ -159,24 +160,103 @@ def _resolve_middleware_ref(ref: str) -> Any:  # noqa: ANN401
     # materializes one-shot iterables (`list()`), so a factory returning a
     # generator would otherwise be consumed right here and compose as empty
     # downstream — a silent drop, the exact failure this transport promises
-    # cannot happen. The normalized phase mapping is a valid `middleware=`
-    # input and re-normalizes idempotently in `create_factory_agent`.
-    from lc_factory.assembly import _normalize_injected_middleware
+    # cannot happen.
+    return _normalize_targets(result, ref)
 
-    try:
-        return _normalize_injected_middleware(result)
-    except ValueError as exc:
-        msg = f"{MIDDLEWARE_REF_ENV}: {ref!r} returned unusable middleware: {exc}"
-        raise ValueError(msg) from exc
+
+def _normalize_targets(result: Any, ref: str) -> dict[str, Any]:  # noqa: ANN401
+    """Normalize a factory's return into per-target middleware mappings.
+
+    Three accepted shapes, disambiguated by key rather than by guessing:
+
+    - a bare sequence — main agent, default phase (the original form);
+    - a **phase**-keyed mapping (`first`/`before_verification`/`last`) — main
+      agent, explicit phases (also original);
+    - a **target**-keyed mapping (`main`/`subagents`/`grader`) whose values are
+      either of the above — added when Group 3's targets needed to reach
+      `lc-code`.
+
+    Target and phase keys are disjoint sets, which is what makes this safe to
+    disambiguate. A mapping mixing both, or naming something in neither set, is
+    **rejected rather than interpreted**: guessing would silently compose an
+    agent the caller did not ask for, which is the failure class this whole
+    transport exists to prevent.
+
+    Reusing one variable is deliberate. A variable per target would each need
+    its own `.env` reservation in `lc_factory/__init__.py` — resolving a
+    reference imports and executes the named module inside the server process
+    (decisions.md D4) — so every new name is new attack surface. This adds
+    none: the existing reservation already covers it.
+
+    Args:
+        result: Whatever the referenced callable returned.
+        ref: The reference string, for error attribution.
+
+    Returns:
+        `{"main": ..., "subagents": ..., "grader": ...}`, each a normalized
+        phase mapping ready to hand to the matching `create_factory_agent`
+        parameter.
+
+    Raises:
+        ValueError: For an unknown, mixed, or unusable shape — always naming
+            the variable, since it is set outside the app.
+    """
+    from lc_factory.assembly import (
+        _normalize_grader_middleware,
+        _normalize_injected_middleware,
+        _normalize_subagent_middleware,
+    )
+
+    normalizers = {
+        "main": _normalize_injected_middleware,
+        "subagents": _normalize_subagent_middleware,
+        "grader": _normalize_grader_middleware,
+    }
+
+    per_target: dict[str, Any] = {}
+    if isinstance(result, Mapping):
+        keys = set(result)
+        targets = keys & set(normalizers)
+        if targets and targets != keys:
+            msg = (
+                f"{MIDDLEWARE_REF_ENV}: {ref!r} returned a mapping mixing "
+                f"target keys {sorted(targets)} with {sorted(keys - targets)}. "
+                f"Return either a target-keyed mapping "
+                f"({sorted(normalizers)}) or a phase-keyed mapping for the "
+                f"main agent — not both. Nesting is one level: put phases "
+                f"inside a target."
+            )
+            raise ValueError(msg)
+        if targets:
+            per_target = dict(result)
+
+    if not per_target:
+        # No target keys: the whole value addresses the main agent, in either
+        # of the two original forms. Unknown phase keys are caught below by the
+        # main normalizer, whose message already lists the valid phases.
+        per_target = {"main": result}
+
+    resolved: dict[str, Any] = {}
+    for target, normalize in normalizers.items():
+        supplied = per_target.get(target)
+        try:
+            resolved[target] = normalize(supplied)
+        except ValueError as exc:
+            msg = (
+                f"{MIDDLEWARE_REF_ENV}: {ref!r} returned unusable middleware "
+                f"for target {target!r}: {exc}"
+            )
+            raise ValueError(msg) from exc
+    return resolved
 
 
 def _factory_middleware() -> Any:  # noqa: ANN401
     """Resolve caller-supplied middleware from the environment, if any.
 
     Returns:
-        The referenced callable's result, or ``None`` when the variable is
-        unset or empty — which composes exactly as it did before the seam
-        existed.
+        Per-target normalized middleware (see `_normalize_targets`), or
+        ``None`` when the variable is unset or empty — which composes exactly
+        as it did before the seam existed.
     """
     ref = os.environ.get(MIDDLEWARE_REF_ENV, "").strip()
     if not ref:
@@ -312,6 +392,9 @@ async def _make_graph() -> Any:  # noqa: ANN401
             sys.exit(1)
 
     def _create_factory_agent_sync() -> Any:  # noqa: ANN401
+        # `None` when the variable is unset; `.get` then yields `None` per
+        # target, which is exactly the inert default each parameter documents.
+        targets = injected_middleware or {}
         async_subagents = load_async_subagents() or None
         auto_mode_enabled = config.interactive and sandbox_backend is None
 
@@ -355,7 +438,13 @@ async def _make_graph() -> Any:  # noqa: ANN401
             async_subagents=async_subagents,
             goal_criteria_tools=read_only_context_tools,
             rubric_grader_tools=read_only_context_tools,
-            middleware=injected_middleware,
+            # All three targets, so a capability that exists in the factory is
+            # actually reachable from `lc-code`. Passing only `middleware=`
+            # here is what left Group 3's subagent and grader seams usable by
+            # nothing (decisions.md D4 rejects a library-only API).
+            middleware=targets.get("main"),
+            subagent_middleware=targets.get("subagents"),
+            rubric_grader_middleware=targets.get("grader"),
         )
         return agent
 

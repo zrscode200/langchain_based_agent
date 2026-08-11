@@ -108,10 +108,29 @@ Two things worth knowing:
 - **The goal-criteria agent stays unreachable.** Upstream's
   `_create_goal_criteria_agent` takes no middleware argument.
 
-`LC_FACTORY_MIDDLEWARE` still carries **main-agent middleware only**. Reaching
-the other targets from the environment needs its own variables and its own
-`.env` reservation guard, which is a security surface rather than a
-convenience — see `UPGRADING.md`.
+All three targets are reachable from a running `lc-code` session too. The
+referenced callable may return a **target-keyed** mapping:
+
+```python
+# my_package/agent_setup.py
+def build_middleware():
+    return {
+        "main":      [AuditMain()],
+        "subagents": [AuditDelegated()],       # or {"first": [...]}
+        "grader":    [AuditGrader()],
+    }
+```
+
+```sh
+export LC_FACTORY_MIDDLEWARE="my_package.agent_setup:build_middleware"
+lc-code
+```
+
+One variable, deliberately — each additional one would need its own `.env`
+reservation guard, and that is real attack surface. The existing forms still
+work unchanged: a bare sequence or a phase-keyed mapping both mean the main
+agent. A mapping mixing target keys with phase keys is rejected rather than
+guessed.
 
 ## Planned deltas over v0
 
