@@ -254,13 +254,32 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    `tests/test_seam.py` asserts placement in the final composed stack, so a
    re-application that moves a site fails there.
 
-2. **Factory-reference transport** (`LC_FACTORY_MIDDLEWARE`, wave 2.2). The
-   server subprocess resolves `"module.path:callable"` from the environment and
-   passes the result to `create_factory_agent(middleware=...)`. Inert when the
-   variable is unset.
+2. **Factory-reference transport** (`LC_FACTORY_MIDDLEWARE`, wave 2.2;
+   extended to all targets by `SEAM-REACH-TRANSPORT`). The server subprocess
+   resolves `"module.path:callable"` from the environment and passes the result
+   to `create_factory_agent`. Inert when the variable is unset.
 
    - Lives in `src/lc_factory/server_graph.py` (`_resolve_middleware_ref`,
-     `_factory_middleware`, and the resolve call in `_make_graph`).
+     `_normalize_targets`, `_factory_middleware`, and the resolve call plus the
+     three-target threading in `_make_graph`).
+   - **Three accepted return shapes**, disambiguated by key rather than
+     guessed: a bare sequence (main, default phase), a **phase**-keyed mapping
+     (main, explicit phases), or a **target**-keyed mapping
+     (`main`/`subagents`/`grader`) whose values are either of the first two.
+     Target and phase key sets are disjoint, which is what makes this safe; a
+     mapping mixing both, or naming something in neither, is **rejected with an
+     attributed error** rather than interpreted.
+   - **One variable, deliberately.** A variable per target would each need its
+     own `.env` reservation in `lc_factory/__init__.py` (decisions.md D4), so
+     every new name is new attack surface. The target-keyed form adds none —
+     the existing reservation already covers it. **Do not add per-target
+     variables without redoing the subprocess D4 coverage for each.**
+   - **On a bump, re-check the threading, not just the resolve.** All three
+     parameters must still be passed at the `create_factory_agent` call site;
+     dropping one silently returns that target to Group 3's state, where the
+     capability existed but nothing could reach it. Drift-injection validated:
+     severing `subagent_middleware=` reddens
+     `test_subagent_middleware_runs_in_a_live_delegated_session`.
    - **Deliberately outside `ServerConfig`.** The upstream
      `DEEPAGENTS_CODE_SERVER_*` contract stays byte-identical; the variable
      reaches the subprocess only because `_build_server_env` filters by an
@@ -391,8 +410,12 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    - **Injected instances are spliced by reference**, so one object is shared
      across every subagent stack. Documented in the parameter's docstring and
      pinned by identity assertion in `tests/test_seam.py`.
-   - **Not reachable from `LC_FACTORY_MIDDLEWARE`** — the transport still feeds
-     `middleware=` only. API-only until wave 3.3 decides otherwise.
+   - **Reachable from `LC_FACTORY_MIDDLEWARE`** via the target-keyed return
+     form (see delta 2). Proven end to end by
+     `tests/integration_tests/test_headless_session.py`, which delegates
+     through `task` and asserts the injected middleware actually *ran* inside
+     the subagent — with a negative control proving the marker tracks
+     execution, not composition.
    - **On a bump, re-check:** that `graph.py` still merges subagent specs via
      `_apply_custom_middleware` with `core_names` (if it stops, the position
      guarantee changes), and that the derived subagent base is still a subset

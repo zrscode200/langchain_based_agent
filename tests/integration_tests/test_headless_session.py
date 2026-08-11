@@ -222,3 +222,103 @@ def test_headless_write_file_round_trip(tmp_path):
     assert target.read_text() == TOP_LEVEL_WRITE_CONTENT
     # The session persisted in the standard dcode sessions DB location.
     assert (home / ".deepagents" / ".state" / "sessions.db").exists()
+
+
+def test_subagent_middleware_runs_in_a_live_delegated_session(tmp_path):
+    """SEAM-REACH-TRANSPORT: the level-2 proof Group 3 never had.
+
+    Everything Group 3 asserted was composition — where middleware *sits*. This
+    asserts it *runs*, inside a real subagent, in a real `lc-code` session:
+
+      LC_FACTORY_MIDDLEWARE (target-keyed)
+        -> _normalize_targets in the server subprocess
+        -> create_factory_agent(subagent_middleware=...)
+        -> the general-purpose subagent's stack
+        -> _MarkerMiddleware.before_agent fires when `task` delegates
+
+    `DCA_TEST_DELEGATE_WRITE` makes upstream's deterministic model emit a real
+    `task` call, so no credentials are needed. The middleware is addressed to
+    subagents ONLY, so the marker file cannot be written by the main agent.
+    """
+    home = _make_home(tmp_path)
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    marker = tmp_path / "subagent-middleware-ran.txt"
+    delegated = workdir / "delegated.txt"
+
+    child_env = _headless_env(home)
+    child_env["LC_FACTORY_MIDDLEWARE"] = (
+        "lc_factory._testing_middleware:build_subagent_marker_middleware"
+    )
+    child_env["LC_FACTORY_TEST_MIDDLEWARE_MARKER"] = str(marker)
+
+    result = subprocess.run(
+        [
+            str(_lc_code()),
+            "--timeout", "240",
+            "-M", "itest:fake",
+            "-q", "--no-stream",
+            "-n", f"DCA_TEST_DELEGATE_WRITE={delegated}",
+        ],
+        cwd=workdir,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    assert result.returncode == 0, result.stderr[-2000:]
+    # Guard the guard: if delegation did not happen, the marker's absence would
+    # prove nothing about the seam.
+    assert delegated.exists(), (
+        "the model never delegated, so this run cannot say anything about "
+        f"subagent middleware: {result.stdout[-1500:]}"
+    )
+    assert marker.exists(), (
+        "the subagent delegated and wrote its file, but the injected subagent "
+        "middleware never ran — subagent_middleware is not reaching live "
+        "subagent stacks through the transport"
+    )
+
+
+def test_subagent_marker_stays_absent_without_delegation(tmp_path):
+    """Negative control: prove the marker tracks EXECUTION, not composition.
+
+    Same configuration, but a prompt that writes at the top level instead of
+    delegating. The subagent stack is still composed with the middleware in it,
+    so if the marker appeared here it would mean the assertion above passes on
+    composition alone and proves nothing new.
+    """
+    home = _make_home(tmp_path)
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    marker = tmp_path / "should-not-appear.txt"
+
+    child_env = _headless_env(home)
+    child_env["LC_FACTORY_MIDDLEWARE"] = (
+        "lc_factory._testing_middleware:build_subagent_marker_middleware"
+    )
+    child_env["LC_FACTORY_TEST_MIDDLEWARE_MARKER"] = str(marker)
+
+    result = subprocess.run(
+        [
+            str(_lc_code()),
+            "--timeout", "240",
+            "-M", "itest:fake",
+            "-q", "--no-stream",
+            "-n", f"DCA_TEST_WRITE_FILE={workdir / 'top_level.txt'}",
+        ],
+        cwd=workdir,
+        env=child_env,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert (workdir / "top_level.txt").exists(), "the top-level write did not run"
+    assert not marker.exists(), (
+        "the subagent marker appeared without any delegation — it is firing on "
+        "composition rather than execution, so the positive test above proves "
+        "nothing about whether subagent middleware actually runs"
+    )
