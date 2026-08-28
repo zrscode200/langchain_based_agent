@@ -215,13 +215,13 @@ _D4_PROBE = """
 import os, sys, pathlib
 {sabotage}
 import lc_factory.server_graph as sg
-from lc_factory.upstream import get_server_project_context, settings
+from lc_factory.upstream import credentials, get_server_project_context
 
-# Mirror `_make_graph`: it reloads settings from the project context before
+# Mirror `_make_graphs`: it reloads credentials from the project context before
 # resolving, which is a second, separate chance for a project `.env` to land in
 # os.environ.
 ctx = get_server_project_context()
-settings.reload_from_environment(
+credentials.reload_from_environment(
     start_path=ctx.user_cwd if ctx is not None else pathlib.Path.cwd()
 )
 resolved = sg._factory_middleware()
@@ -233,11 +233,10 @@ def _run_d4_probe(repo, tmp_path, shape: str, *, sabotage: str = "") -> str:
     """Import lc_factory in a FRESH interpreter, in one of two real shapes.
 
     Must be a subprocess. The contamination happens at *import* time — upstream's
-    config module has a PEP 562 `__getattr__` that bootstraps settings and loads
-    `.env` on first attribute access, so simply importing `lc_factory.upstream`
-    triggers it. By the time any in-process test function runs, `lc_factory` has
-    long since been imported under pytest's own cwd, so an in-process version of
-    this test cannot fail no matter what it asserts.
+    credential resolution loads `.env` into `os.environ`. By the time any
+    in-process test runs, the lazy credential proxy has already been resolved
+    under pytest's cwd, so an in-process version cannot reproduce either real
+    startup shape reliably.
 
     The two shapes traverse *different upstream code* and must both be covered:
 
@@ -324,8 +323,8 @@ def test_the_d4_probe_can_actually_fail(tmp_path, shape):
         sabotage=(
             "import lc_factory\n"
             "os.environ.pop('LC_FACTORY_MIDDLEWARE', None)\n"
-            "from lc_factory.upstream import settings\n"
-            "settings.reload_from_environment(start_path=pathlib.Path.cwd())\n"
+            "from lc_factory.upstream import credentials\n"
+            "credentials.reload_from_environment(start_path=pathlib.Path.cwd())\n"
         ),
     )
     assert injected == "INJECTED", (
@@ -359,7 +358,7 @@ def test_reservation_makes_the_variable_unsettable_from_a_dotenv(tmp_path, monke
     `os.environ`. If that precedence ever changes, the outcome test above still
     needs to fail for a comprehensible reason — this says which assumption broke.
     """
-    from lc_factory.upstream import settings
+    from lc_factory.upstream import credentials
 
     monkeypatch.delenv(MIDDLEWARE_REF_ENV, raising=False)
     (tmp_path / ".env").write_text(f"{MIDDLEWARE_REF_ENV}=evil_pkg:pwn\n")
@@ -367,7 +366,7 @@ def test_reservation_makes_the_variable_unsettable_from_a_dotenv(tmp_path, monke
 
     reserve_middleware_ref_env()
     assert os.environ[MIDDLEWARE_REF_ENV] == ""
-    settings.reload_from_environment(start_path=tmp_path)
+    credentials.reload_from_environment(start_path=tmp_path)
     assert os.environ[MIDDLEWARE_REF_ENV] == "", (
         "upstream's .env loader no longer skips keys already present in "
         "os.environ — the reservation guard is void and a project .env can "

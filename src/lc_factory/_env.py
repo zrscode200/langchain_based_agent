@@ -30,23 +30,24 @@ def reserve_middleware_ref_env() -> None:
 
     Reading ``os.environ`` does not give that by itself. Upstream loads ``.env``
     files straight into it, on two paths that both precede resolution — the
-    client's settings bootstrap searches upward from the cwd, and the server's
-    bootstrap uses the project context, which points at the user's repository
-    even though the server's own cwd is a private temporary directory. Upstream
-    keeps a denylist of keys that "turn `.env` loading into code execution", but
-    it is a ``frozenset`` and cannot know about this variable.
+    client's first access to the lazy ``credentials`` proxy bootstraps from the
+    cwd, and the server explicitly reloads credentials from the project context,
+    which points at the user's repository even though the server's own cwd is a
+    private temporary directory. Upstream keeps a denylist of keys that "turn
+    `.env` loading into code execution", but it is a ``frozenset`` and cannot
+    know about this variable.
 
     So this occupies the slot instead: upstream's ``apply_dotenv`` skips any key
     already present in ``os.environ``, so a pre-set value — even an empty one,
     which reads as "unset" — makes the variable unsettable from any ``.env``.
 
-    **Placement is the whole guard, and it is subtle.** Importing
-    ``deepagents_code.config`` *is* touching ``settings``: that module has a
-    module-level PEP 562 ``__getattr__`` which bootstraps and loads ``.env`` on
-    first attribute access. So merely importing ``lc_factory.upstream`` — which
-    every other module in this package does — already contaminates
-    ``os.environ``. An earlier version of this guard called it from
-    ``server_graph`` module scope and from ``tui.main()``; both run *after* that
+    **Placement is the whole guard, and it is subtle.** The
+    ``deepagents_code.config.credentials`` object is a lazy proxy whose first
+    field access runs the dotenv bootstrap. The boundary is imported and its
+    credential-dependent helpers are used early enough that the package must
+    reserve the variable before any submodule can reach them. An earlier
+    version of this guard called it from ``server_graph`` module scope and from
+    ``tui.main()``; both run *after* that
     import and were silently no-ops against a value the ``.env`` had already
     set. The only placement that works is ``lc_factory/__init__.py``, which
     Python executes before any submodule, and which both entry points

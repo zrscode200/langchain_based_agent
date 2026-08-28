@@ -2,8 +2,8 @@
 
 from importlib.metadata import version
 
-PINNED_DEEPAGENTS_CODE = "0.1.54"
-PINNED_DEEPAGENTS = "0.7.5"
+PINNED_DEEPAGENTS_CODE = "0.1.64"
+PINNED_DEEPAGENTS = "0.7.10"
 
 
 def test_upstream_pins_installed():

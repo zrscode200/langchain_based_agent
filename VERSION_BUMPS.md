@@ -17,13 +17,90 @@ stay a constant-length document no matter how many bumps accumulate.
 
 | Date | `deepagents-code` | `deepagents` | Port changes | Effort | Commit |
 |---|---|---|---|---|---|
+| 2026-08-28 | 0.1.54 → **0.1.64** | 0.7.5 → **0.7.10** | **broad runtime rebase** | ~1 hr | this commit |
 | 2026-08-10 | 0.1.52 → **0.1.54** | 0.7.1 → **0.7.5** | **none** (proven) | <30 min | `cb43e40` |
 | 2026-08-06 | 0.1.48 → **0.1.52** | 0.7.0b2 → **0.7.1** | **7 hunks re-applied** | ~1 hr | `304f8a8` |
 | 2026-07-27 | 0.1.47 → **0.1.48** | 0.7.0b2 (held) | **none** (inferred) | ~15 min | `45c40bd` |
 
-Two free bumps and one real re-application across five upstream releases. The
-re-application was the meaningful test, and it came in at about an hour for a
-three-arc delta — which is the number D3 should be judged on.
+Two free bumps and two real re-applications. The 0.1.64 jump is the largest
+data point so far: every copied/private surface changed, yet the rebase stayed
+inside one maintenance wave and retained executable parity and drift tripwires.
+
+---
+
+## 2026-08-28 — 0.1.54 → 0.1.64 (SDK 0.7.5 → 0.7.10) — this commit
+
+**Verdict: re-application owed across every coupled runtime surface.** This was
+not a lock-only bump: 905 additions / 270 deletions landed across upstream's
+ported agent, server graph, launcher, and server-manager files, before their
+transitive private dependencies are counted. All ten factory `# SEAM` sites
+were re-applied against the released assembly.
+
+**Delta-read method:** exact PyPI wheel and sdist hashes matched PyPI metadata;
+the SDK tag, sdist, and wheel package sources were byte-identical. The code tag,
+sdist, and wheel package sources were byte-identical apart from the expected
+generated `_build_info.py`; its `BUILD_COMMIT="d8686f7"` identifies release tag
+commit `d8686f74df7b8f838ec6679086c6291e3096a39e`. The coupled SDK tag is
+`d26b53ad12265375c6dcf6b1c1501e0a4adf0ea3`. Artifact metadata requires Python
+`>=3.12,<4` and exactly `deepagents==0.7.10`.
+
+**Re-applied upstream runtime changes:** credential snapshots replace the old
+settings surface; model creation publishes to `RuntimeState`; model allow-list
+policy and `CodeModelRetryMiddleware` now cover main, nested, criteria, and
+grader paths; interpreter settings are resolver snapshots; `BaseStore` and
+recursion behavior thread through compilation. The server now caches a named
+`ServerRuntime` containing graph, backend, and server-owned offload operation,
+and owns Python-extension loading, host binding, and shutdown.
+
+**Factory-specific reconciliation:** all external imports remain behind
+`upstream.py`; all three middleware targets remain reachable through the one D4
+reserved variable. Main `last` moved after extension middleware/runtime hosting,
+and a new guard rejects extension replacement of caller middleware in every
+main phase. Retry became the verification-tail anchor and sits inside subagent
+and grader stacks without changing their documented defaults. The factory
+reuses upstream's offload app through a narrow runtime rebind and adds the
+authenticated custom HTTP block structurally to its generated workspace.
+
+**Tripwire maintenance:** `tests/test_parity.py` required one instrumentation
+change, `_MAX_DEPTH` 6 → 9, because 0.1.64 nests model metadata three levels
+deeper. The rich repository case proves no state is truncated at 9; no parity
+expectation or factory exemption changed. Seam coverage added extension
+collision and final-position cases. D4 subprocess probes moved from removed
+`settings.reload_from_environment` to `credentials.reload_from_environment`.
+
+**Guard re-checks:** dotenv loading remains first-write-wins for an existing
+`os.environ` key; `lc_factory/__init__.py` still reserves before boundary use;
+the generated checkpointer and `langgraph.json` cannot pre-import upstream or
+load an env file; `_build_server_env` remains an explicit denylist and relays
+`LC_FACTORY_MIDDLEWARE`; the TUI still resolves `_scaffold_workspace` through
+the rebound module global. SDK core/tail/profile names and subagent merge rules
+remain covered by `tests/test_seam.py`.
+
+**Verification and review:** Python **3.12.12** with the exact installed pair;
+boundary/smoke **8**; initial focused boundary, smoke, assembly, parity, seam,
+D4/server, and launch **165**. The integrated gate found one
+`confirmed-in-scope` test gap: the cancel route did not prove that positive
+`/offload` execution reaches the factory runtime. A focused ASGI test now runs
+the real upstream operation route through the adapter-bound runtime and
+server-owned offload operation; the launch suite is **9 passed**. Final default
+is **167 passed, 6 deselected** and live integration is **6 passed**. The first
+integration run exposed the new inherited `DEEPAGENTS_HOME` input, so its
+hermetic filter now strips the whole `DEEPAGENTS_` prefix; all six then passed.
+The documented shell allow-list drift injection produced the expected **2
+failed / 23 passed**, and clean parity returned to **25 passed**. `uv build`
+produces both sdist and wheel, and `git diff --check` is clean. The gate passes
+with two explicit residuals: no real LangGraph Server offload session and no
+live extension-enabled server session in this maintenance wave.
+
+**Effort:** approximately one hour through the initial full green run; final
+review/verification time is included in this maintenance wave rather than split
+into feature work.
+
+**Watches carried forward:** third-party harness profiles registered after
+import remain outside the static reserved-name set; D4 still assumes
+`lc_factory` is first to touch upstream; resolving the factory reference still
+runs on the server event loop; the grader test still observes the private
+`ReliableRubricMiddleware._grader_middleware` attribute.
 
 ---
 

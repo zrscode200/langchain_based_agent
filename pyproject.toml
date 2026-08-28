@@ -9,16 +9,16 @@ description = "Agent factory layer over the LangChain ecosystem: an owned recomp
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.11,<4.0"
+requires-python = ">=3.12,<4.0"
 dependencies = [
     # Upstream v0 baseline. The exact pin is deliberate: the factory
     # recomposes upstream internals, so every bump is a reviewed event
     # gated by the parity test suite.
-    "deepagents-code==0.1.54",
+    "deepagents-code==0.1.64",
     # Direct dependency (upstream.py imports `deepagents` itself), pinned to
     # the exact version deepagents-code requires. Declaring it directly also
     # lets uv resolve the pre-release. Bump both pins together.
-    "deepagents==0.7.5",
+    "deepagents==0.7.10",
 ]
 
 [project.scripts]

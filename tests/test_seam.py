@@ -351,12 +351,13 @@ def test_before_verification_sits_between_policy_and_the_verification_tail(tmp_p
     assert names.index("LocalContextMiddleware") < names.index("probe")
     assert names.index("HumanInTheLoopMiddleware") < names.index("probe")
     assert names.index("ServerHooksMiddleware") < names.index("probe")
-    # ...and immediately ahead of the verification tail. The compaction
-    # middleware is no longer that tail's first member: renamed to
-    # `SummarizationMiddleware` in 0.1.52, it is hoisted into the SDK core's
-    # summarization slot by the name-based merge, so with no goal-criteria
-    # middleware in this config the tail begins at the rubric.
-    assert names.index("probe") == names.index("ReliableRubricMiddleware") - 1
+    # ...and immediately ahead of the verification tail. Compaction is hoisted
+    # into the SDK core by name; at 0.1.64 the remaining tail begins with the
+    # model-node retry middleware, followed by the rubric.
+    assert names.index("probe") == names.index("CodeModelRetryMiddleware") - 1
+    assert names.index("CodeModelRetryMiddleware") < names.index(
+        "ReliableRubricMiddleware"
+    )
 
 
 def test_last_phase_is_innermost_factory_middleware(tmp_path):
@@ -392,6 +393,55 @@ def test_all_three_phases_compose_in_order(tmp_path):
     # Injection order within one phase is preserved too.
     multi = _compose(tmp_path, middleware={"first": [_Probe("p-a"), _Probe("p-b")]})
     assert multi.index("p-a") == multi.index("p-b") - 1
+
+
+@pytest.mark.parametrize("phase", _PHASE_ORDER)
+def test_extension_cannot_silently_replace_injected_middleware(
+    tmp_path, monkeypatch, phase
+):
+    """Upstream extensions replace by name after the old seam guard point."""
+    from deepagents_code.extensions.registry import ExtensionRegistry, SourceInfo
+
+    from lc_factory.upstream import EXPERIMENTAL
+
+    monkeypatch.setenv(EXPERIMENTAL, "1")
+    registry = ExtensionRegistry()
+    registry.add_middleware(
+        _Probe("probe"),
+        SourceInfo(path=tmp_path / "extension.py"),
+    )
+
+    with pytest.raises(ValueError, match="conflicts with extension middleware"):
+        _compose(
+            tmp_path,
+            extension_registry=registry,
+            middleware={phase: [_Probe("probe")]},
+        )
+
+
+def test_last_phase_follows_extension_runtime(tmp_path, monkeypatch):
+    """The last phase remains last after 0.1.64 extension composition."""
+    from deepagents_code.extensions.registry import ExtensionRegistry, SourceInfo
+
+    from lc_factory.upstream import EXPERIMENTAL
+
+    monkeypatch.setenv(EXPERIMENTAL, "1")
+    registry = ExtensionRegistry()
+    registry.add_middleware(
+        _Probe("extension-probe"),
+        SourceInfo(path=tmp_path / "extension.py"),
+    )
+
+    names = _compose(
+        tmp_path,
+        extension_registry=registry,
+        middleware={"last": [_Probe("probe")]},
+    )
+    assert names.index("extension-probe") < names.index(
+        "__deepagents_extension_runtime__"
+    )
+    assert names.index("__deepagents_extension_runtime__") < names.index("probe")
+    assert names.index("probe") < names.index("AnthropicPromptCachingMiddleware")
 
 
 def test_before_verification_holds_in_a_richly_gated_config(tmp_path):

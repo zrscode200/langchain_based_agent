@@ -1,21 +1,12 @@
-"""Import boundary: every upstream symbol lc_factory touches, in one place.
+"""Single import boundary for the pinned deepagents runtime.
 
-All lc_factory code MUST import upstream (``deepagents-code`` / ``deepagents``
-/ ``langchain*``) symbols through this module — never directly. On a pin bump,
-upstream breakage surfaces here first, and this file doubles as the divergence
-inventory. Private (underscore) upstream names carry no semver protection;
-they are the exact surface the parity suite guards.
+Every project source module imports ``deepagents-code``, ``deepagents``, and
+LangChain runtime symbols through this module. A pin bump therefore fails at
+one explicit boundary before copied assembly or launch code can drift silently.
 
-Verified against deepagents-code==0.1.54 / deepagents==0.7.5.
-(The port was authored against 0.1.47 / monorepo commit 8da0ccb13; the
-0.1.48 bump required no changes here. The 0.1.52 bump added the
-cost-tracking, server-hooks, and auto-classifier config symbols. The
-0.1.54 bump required no changes here: every changed upstream module is
-consumed as a library, and no symbol this file names moved.)
-
-Layout mirrors the consumers: assembly (the ported ``create_cli_agent``),
-server graph, and launcher. Type-only names live in the TYPE_CHECKING block
-at the bottom.
+Verified against deepagents-code==0.1.64 / deepagents==0.7.10. The factory's
+owned assembly and server runtime are ports of those exact released sources;
+private names remain intentionally guarded by tests and the bump ledger.
 """
 
 from typing import TYPE_CHECKING
@@ -30,26 +21,33 @@ from deepagents.middleware.subagents import (
     SubAgent as RuntimeSubAgent,
 )
 
-# --- langchain core ---
-# `AgentMiddleware` is a RUNTIME export, not type-only: the injection seam's
-# public API is defined in terms of it, and `_testing_middleware` subclasses it
-# at runtime — which the boundary rule requires it do through this module.
+# --- LangChain runtime ---
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core._api import suppress_langchain_beta_warning
 
-# NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here —
-# importing it eagerly would drag the entire CLI stack into the server
-# subprocess. See that module's docstring.
-from deepagents_code._cli_context import CLIContextSchema
+# NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here.
+# Eagerly importing it would pull the full TUI into the server subprocess.
+from deepagents_code._cli_context import CLIContextSchema, INHERIT_CLASSIFIER_MODEL
+from deepagents_code._env_vars import EXPERIMENTAL, is_env_truthy
 from deepagents_code._glm_5p2_profile import (
     _ensure_glm_5p2_profile_registered,
     _GlmTerminalStallRecovery,
 )
+from deepagents_code._paths import (
+    ensure_agent_dir,
+    get_project_agent_md_path,
+    get_project_agents_dir,
+    get_user_agent_md_path,
+    get_user_agents_dir,
+)
 from deepagents_code._repository_bounds import REPOSITORY_TOOL_CALL_LIMIT
 from deepagents_code._server_config import ServerConfig
-from deepagents_code._startup_error import STARTUP_ERROR_MARKER
+from deepagents_code._startup_error import (
+    STARTUP_ERROR_MARKER,
+    emit_startup_failure,
+)
 
-# --- v0 assembly module: reference implementation + its private helpers ---
+# --- released agent assembly and helpers ---
 from deepagents_code.agent import (
     AsyncApprovalHITLMiddleware,
     ShellAllowListMiddleware,
@@ -57,15 +55,19 @@ from deepagents_code.agent import (
     _apply_inherited_pythonpath,
     _create_rubric_grader_tools,
     _get_harness_tool_descriptions,
+    _has_resolvable_model_provider,
     _inject_fs_tools_into_subagents,
     _MEMORY_READONLY_SYSTEM_PROMPT,
     _normalize_rubric_grader_context_tools,
     _resolve_ptc_option,
+    _resolve_retry_owned_model,
+    _resolve_shell_allow_list,
     _rubric_grader_read_file_prefix,
     _rubric_grader_repository_tool_names,
     _rubric_grader_system_prompt,
     _sanitize_agent_message_name,
     create_cli_agent,
+    get_skill_sources,
     get_system_prompt,
     load_async_subagents,
 )
@@ -76,7 +78,7 @@ from deepagents_code.auto_mode import (
     gated_mcp_tool_names,
 )
 
-# --- client machinery reused by the micro-launcher and TUI entry ---
+# --- client machinery reused by the launcher/TUI seam ---
 from deepagents_code.client.launch import server_manager as server_manager_module
 from deepagents_code.client.launch.server import (
     ServerProcess,
@@ -88,25 +90,42 @@ from deepagents_code.client.launch.server_manager import (
 )
 from deepagents_code.client.remote_client import RemoteAgent
 
-# --- config / settings ---
+# --- config, runtime state, and model policy ---
 from deepagents_code.config import (
+    DEFAULT_MODEL_RETRIES,
     _ShellAllowAll,
-    config,
     configure_langsmith_secret_redaction,
     create_model,
+    credentials,
     get_langsmith_project_name,
     is_memory_auto_save_enabled,
     resolve_auto_classifier_model,
     restore_user_tracing_api_keys,
     restore_user_tracing_env,
-    settings,
+    runtime_state,
 )
 from deepagents_code.config_manifest import (
     resolve_auto_classifier_timeout,
     resolve_recursion_limit,
 )
 from deepagents_code.configurable_model import ConfigurableModelMiddleware
+from deepagents_code.configuration.interpreter import InterpreterConfig
+from deepagents_code.configuration.resolver import get_config_resolver
 from deepagents_code.cost_tracking import CostTrackingMiddleware
+from deepagents_code.model_config import ModelConfig
+from deepagents_code.model_retry import CodeModelRetryMiddleware
+
+# --- extensions ---
+from deepagents_code.extensions import ExtensionMode, load_extensions
+from deepagents_code.extensions.hosting import (
+    ExtensionRuntimeMiddleware,
+    bind_runtime_host_policy,
+    validate_backend_route,
+)
+from deepagents_code.extensions.runtime import (
+    bind_server_extensions,
+    shutdown_server_extensions,
+)
 
 # --- verification pipeline (goals -> criteria -> rubric) ---
 from deepagents_code.goal_rubric import (
@@ -130,6 +149,8 @@ from deepagents_code.local_context import (
     _ExecutableBackend,
 )
 from deepagents_code.memory_guard import ManagedMemoryGuardMiddleware
+from deepagents_code.reliable_rubric import ReliableRubricMiddleware
+from deepagents_code.resume_state import ResumeStateMiddleware
 
 # --- offload / compaction ---
 from deepagents_code.offload import (
@@ -138,40 +159,40 @@ from deepagents_code.offload import (
     _artifacts_root,
     _offload_fallback_root,
 )
-from deepagents_code.offload_middleware import _create_cli_compaction_middleware
-
-# --- plugins / skills ---
-from deepagents_code.plugins import discover_plugins
-from deepagents_code.plugins.adapters.skills import plugin_skill_sources
-from deepagents_code.plugins.adapters.skills_middleware import PluginSkillsMiddleware
-from deepagents_code.project_utils import (
-    ProjectContext,
-    get_server_project_context,
+from deepagents_code.offload_middleware import (
+    OffloadOperation,
+    _create_cli_compaction_middleware,
+    attach_offload_operation,
+    offload_operation_from,
 )
-from deepagents_code.reliable_rubric import ReliableRubricMiddleware
-from deepagents_code.resume_state import ResumeStateMiddleware
+
+# --- plugins, skills, and project context ---
+from deepagents_code.plugins.adapters.skills_middleware import PluginSkillsMiddleware
+from deepagents_code.project_utils import ProjectContext, get_server_project_context
+from deepagents_code.subagents import list_subagents
 
 # --- server graph internals reused by lc_factory.server_graph ---
 from deepagents_code.server_graph import (
+    ServerRuntime,
     _build_graph_factory,
+    _build_runtime_factory,
     _build_tools,
     _criteria_context_tools,
 )
-from deepagents_code.subagents import list_subagents
 
 
 def import_code_interpreter():  # noqa: ANN201
-    """Lazily import the optional QuickJS interpreter middleware pieces.
-
-    Kept lazy to mirror upstream (interpreter import cost is paid only when
-    ``enable_interpreter`` is set) while still routing through the boundary.
-
-    Returns:
-        Tuple of ``(CodeInterpreterMiddleware, PTCOption)``.
-    """
+    """Lazily import the optional QuickJS interpreter middleware pieces."""
     from langchain_quickjs import CodeInterpreterMiddleware, PTCOption
 
     return CodeInterpreterMiddleware, PTCOption
+
+
+def import_offload_api():  # noqa: ANN201
+    """Lazily return upstream's HTTP app module for the factory adapter."""
+    from deepagents_code import offload_api
+
+    return offload_api
 
 
 TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
@@ -185,21 +206,13 @@ TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
     ("langchain_core.language_models", "BaseChatModel"),
     ("langgraph.checkpoint.base", "BaseCheckpointSaver"),
     ("langgraph.pregel", "Pregel"),
+    ("langgraph.store.base", "BaseStore"),
+    ("deepagents_code.extensions.registry", "ExtensionRegistry"),
     ("deepagents_code.mcp_tools", "MCPServerInfo"),
-    ("deepagents_code.plugins.adapters.skills", "CodeSkillSource"),
 )
-"""Upstream names used only in annotations, mirrored from the block below.
-
-These are never evaluated at runtime (every lc_factory module uses
-`from __future__ import annotations`), so an upstream rename would fail
-silently. `tests/test_boundary.py` resolves this list explicitly to keep
-them inside the pin-bump tripwire. Keep it in sync with the block below.
-"""
+"""Annotation-only imports explicitly resolved by the boundary test."""
 
 if TYPE_CHECKING:
-    # Type-only names (annotation/type-checking use; never evaluated at
-    # runtime by lc_factory modules, which all use
-    # `from __future__ import annotations`). Mirrored in TYPE_ONLY_IMPORTS.
     from deepagents.backends.protocol import BackendProtocol
     from deepagents.backends.sandbox import SandboxBackendProtocol
     from deepagents.middleware.async_subagents import AsyncSubAgent
@@ -209,22 +222,27 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
     from langgraph.checkpoint.base import BaseCheckpointSaver
     from langgraph.pregel import Pregel
-    from deepagents_code.mcp_tools import MCPServerInfo
-    from deepagents_code.plugins.adapters.skills import CodeSkillSource
+    from langgraph.store.base import BaseStore
 
-# Runtime surface only: TYPE_CHECKING-only re-exports (BaseTool, Pregel, ...)
-# are intentionally NOT in __all__ — they exist solely for type checkers, and
-# the boundary-integrity test getattr-sweeps this list.
+    from deepagents_code.extensions.registry import ExtensionRegistry
+    from deepagents_code.mcp_tools import MCPServerInfo
+
+
 __all__ = [
     "AgentMiddleware",
     "AskUserMiddleware",
     "AsyncApprovalHITLMiddleware",
     "AutoModeHITLMiddleware",
     "CLIContextSchema",
+    "CONVERSATION_HISTORY_DIRNAME",
+    "CodeModelRetryMiddleware",
     "CompositeBackend",
     "ConfigurableModelMiddleware",
-    "CONVERSATION_HISTORY_DIRNAME",
     "CostTrackingMiddleware",
+    "DEFAULT_MODEL_RETRIES",
+    "EXPERIMENTAL",
+    "ExtensionMode",
+    "ExtensionRuntimeMiddleware",
     "FilesystemBackend",
     "FilesystemMiddleware",
     "FsToolName",
@@ -232,10 +250,14 @@ __all__ = [
     "GoalCriteriaMiddleware",
     "GoalToolsMiddleware",
     "HeadlessMCPGuardMiddleware",
+    "INHERIT_CLASSIFIER_MODEL",
+    "InterpreterConfig",
     "LocalContextMiddleware",
     "LocalShellBackend",
     "ManagedMemoryGuardMiddleware",
     "MemoryMiddleware",
+    "ModelConfig",
+    "OffloadOperation",
     "PluginSkillsMiddleware",
     "ProjectContext",
     "REPOSITORY_TOOL_CALL_LIMIT",
@@ -243,24 +265,26 @@ __all__ = [
     "RemoteAgent",
     "ResumeStateMiddleware",
     "RuntimeSubAgent",
+    "STARTUP_ERROR_MARKER",
     "ServerConfig",
     "ServerHooksMiddleware",
     "ServerProcess",
+    "ServerRuntime",
     "ShellAllowListMiddleware",
-    "STARTUP_ERROR_MARKER",
-    "_FALLBACK_ARTIFACTS_ROOT",
-    "_MEMORY_READONLY_SYSTEM_PROMPT",
     "_AsyncExecutableBackend",
     "_ContextToolCallBudgetMiddleware",
     "_CriteriaContextBudgetMiddleware",
     "_ExecutableBackend",
+    "_FALLBACK_ARTIFACTS_ROOT",
     "_GlmTerminalStallRecovery",
+    "_MEMORY_READONLY_SYSTEM_PROMPT",
     "_ShellAllowAll",
     "_WebSearchBudgetMiddleware",
     "_add_interrupt_on",
     "_apply_inherited_pythonpath",
     "_artifacts_root",
     "_build_graph_factory",
+    "_build_runtime_factory",
     "_build_tools",
     "_create_cli_compaction_middleware",
     "_create_goal_criteria_agent",
@@ -268,42 +292,60 @@ __all__ = [
     "_criteria_context_tools",
     "_ensure_glm_5p2_profile_registered",
     "_get_harness_tool_descriptions",
+    "_has_resolvable_model_provider",
     "_inject_fs_tools_into_subagents",
     "_normalize_rubric_grader_context_tools",
     "_offload_fallback_root",
     "_resolve_ptc_option",
+    "_resolve_retry_owned_model",
+    "_resolve_shell_allow_list",
     "_rubric_grader_read_file_prefix",
     "_rubric_grader_repository_tool_names",
     "_rubric_grader_system_prompt",
     "_rubric_interrupt_on",
     "_sanitize_agent_message_name",
     "_write_checkpointer",
-    "config",
+    "attach_offload_operation",
+    "bind_runtime_host_policy",
+    "bind_server_extensions",
     "configure_langsmith_secret_redaction",
     "create_cli_agent",
     "create_deep_agent",
     "create_goal_criteria_fallback_agent",
     "create_model",
     "create_sandbox",
-    "discover_plugins",
+    "credentials",
+    "emit_startup_failure",
+    "ensure_agent_dir",
     "gated_mcp_tool_names",
     "generate_langgraph_json",
+    "get_config_resolver",
     "get_default_working_dir",
     "get_langsmith_project_name",
+    "get_project_agent_md_path",
+    "get_project_agents_dir",
     "get_server_project_context",
+    "get_skill_sources",
     "get_system_prompt",
+    "get_user_agent_md_path",
+    "get_user_agents_dir",
     "import_code_interpreter",
+    "import_offload_api",
+    "is_env_truthy",
     "is_memory_auto_save_enabled",
     "list_subagents",
     "load_async_subagents",
-    "plugin_skill_sources",
+    "load_extensions",
+    "offload_operation_from",
     "resolve_auto_classifier_model",
     "resolve_auto_classifier_timeout",
     "resolve_recursion_limit",
     "restore_user_tracing_api_keys",
     "restore_user_tracing_env",
+    "runtime_state",
     "server_manager_module",
-    "settings",
+    "shutdown_server_extensions",
     "start_server_and_get_agent",
     "suppress_langchain_beta_warning",
+    "validate_backend_route",
 ]

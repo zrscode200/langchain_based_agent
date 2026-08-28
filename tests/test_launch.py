@@ -15,6 +15,10 @@ def test_scaffold_workspace_targets_factory_graph(tmp_path):
 
     config = json.loads((tmp_path / "langgraph.json").read_text())
     assert config["graphs"] == {"agent": "lc_factory.server_graph:make_graph"}
+    assert config["http"] == {
+        "app": "lc_factory.offload_api:app",
+        "enable_custom_route_auth": True,
+    }
 
     checkpointer = (tmp_path / "checkpointer.py").read_text()
     assert "AsyncSqliteSaver" in checkpointer
@@ -23,6 +27,115 @@ def test_scaffold_workspace_targets_factory_graph(tmp_path):
     pyproject = (tmp_path / "pyproject.toml").read_text()
     assert "lc-factory-server-runtime" in pyproject
     assert "lc_factory" in pyproject
+    assert 'requires-python = ">=3.12"' in pyproject
+
+
+def test_offload_adapter_reuses_upstream_app_with_factory_runtime():
+    import deepagents_code.offload_api as upstream_offload_api
+
+    from lc_factory import offload_api
+    from lc_factory.server_graph import get_server_runtime
+
+    assert offload_api.app is upstream_offload_api.app
+    assert upstream_offload_api.get_server_runtime is get_server_runtime
+
+
+async def test_offload_adapter_serves_upstream_operation_routes():
+    import httpx
+
+    from lc_factory import offload_api
+
+    transport = httpx.ASGITransport(app=offload_api.app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://factory.test",
+    ) as client:
+        response = await client.post(
+            "/dcode/threads/factory-probe/offload/probe-operation/cancel",
+            json={},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "cancelled"}
+
+
+async def test_offload_adapter_operation_route_uses_factory_runtime(monkeypatch):
+    import httpx
+    import deepagents_code.offload_api as upstream_offload_api
+    from deepagents_code.offload_middleware import (
+        OffloadExecution,
+        unchanged_offload_result,
+    )
+
+    from lc_factory import offload_api, server_graph
+    from lc_factory.upstream import ServerRuntime
+
+    checkpoint = {
+        "checkpoint": {"checkpoint_id": "checkpoint-1"},
+        "next": [],
+        "tasks": [],
+        "interrupts": [],
+        "values": {
+            "messages": [{"type": "human", "content": "please summarize"}],
+            "_model_spec": "openai:gpt-5-mini",
+            "_model_params": {"temperature": 0},
+        },
+    }
+    calls: dict[str, object] = {}
+
+    class FakeThreads:
+        async def get(self, thread_id):
+            calls["thread_get"] = thread_id
+            return {"status": "idle"}
+
+        async def get_state(self, thread_id):
+            calls["thread_state"] = thread_id
+            return checkpoint
+
+        async def update_state(self, thread_id, update):
+            calls["thread_update"] = (thread_id, update)
+
+    class FakeClient:
+        threads = FakeThreads()
+
+    class FakeOffload:
+        async def execute(self, state, runtime):
+            calls["runtime_store"] = runtime.store
+            calls["runtime_model"] = runtime.context["model"]
+            calls["state_messages"] = len(state["messages"])
+            result = unchanged_offload_result("noop", messages=1, tokens=0)
+            return OffloadExecution({}, result)
+
+    async def fake_get_runtime():
+        calls["factory_runtime"] = True
+        agent = type("FakeAgent", (), {"store": "factory-store"})()
+        return ServerRuntime(agent=agent, backend=object(), offload=FakeOffload())
+
+    monkeypatch.setattr(upstream_offload_api, "_client", FakeClient())
+    monkeypatch.setattr(server_graph, "_get_runtime", fake_get_runtime)
+
+    transport = httpx.ASGITransport(app=offload_api.app)
+    async with httpx.AsyncClient(
+        transport=transport,
+        base_url="http://factory.test",
+    ) as client:
+        response = await client.post(
+            "/dcode/threads/factory-offload/offload",
+            json={"operation_id": "positive-operation", "context": {}},
+        )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "complete"
+    assert body["result"]["status"] == "noop"
+    assert calls == {
+        "thread_get": "factory-offload",
+        "thread_state": "factory-offload",
+        "factory_runtime": True,
+        "runtime_store": "factory-store",
+        "runtime_model": "openai:gpt-5-mini",
+        "state_messages": 1,
+    }
 
 
 def test_generated_workspace_cannot_preempt_the_reservation(tmp_path):
@@ -32,10 +145,10 @@ def test_generated_workspace_cannot_preempt_the_reservation(tmp_path):
     code runs in the server process before the graph module imports
     `lc_factory`. Two workspace artifacts could break that silently on a pin
     bump: `checkpointer.py` (imported by the langgraph loader — an upstream
-    import there would run the settings bootstrap, and load a repository
-    `.env`, ahead of the reservation) and an `env` key in `langgraph.json`
-    (langgraph loads that dotenv before importing the graph module, outside
-    the reservation's reach entirely).
+    import there could touch the lazy credentials bootstrap and load a
+    repository `.env`, ahead of the reservation) and an `env` key in
+    `langgraph.json` (langgraph loads that dotenv before importing the graph
+    module, outside the reservation's reach entirely).
     """
     launch.scaffold_workspace(tmp_path)
 

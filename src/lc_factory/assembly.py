@@ -1,13 +1,9 @@
 """Factory assembly: an owned recomposition of upstream's ``create_cli_agent``.
 
 ``create_factory_agent`` is a line-faithful port of
-``deepagents_code.agent.create_cli_agent`` (``agent.py:2155-2989`` at monorepo
-``8da0ccb13``, authored against deepagents-code==0.1.47, unchanged through
-0.1.48, re-applied for 0.1.52's composition changes: cost tracking,
-server-owned Hooks v2, the Auto classifier configuration, and the HITL
-restructure, then unchanged again through 0.1.54 — upstream's ``agent.py``
-is byte-identical between 0.1.52 and 0.1.54), with every upstream import
-routed through :mod:`lc_factory.upstream`.
+``deepagents_code.agent.create_cli_agent`` (``agent.py:2356-3410`` at the
+``deepagents-code==0.1.64`` release tag, commit ``d8686f74``), with every
+upstream import routed through :mod:`lc_factory.upstream`.
 
 **One deliberate behavioral delta**: the middleware injection seam
 (``middleware=``, Group 2), which is inert unless used — the default
@@ -31,11 +27,13 @@ import warnings
 from collections import Counter
 from collections.abc import Mapping
 from collections.abc import Set as AbstractSet
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from lc_factory.upstream import (
     CONVERSATION_HISTORY_DIRNAME,
+    DEFAULT_MODEL_RETRIES,
     REPOSITORY_TOOL_CALL_LIMIT,
     AsyncApprovalHITLMiddleware,
     CLIContextSchema,
@@ -43,6 +41,7 @@ from lc_factory.upstream import (
     ConfigurableModelMiddleware,
     FilesystemBackend,
     FilesystemMiddleware,
+    InterpreterConfig,
     LocalContextMiddleware,
     LocalShellBackend,
     MemoryMiddleware,
@@ -65,20 +64,30 @@ from lc_factory.upstream import (
     _normalize_rubric_grader_context_tools,
     _offload_fallback_root,
     _resolve_ptc_option,
+    _resolve_retry_owned_model,
+    _resolve_shell_allow_list,
     _rubric_grader_read_file_prefix,
     _rubric_grader_repository_tool_names,
     _rubric_grader_system_prompt,
     _sanitize_agent_message_name,
     _ShellAllowAll,
-    config,
+    _has_resolvable_model_provider,
+    attach_offload_operation,
+    credentials,
     create_deep_agent,
+    ensure_agent_dir,
     get_default_working_dir,
     get_langsmith_project_name,
+    get_project_agent_md_path,
+    get_project_agents_dir,
+    get_skill_sources,
     get_system_prompt,
+    get_user_agent_md_path,
+    get_user_agents_dir,
     list_subagents,
+    OffloadOperation,
     restore_user_tracing_api_keys,
     restore_user_tracing_env,
-    settings,
 )
 
 if TYPE_CHECKING:
@@ -90,9 +99,10 @@ if TYPE_CHECKING:
         BackendProtocol,
         BaseChatModel,
         BaseCheckpointSaver,
+        BaseStore,
         BaseTool,
-        CodeSkillSource,
         CompiledSubAgent,
+        ExtensionRegistry,
         FsToolName,
         InterruptOnConfig,
         MCPServerInfo,
@@ -121,16 +131,14 @@ _PHASE_ORDER: tuple[FactoryPhase, ...] = ("first", "before_verification", "last"
   instances: the compaction middleware (named ``SummarizationMiddleware``
   since 0.1.52, so it always rides the SDK core's summarization slot), and
   the factory's own ``FilesystemMiddleware`` when ``fs_tools`` is set.
-- ``before_verification`` — after everything that installs tools, context,
-  memory, skills and approval policy (since 0.1.52 that includes the main
-  agent's HITL approval middleware and server-owned hooks, which upstream
-  moved into the stack); ahead of the goal-criteria -> rubric verification
-  tail.
+- ``before_verification`` — after the built-in tool, context, memory, skills,
+  approval, and hooks block; ahead of goal criteria, compaction, model retry,
+  and rubric verification. Extension middleware retains upstream's late
+  post-verification position rather than being moved across this boundary.
 - ``last`` — after every factory middleware, immediately ahead of the SDK's own
-  tail (harness profile, prompt caching), which is not addressable. Since
-  0.1.52 the approval gate is NOT part of that tail: upstream installs HITL
-  inside the factory stack, ahead of the verification tail, so ``last``
-  middleware sits after the approval gate in list order rather than before it.
+  tail (harness profile, prompt caching), which is not addressable. This now
+  includes extension middleware and its runtime host. The approval gate is
+  inside the factory stack, so ``last`` remains after it in list order.
 """
 
 _DEFAULT_PHASE: FactoryPhase = "before_verification"
@@ -142,9 +150,9 @@ SubagentPhase = Literal["first", "last"]
 Deliberately a smaller vocabulary than `FactoryPhase`: subagent stacks have no
 goal-criteria/rubric verification tail, so `'before_verification'` would name a
 boundary that does not exist. The two phases here are the edges of the factory's
-own subagent block, which is never empty — `CostTrackingMiddleware(nested=True)`
-and `ServerHooksMiddleware` are appended unconditionally — so neither boundary
-moves with configuration.
+own subagent block, which is never empty — cost tracking, model retry, and
+server hooks are appended unconditionally — so neither boundary moves with
+configuration.
 """
 
 _SUBAGENT_PHASE_ORDER: tuple[SubagentPhase, ...] = ("first", "last")
@@ -173,7 +181,7 @@ than a silent no-op.
 _GRADER_PHASE_ORDER: tuple[GraderPhase, ...] = ("first", "last")
 """Grader phases in stack order.
 
-The factory's grader block is never empty — three budget middlewares
+The factory's grader block is never empty — model retry plus three budget middlewares
 (`_ContextToolCallBudgetMiddleware`, `_WebSearchBudgetMiddleware`,
 `_CriteriaContextBudgetMiddleware`) are unconditional — so both boundaries are
 well defined regardless of configuration.
@@ -682,17 +690,23 @@ def create_factory_agent(
     enable_skills: bool = True,
     enable_shell: bool = True,
     enable_interpreter: bool = False,
+    interpreter_config: InterpreterConfig | None = None,
     rubric_model: str | BaseChatModel | None = None,
     rubric_max_iterations: int | None = None,
     auto_classifier_model: str | BaseChatModel | None = None,
     recursion_limit: int | None = None,
     checkpointer: BaseCheckpointSaver | None = None,
+    store: BaseStore | None = None,
     mcp_server_info: list[MCPServerInfo] | None = None,
     cwd: str | Path | None = None,
     project_context: ProjectContext | None = None,
     async_subagents: list[AsyncSubAgent] | None = None,
     goal_criteria_tools: Sequence[BaseTool | Callable[..., Any]] | None = None,
     rubric_grader_tools: Sequence[BaseTool | Callable[..., Any]] | None = None,
+    model_retries: int = DEFAULT_MODEL_RETRIES,
+    cli_max_retries: int | None = None,
+    enforce_model_policy: bool = True,
+    extension_registry: ExtensionRegistry | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
@@ -747,8 +761,8 @@ def create_factory_agent(
 
             If `False`, tools pause for user confirmation via the approval menu.
             See `_add_interrupt_on` for the full list of gated tools.
-        auto_mode_enabled: Install classifier-backed Auto for the local Textual
-            runtime. Callers must leave this disabled for headless, remote, and
+        auto_mode_enabled: Install classifier-backed Auto for local TUI or ACP
+            runtimes. Callers must leave this disabled for headless and
             sandbox-backed graphs.
         interrupt_shell_only: If `True`, all HITL interrupts are disabled;
             shell commands are validated inline by `ShellAllowListMiddleware`
@@ -761,8 +775,8 @@ def create_factory_agent(
             disabled) or when `shell_allow_list` is `SHELL_ALLOW_ALL`.
         shell_allow_list: Explicit restrictive shell allow-list forwarded from
             the CLI process. When provided (and `interrupt_shell_only` is
-            `True`), used directly instead of reading `settings.shell_allow_list`
-            (which may not be set in the server subprocess environment).
+            `True`), used directly instead of resolving `shell.allow_list`
+            again in the server subprocess.
         fs_tools: Allowlist of filesystem tools to expose to the agent, from
             `--allow-fs-tools`. `None` (default; also what `--allow-fs-tools
             all` parses to) leaves `FilesystemMiddleware` at its SDK default
@@ -799,7 +813,7 @@ def create_factory_agent(
             receive the interpreter in v1.
 
             PTC (`tools.*` host bridge) calls bypass `interrupt_on`/HITL
-            approval, so `settings.interpreter_ptc` is the only effective
+            approval, so `InterpreterConfig.ptc` is the only effective
             control over which host tools can be invoked from inside the
             REPL. `js_eval` itself is intentionally not gated by HITL —
             per-call approval would be unusably noisy and would not block
@@ -811,6 +825,11 @@ def create_factory_agent(
             `interpreter_ptc_acknowledge_unsafe=True`.
 
             Requires the core `langchain-quickjs` dependency.
+        interpreter_config: Resolver-backed interpreter settings snapshot.
+
+            Direct callers may omit this to resolve one for the current
+            process. The server supplies a snapshot that incorporates its
+            invocation-scoped PTC overrides.
         rubric_model: Grader model for `RubricMiddleware`.
 
             A `'provider:model'` string or `BaseChatModel`.
@@ -830,11 +849,11 @@ def create_factory_agent(
             consult the env var or `config.toml`. Only meaningful when
             `auto_mode_enabled` is `True`.
         recursion_limit: Explicit LangGraph `recursion_limit` (graph step budget)
-            for the main agent. When `None`, it is resolved from the
-            `DEEPAGENTS_CODE_RECURSION_LIMIT` env var, `[runtime].recursion_limit`
-            in `config.toml`, then the default via `resolve_recursion_limit`.
+            for the main agent. When `None`, it is resolved from runtime
+            configuration. If unset, no `recursion_limit` is bound.
         checkpointer: Optional checkpointer for session persistence.
             When `None`, the graph is compiled without a checkpointer.
+        store: Optional LangGraph Store for runtime approval state.
         mcp_server_info: MCP server metadata to surface in the system prompt.
         cwd: Override the working directory for the agent's filesystem backend
             and system prompt.
@@ -879,15 +898,16 @@ def create_factory_agent(
                 the compaction middleware (named `SummarizationMiddleware`),
                 always, and the factory's own `FilesystemMiddleware` when
                 `fs_tools` is set.
-            - `'before_verification'` (default): after everything that
-                installs tools, context, memory, skills and approval policy
-                (including the main agent's HITL middleware and server-owned
-                hooks); ahead of the goal-criteria/rubric tail.
+            - `'before_verification'` (default): after the built-in tool,
+                context, memory, skills, approval, and hooks block; ahead of
+                goal criteria, compaction, model retry, and rubric verification.
+                Extension middleware keeps upstream's late post-verification
+                position and is not moved across this boundary.
             - `'last'`: after every factory middleware, immediately ahead of
-                the SDK's own tail (harness profile, prompt caching). That
-                SDK tail is not addressable from here. The approval gate is
-                no longer in it — HITL sits inside the factory stack, before
-                this phase.
+                the SDK's own tail (harness profile, prompt caching), including
+                extension middleware and its runtime host. The SDK tail is not
+                addressable from here. HITL sits inside the factory stack,
+                before this phase.
 
             This parameter reaches the **main agent only**. To cover work
             delegated through `task`, use `subagent_middleware`. The
@@ -907,6 +927,11 @@ def create_factory_agent(
             override `.name` on your instance. The guard is deliberately
             model-independent, so it also refuses names that could only
             collide on a model you are not using.
+
+            Extension middleware uses the same name-replacement rule after the
+            ordinary factory stack is assembled. A name shared with an
+            injection is rejected explicitly instead of allowing the extension
+            to discard the requested phase silently.
         subagent_middleware: Caller-supplied middleware spliced into **every**
             subagent stack the factory composes, including the synthesized
             `general-purpose` subagent.
@@ -971,6 +996,18 @@ def create_factory_agent(
             construction — not lazily when the grader is first built — so a bad
             injection fails at boot rather than mid-evaluation.
 
+        model_retries: Model-node retry attempts after the first call. `0`
+            disables retries. Resolved upstream from config/CLI.
+        cli_max_retries: The `--max-retries` flag value, or `None` when unset.
+            Forwarded to subagent, Auto classifier, and runtime offload models
+            so each one resolves its own provider's configured budget unless the
+            user overrode it globally.
+        enforce_model_policy: Check every model string against `models.allowed`.
+            Pass `False` **only** from callers that compile a graph they never
+            invoke (tool enumeration), so a blocked subagent model degrades the
+            listing rather than raising. Any caller that can run the graph must
+            leave this `True`.
+        extension_registry: Server-owned Python extension registrations.
 
     Returns:
         2-tuple of `(agent_graph, backend)`
@@ -981,7 +1018,7 @@ def create_factory_agent(
 
     Raises:
         ValueError: When `enable_interpreter=True` is paired with a
-            non-`None` `sandbox`, when `settings.interpreter_ptc` contains
+            non-`None` `sandbox`, when `InterpreterConfig.ptc` contains
             unknown tool names, when `interpreter_ptc="all"` is used
             without `auto_approve` or `interpreter_ptc_acknowledge_unsafe`,
             when any of `middleware`, `subagent_middleware`, or
@@ -989,13 +1026,27 @@ def create_factory_agent(
             entry that is not usable as middleware, when injected main-agent or
             subagent middleware claims a name the deepagents SDK reserves, or
             when any composed stack — main, subagent, or rubric grader — ends
-            up with a duplicate `.name`.
-    """
-    tools = tools or []
+            up with a duplicate `.name`, or when extension middleware claims
+            the same name as injected main-agent middleware.
+        ModelNotAllowedError: When `model`, `auto_classifier_model`,
+            `rubric_model`, or a subagent's frontmatter `model` is a string
+            outside the effective `models.allowed` policy. Model strings are
+            checked before dcode resolves them with provider retries disabled;
+            a prebuilt `BaseChatModel` came from a path that already checked.
+    """  # noqa: DOC502 - propagates from `ModelConfig.require_model_allowed`
+    tools = list(tools or [])
+    if extension_registry is not None:
+        from lc_factory.upstream import EXPERIMENTAL, is_env_truthy
+
+        if not is_env_truthy(EXPERIMENTAL):
+            extension_registry = None
     mcp_tools = tuple(mcp_tools or ())
     # SEAM (resolve): up front, so a bad phase key or entry fails before any
     # setup work. The three splice sites below depend on this binding.
     injected_middleware = _normalize_injected_middleware(middleware)
+    _injected_main_names = {
+        item.name for items in injected_middleware.values() for item in items
+    }
     # SEAM (resolve, subagents): same reasoning, and the reserved-name check
     # runs here too rather than at the per-subagent splice — a collision is a
     # property of the caller's input, not of any one subagent, so failing here
@@ -1014,10 +1065,9 @@ def create_factory_agent(
     _injected_grader_names = {
         item.name for items in injected_grader_middleware.values() for item in items
     }
-    if auto_mode_enabled and (not interactive or sandbox is not None):
+    if auto_mode_enabled and sandbox is not None:
         logger.warning(
-            "Classifier-backed Auto is unavailable outside the local interactive "
-            "runtime; using Manual HITL"
+            "Classifier-backed Auto is unavailable with a sandbox; using Manual HITL"
         )
         auto_mode_enabled = False
     effective_cwd = (
@@ -1028,46 +1078,28 @@ def create_factory_agent(
 
     # Setup agent directory for persistent memory (if enabled)
     if enable_memory or enable_skills:
-        agent_dir = settings.ensure_agent_dir(assistant_id)
+        agent_dir = ensure_agent_dir(assistant_id)
         agent_md = agent_dir / "AGENTS.md"
         if not agent_md.exists():
             # Create empty file for user customizations
             # Base instructions are loaded fresh from get_system_prompt()
             agent_md.touch()
 
-    # Skills directories (if enabled)
-    skills_dir = None
-    user_agent_skills_dir = None
-    project_skills_dir = None
-    project_agent_skills_dir = None
-    if enable_skills:
-        skills_dir = settings.ensure_user_skills_dir(assistant_id)
-        user_agent_skills_dir = settings.get_user_agent_skills_dir()
-        project_skills_dir = (
-            project_context.project_skills_dir()
-            if project_context is not None
-            else settings.get_project_skills_dir()
-        )
-        project_agent_skills_dir = (
-            project_context.project_agent_skills_dir()
-            if project_context is not None
-            else settings.get_project_agent_skills_dir()
-        )
-
     # Load custom subagents from filesystem
     custom_subagents: list[SubAgent | CompiledSubAgent] = []
+    resolved_shell_allow_list = _resolve_shell_allow_list()
     restrictive_shell_allow_list: list[str] | None = None
     if interrupt_shell_only and not auto_approve:
         # Prefer the explicitly forwarded allow-list (set by the CLI process
-        # and passed through ServerConfig).  Fall back to settings only for
-        # direct callers (e.g. benchmarking frameworks) that don't go through
-        # the server subprocess path.
+        # and passed through ServerConfig). Resolve the shared shell policy
+        # only for direct callers (e.g. benchmarking frameworks) that don't go
+        # through the server subprocess path.
         if shell_allow_list:
             restrictive_shell_allow_list = list(shell_allow_list)
-        elif settings.shell_allow_list and not isinstance(
-            settings.shell_allow_list, _ShellAllowAll
+        elif resolved_shell_allow_list and not isinstance(
+            resolved_shell_allow_list, _ShellAllowAll
         ):
-            restrictive_shell_allow_list = list(settings.shell_allow_list)
+            restrictive_shell_allow_list = list(resolved_shell_allow_list)
         else:
             logger.warning(
                 "interrupt_shell_only=True but no restrictive shell allow-list "
@@ -1084,11 +1116,11 @@ def create_factory_agent(
         else None
     )
 
-    user_agents_dir = settings.get_user_agents_dir(assistant_id)
+    user_agents_dir = get_user_agents_dir(assistant_id)
     project_agents_dir = (
         project_context.project_agents_dir()
         if project_context is not None
-        else settings.get_project_agents_dir()
+        else get_project_agents_dir(credentials.project_root)
     )
 
     def _subagent_cli_middleware(
@@ -1105,7 +1137,12 @@ def create_factory_agent(
         if resolved_interrupt_on is not None:
             middleware.append(AsyncApprovalHITLMiddleware(resolved_interrupt_on))
         if not has_explicit_model:
-            middleware.append(ConfigurableModelMiddleware(persist_model_state=False))
+            middleware.append(
+                ConfigurableModelMiddleware(
+                    persist_model_state=False,
+                    cli_max_retries=cli_max_retries,
+                )
+            )
         # Checkpoint nested spend before HITL can pause the subgraph, then hand
         # the completed delta back through owner-scoped state for the parent
         # graph to add to its durable total.
@@ -1115,6 +1152,9 @@ def create_factory_agent(
         # activates only for the measured Fireworks GLM-5.2 endpoint.
         if not interactive:
             middleware.append(_GlmTerminalStallRecovery())
+        from lc_factory.upstream import CodeModelRetryMiddleware
+
+        middleware.append(CodeModelRetryMiddleware(max_retries=model_retries))
         if restrictive_shell_allow_list is not None:
             middleware.append(ShellAllowListMiddleware(restrictive_shell_allow_list))
         # Server-owned hooks must wrap subagent tools too; otherwise Pre/Post
@@ -1139,9 +1179,7 @@ def create_factory_agent(
             from lc_factory.upstream import ManagedMemoryGuardMiddleware
 
             middleware.append(
-                ManagedMemoryGuardMiddleware(
-                    [settings.get_user_agent_md_path(assistant_id)]
-                )
+                ManagedMemoryGuardMiddleware([get_user_agent_md_path(assistant_id)])
             )
         # SEAM (subagent phase "last"): after every factory subagent
         # middleware, still ahead of the SDK's own subagent tail.
@@ -1151,6 +1189,41 @@ def create_factory_agent(
         _validate_subagent_stack(middleware, _injected_subagent_names)
         return middleware
 
+    from lc_factory.upstream import INHERIT_CLASSIFIER_MODEL, ModelConfig
+
+    # Every runtime model string is checked before it is resolved. Known providers
+    # go through `create_model` here so the SDK retry loop is disabled before Deep
+    # Agents builds the graph and every request carries dcode's retry metadata.
+    # Graph-only tool enumeration leaves all strings to SDK assembly because it
+    # never invokes them. Provider-less placeholders also remain strings because
+    # dcode cannot identify a retry constructor parameter for them. A
+    # `BaseChatModel` was already built by a checked path, so it is exempt.
+    model_policy = ModelConfig.load()
+    if not enforce_model_policy:
+        # Read-only enumeration (`dcode tools list`, `/tools`) compiles a graph
+        # with a placeholder model purely to read its bound tool node. Nothing
+        # is ever invoked, so a subagent whose frontmatter names a blocked model
+        # must not turn listing tools into a crash. Runtime construction always
+        # enforces; this flag exists only for callers that never execute.
+        model_policy = replace(
+            model_policy, allowed_models=None, allowed_models_source=None
+        )
+    if isinstance(model, str):
+        model_policy.require_model_allowed(model)
+        if enforce_model_policy and _has_resolvable_model_provider(model):
+            # `None` means credentials are absent: keep the spec so graph
+            # construction resolves it later instead of failing the launch.
+            resolved = _resolve_retry_owned_model(model, cli_max_retries)
+            if resolved is not None:
+                model = resolved
+    if (
+        isinstance(auto_classifier_model, str)
+        and auto_classifier_model.strip()
+        # The sentinel means "reuse the runtime model", which the check above
+        # already covered; it is not a spec and would never match a policy.
+        and auto_classifier_model != INHERIT_CLASSIFIER_MODEL
+    ):
+        model_policy.require_model_allowed(auto_classifier_model.strip())
     for subagent_meta in list_subagents(
         user_agents_dir=user_agents_dir,
         project_agents_dir=project_agents_dir,
@@ -1166,11 +1239,30 @@ def create_factory_agent(
             "system_prompt": subagent_meta["system_prompt"],
         }
         if model_spec:
-            subagent["model"] = model_spec
+            # Name the declaring file: this raise aborts the whole CLI launch,
+            # and across a dozen `agents/*.md` files the model alone is not
+            # enough to find the one to edit.
+            declared_in = subagent_meta.get("path")
+            name = subagent_meta["name"]
+            model_policy.require_model_allowed(
+                model_spec,
+                context=(
+                    f"subagent {name!r} ({declared_in})"
+                    if declared_in
+                    else f"subagent {name!r}"
+                ),
+            )
+            resolved_model = (
+                _resolve_retry_owned_model(model_spec, cli_max_retries)
+                if enforce_model_policy and _has_resolvable_model_provider(model_spec)
+                else None
+            )
+            subagent["model"] = (
+                resolved_model if resolved_model is not None else model_spec
+            )
         # Named `subagent_stack`, not `subagent_middleware` as upstream has it:
-        # that name is now the factory's own parameter, and rebinding it here
-        # would shadow it for the rest of the body. Deliberate divergence,
-        # recorded in UPGRADING.md.
+        # that name is the factory's own parameter, and rebinding it here would
+        # shadow it for the rest of the body.
         subagent_stack = _subagent_cli_middleware(
             has_explicit_model=has_explicit_model,
         )
@@ -1208,7 +1300,7 @@ def create_factory_agent(
     agent_middleware: list[AgentMiddleware[Any, Any]] = [
         # SEAM (phase "first"): ahead of every factory middleware.
         *injected_middleware["first"],
-        ConfigurableModelMiddleware(),
+        ConfigurableModelMiddleware(cli_max_retries=cli_max_retries),
     ]
     if not interactive:
         agent_middleware.append(_GlmTerminalStallRecovery())
@@ -1234,8 +1326,9 @@ def create_factory_agent(
     # `ReliableRubricMiddleware`: otherwise the grading agent's spend lands in
     # the next turn's checkpoint, or is lost on a session's final turn.
     # The CLI reads these channels back from `state_values` on thread resume.
-    # Goal tools: exposes the read-only `get_goal`/`get_rubric` tools and the
-    # constrained `update_goal` tool, and maintains goal-state notices.
+    # Goal tools: exposes the constrained write-side `update_goal` tool and
+    # maintains goal-state notices that carry the objective and acceptance
+    # criteria while they are live, so the model needs no goal/rubric read tool.
     from lc_factory.upstream import CostTrackingMiddleware
     from lc_factory.upstream import GoalToolsMiddleware
     from lc_factory.upstream import ResumeStateMiddleware
@@ -1255,11 +1348,11 @@ def create_factory_agent(
 
     # Add memory middleware
     if enable_memory:
-        memory_sources = [str(settings.get_user_agent_md_path(assistant_id))]
+        memory_sources = [str(get_user_agent_md_path(assistant_id))]
         project_agent_md_paths = (
             project_context.project_agent_md_paths()
             if project_context is not None
-            else settings.get_project_agent_md_path()
+            else get_project_agent_md_path(credentials.project_root)
         )
         memory_sources.extend(str(p) for p in project_agent_md_paths)
 
@@ -1285,54 +1378,15 @@ def create_factory_agent(
         from lc_factory.upstream import ManagedMemoryGuardMiddleware
 
         agent_middleware.append(
-            ManagedMemoryGuardMiddleware(
-                [settings.get_user_agent_md_path(assistant_id)]
-            )
+            ManagedMemoryGuardMiddleware([get_user_agent_md_path(assistant_id)])
         )
 
     # Add skills middleware
     if enable_skills:
-        # Lowest to highest precedence:
-        # built-in -> plugins -> user .deepagents -> user .agents
-        # -> project .deepagents -> project .agents
-        # -> user .claude (experimental) -> project .claude (experimental)
-        # Plugin skills are namespaced as `{plugin_id}:{skill_name}` to avoid
-        # collisions between plugins and user/project skills.
-        sources: list[CodeSkillSource] = [
-            (str(settings.get_built_in_skills_dir()), "Built-in"),
-        ]
-        try:
-            from lc_factory.upstream import discover_plugins
-            from lc_factory.upstream import plugin_skill_sources
-
-            plugin_result = discover_plugins()
-            if plugin_result.warnings:
-                logger.warning("Plugin discovery warnings: %s", plugin_result.warnings)
-            sources.extend(plugin_skill_sources(plugin_result.plugins))
-        except Exception:
-            logger.warning("Could not discover plugin skills", exc_info=True)
-        sources.extend(
-            [
-                (str(skills_dir), "User Deepagents"),
-                (str(user_agent_skills_dir), "User Agents"),
-            ]
+        sources = get_skill_sources(
+            assistant_id=assistant_id,
+            project_context=project_context,
         )
-        if project_skills_dir:
-            sources.append((str(project_skills_dir), "Project Deepagents"))
-        if project_agent_skills_dir:
-            sources.append((str(project_agent_skills_dir), "Project Agents"))
-
-        # Experimental: Claude Code skill directories
-        user_claude_skills_dir = settings.get_user_claude_skills_dir()
-        if user_claude_skills_dir.exists():
-            sources.append((str(user_claude_skills_dir), "User Claude"))
-        project_claude_skills_dir = settings.get_project_claude_skills_dir()
-        if project_claude_skills_dir:
-            sources.append((str(project_claude_skills_dir), "Project Claude"))
-
-        # `PluginSkillsMiddleware` namespaces plugin skills before dedup while
-        # behaving like the SDK middleware when no plugin namespaces are
-        # present, so it is safe to use for all skill sources.
         agent_middleware.append(
             PluginSkillsMiddleware(
                 backend=FilesystemBackend(virtual_mode=False),
@@ -1341,6 +1395,9 @@ def create_factory_agent(
         )
 
     # CONDITIONAL SETUP: Local vs Remote Sandbox
+    artifact_routes: dict[str, BackendProtocol] = {}
+    protected_extension_routes: set[str] = set()
+    artifacts_root: str | None = None
     if sandbox is None:
         # ========== LOCAL MODE ==========
         root_dir = effective_cwd if effective_cwd is not None else Path.cwd()
@@ -1351,8 +1408,9 @@ def create_factory_agent(
             # `deepagents-code` default applied at bootstrap) entirely so shell
             # commands don't inherit it.
             shell_env = os.environ.copy()
-            if settings.user_langchain_project is not None:
-                shell_env["LANGSMITH_PROJECT"] = settings.user_langchain_project
+            shell_env["GIT_TERMINAL_PROMPT"] = "0"
+            if credentials.user_langchain_project is not None:
+                shell_env["LANGSMITH_PROJECT"] = credentials.user_langchain_project
             else:
                 shell_env.pop("LANGSMITH_PROJECT", None)
             restore_user_tracing_env(shell_env)
@@ -1402,10 +1460,11 @@ def create_factory_agent(
 
         CodeInterpreterMiddleware, PTCOption = import_code_interpreter()
 
+        interpreter = interpreter_config or InterpreterConfig.from_resolver()
         ptc_names = _resolve_ptc_option(
-            settings.interpreter_ptc,
+            interpreter.ptc,
             tools=tools,
-            acknowledge_unsafe=settings.interpreter_ptc_acknowledge_unsafe,
+            acknowledge_unsafe=interpreter.ptc_acknowledge_unsafe,
             auto_approve=auto_approve,
         )
         ptc_option: PTCOption | None = (
@@ -1418,10 +1477,10 @@ def create_factory_agent(
             agent_middleware.append(
                 CodeInterpreterMiddleware(
                     tool_name="js_eval",
-                    timeout=settings.interpreter_timeout_seconds,
-                    memory_limit=settings.interpreter_memory_limit_mb * 1024 * 1024,
-                    max_ptc_calls=settings.interpreter_max_ptc_calls,
-                    max_result_chars=settings.interpreter_max_result_chars,
+                    timeout=interpreter.timeout_seconds,
+                    memory_limit=interpreter.memory_limit_mb * 1024 * 1024,
+                    max_ptc_calls=interpreter.max_ptc_calls,
+                    max_result_chars=interpreter.max_result_chars,
                     ptc=ptc_option,
                 )
             )
@@ -1433,7 +1492,7 @@ def create_factory_agent(
                 backend=backend,
                 mcp_server_info=mcp_server_info,
                 tracing_project=get_langsmith_project_name(),
-                user_tracing_project=settings.user_langchain_project,
+                user_tracing_project=credentials.user_langchain_project,
             )
         )
 
@@ -1454,7 +1513,7 @@ def create_factory_agent(
     interrupt_on: dict[str, bool | InterruptOnConfig] = {}
     auto_mode_config: tuple[Path, list[str]] | None = None
     if resolved_interrupt_on is not None and auto_mode_enabled:
-        configured_allow_list = shell_allow_list or settings.shell_allow_list
+        configured_allow_list = shell_allow_list or resolved_shell_allow_list
         narrow_allow_list = (
             configured_allow_list if isinstance(configured_allow_list, list) else []
         )
@@ -1477,14 +1536,17 @@ def create_factory_agent(
         # recovers, so archive paths saved during fallback stay resolvable.
         artifacts_storage = _artifacts_root()
         artifacts_root = artifacts_storage.root
+        conversation_history_root = (
+            _offload_fallback_root() / CONVERSATION_HISTORY_DIRNAME
+        )
         conversation_history_backend = FilesystemBackend(
-            root_dir=_offload_fallback_root() / CONVERSATION_HISTORY_DIRNAME,
+            root_dir=conversation_history_root,
             virtual_mode=True,
         )
         fallback_history_root = (
             f"{_FALLBACK_ARTIFACTS_ROOT}/{CONVERSATION_HISTORY_DIRNAME}/"
         )
-        artifact_routes: dict[str, BackendProtocol] = {
+        artifact_routes = {
             f"{artifacts_root}/{CONVERSATION_HISTORY_DIRNAME}/": (
                 conversation_history_backend
             ),
@@ -1497,19 +1559,46 @@ def create_factory_agent(
                     virtual_mode=True,
                 )
             )
-        composite_backend = CompositeBackend(
-            default=backend,
-            routes=artifact_routes,
-            artifacts_root=artifacts_root,
-        )
-    else:
-        # Sandbox mode: No special routing needed
-        composite_backend = CompositeBackend(
-            default=backend,
-            routes={},
+        protected_extension_routes = {
+            f"{_FALLBACK_ARTIFACTS_ROOT.rstrip('/')}/",
+            f"{artifacts_root.rstrip('/')}/",
+            f"/{str(conversation_history_root).lstrip('/').rstrip('/')}/",
+        }
+    extension_routes: dict[str, BackendProtocol] = {}
+    if extension_registry is not None:
+        from lc_factory.upstream import (
+            bind_runtime_host_policy,
+            validate_backend_route,
         )
 
-    compaction_middleware = _create_cli_compaction_middleware(model, composite_backend)
+        for route in extension_registry.backend_routes:
+            validate_backend_route(
+                route,
+                protected_extension_routes,
+                sandbox_active=sandbox is not None,
+            )
+            extension_routes[route.name] = route.unit
+        bind_runtime_host_policy(
+            extension_registry,
+            protected_extension_routes,
+            sandbox_active=sandbox is not None,
+        )
+    if artifacts_root is None:
+        composite_backend = CompositeBackend(
+            default=backend,
+            routes=extension_routes,
+        )
+    else:
+        composite_backend = CompositeBackend(
+            default=backend,
+            routes={**extension_routes, **artifact_routes},
+            artifacts_root=artifacts_root,
+        )
+    compaction_middleware = _create_cli_compaction_middleware(
+        model,
+        composite_backend,
+        cli_max_retries=cli_max_retries,
+    )
     if auto_mode_config is not None and resolved_interrupt_on is not None:
         from lc_factory.upstream import AutoModeHITLMiddleware
         from lc_factory.upstream import resolve_auto_classifier_model
@@ -1518,7 +1607,7 @@ def create_factory_agent(
         trusted_root, narrow_allow_list = auto_mode_config
         # An explicit argument wins; otherwise the env var / `config.toml`
         # preference is read here, where agent construction already runs off the
-        # blockbuster-guarded server loop (see `server_graph._make_graph`).
+        # blockbuster-guarded server loop (see `server_graph._make_graphs`).
         classifier_model = (
             auto_classifier_model
             if auto_classifier_model is not None
@@ -1530,6 +1619,7 @@ def create_factory_agent(
                 worktree_root=trusted_root,
                 shell_allow_list=narrow_allow_list,
                 classifier_model=classifier_model,
+                cli_max_retries=cli_max_retries,
                 classifier_timeout_seconds=resolve_auto_classifier_timeout(),
                 trusted_ask_user_tool=trusted_ask_user_tool,
                 trusted_compaction_tool=compaction_middleware.tools[0],
@@ -1548,7 +1638,16 @@ def create_factory_agent(
     from lc_factory.upstream import ServerHooksMiddleware
 
     hooks_cwd = Path(effective_cwd) if effective_cwd is not None else Path.cwd()
-    agent_middleware.append(ServerHooksMiddleware(cwd=hooks_cwd, mcp_tools=mcp_tools))
+    server_hooks_middleware = ServerHooksMiddleware(cwd=hooks_cwd, mcp_tools=mcp_tools)
+    agent_middleware.append(server_hooks_middleware)
+
+    # Publish the server operation on the backend shared with `server_graph`.
+    # The custom HTTP route owns checkpoint access and persistence, while this
+    # object retains the exact compaction and hook instances used by the agent.
+    attach_offload_operation(
+        composite_backend,
+        OffloadOperation(compaction_middleware, server_hooks_middleware),
+    )
 
     if fs_tools is not None:
         # `fs_tools` is an explicit allowlist here (`--allow-fs-tools all` and an
@@ -1621,13 +1720,28 @@ def create_factory_agent(
             context_tools=goal_criteria_tools,
             auto_mode_enabled=auto_mode_enabled,
             fs_tools=fs_tools,
+            model_retries=model_retries,
+            cli_max_retries=cli_max_retries,
         )
-        criteria_fallback_agent = create_goal_criteria_fallback_agent(model=model)
+        criteria_fallback_agent = create_goal_criteria_fallback_agent(
+            model=model,
+            model_retries=model_retries,
+            cli_max_retries=cli_max_retries,
+        )
         agent_middleware.append(
             GoalCriteriaMiddleware(criteria_agent, criteria_fallback_agent)
         )
 
     agent_middleware.append(compaction_middleware)
+
+    # Model-node retry sits inside side-effecting automatic compaction so a
+    # failed provider attempt repeats only the final model handler, not summary
+    # generation or the archive append. Keep it in the stack when the startup
+    # budget is zero because a runtime `/model` switch may select a provider
+    # with a non-zero request-time budget.
+    from lc_factory.upstream import CodeModelRetryMiddleware
+
+    agent_middleware.append(CodeModelRetryMiddleware(max_retries=model_retries))
 
     grader_context_tools = _normalize_rubric_grader_context_tools(
         rubric_grader_tools or ()
@@ -1672,6 +1786,12 @@ def create_factory_agent(
         # SEAM (grader phase "first"): outside the budget middlewares. Opt-in
         # only — the default phase is "last", which keeps budgets wrapping.
         *injected_grader_middleware["first"],
+        # Both clients filter this nested message stream. A transient fault can
+        # safely retry the failed model node without replaying grader tools.
+        CodeModelRetryMiddleware(
+            max_retries=model_retries,
+            stream_output_is_visible=False,
+        ),
         _ContextToolCallBudgetMiddleware(
             # `read_file` is bounded separately by the grader's in-tool
             # working-directory counter, which excludes offloaded-result reads.
@@ -1704,6 +1824,21 @@ def create_factory_agent(
     # injection mid-evaluation instead of at boot.
     _validate_grader_stack(grader_middleware, _injected_grader_names)
 
+    # Checked unconditionally, unlike the middleware below: a rubric model the
+    # policy blocks is a misconfiguration worth reporting at launch, not at the
+    # first invocation that happens to supply a rubric. A blank string is
+    # skipped because it is not a spec -- `RubricMiddleware` rejects it a few
+    # lines below with "`model` is required", which is the accurate diagnosis;
+    # a policy check here would instead advise a fully qualified spec.
+    if isinstance(rubric_model, str) and rubric_model.strip():
+        model_policy.require_model_allowed(rubric_model)
+        if enforce_model_policy and _has_resolvable_model_provider(rubric_model):
+            resolved_rubric_model = _resolve_retry_owned_model(
+                rubric_model, cli_max_retries
+            )
+            if resolved_rubric_model is not None:
+                rubric_model = resolved_rubric_model
+
     # Rubric-driven self-evaluation. The middleware is a no-op until a
     # `rubric` is supplied on invocation state, so installing it is safe.
     with warnings.catch_warnings():
@@ -1728,12 +1863,6 @@ def create_factory_agent(
             rubric_kwargs["max_iterations"] = rubric_max_iterations
         agent_middleware.append(ReliableRubricMiddleware(**rubric_kwargs))
 
-    # SEAM (phase "last"): after every factory middleware, immediately ahead of
-    # the SDK's own tail (harness profile, prompt caching). HITL is no longer
-    # in that tail — since 0.1.52 it sits inside the factory stack, above.
-    agent_middleware.extend(injected_middleware["last"])
-    _validate_injected_middleware(agent_middleware, injected_middleware)
-
     # Create the agent
     all_subagents: list[SubAgent | CompiledSubAgent | AsyncSubAgent] = [
         *custom_subagents,
@@ -1745,6 +1874,44 @@ def create_factory_agent(
     effective_recursion_limit = (
         recursion_limit if recursion_limit is not None else resolve_recursion_limit()
     )
+    if extension_registry is not None:
+        extension_tools = extension_registry.tool_units()
+        extension_tool_names = {registered.name for registered in extension_tools}
+        tools = [
+            item
+            for item in tools
+            if (getattr(item, "name", None) or getattr(item, "__name__", None))
+            not in extension_tool_names
+        ]
+        tools.extend(registered.unit for registered in extension_tools)
+        extension_middleware_names = {
+            registered.name for registered in extension_registry.middleware
+        }
+        if colliding := sorted(_injected_main_names & extension_middleware_names):
+            msg = (
+                "Injected main-agent middleware conflicts with extension "
+                f"middleware name(s): {colliding}. Upstream extensions replace "
+                "same-named middleware in place; refusing the collision keeps "
+                "the requested factory phase from being silently discarded. "
+                "Override `.name` on the injected or extension middleware."
+            )
+            raise ValueError(msg)
+        agent_middleware = [
+            item
+            for item in agent_middleware
+            if getattr(item, "name", type(item).__name__)
+            not in extension_middleware_names
+        ]
+        agent_middleware.extend(
+            registered.unit for registered in extension_registry.middleware
+        )
+        from lc_factory.upstream import ExtensionRuntimeMiddleware
+
+        agent_middleware.append(ExtensionRuntimeMiddleware(extension_registry))
+    # SEAM (phase "last"): after every factory middleware, including extension
+    # middleware and its runtime host, immediately ahead of the SDK's own tail.
+    agent_middleware.extend(injected_middleware["last"])
+    _validate_injected_middleware(agent_middleware, injected_middleware)
     agent = create_deep_agent(
         model=model,
         system_prompt=system_prompt,
@@ -1754,7 +1921,20 @@ def create_factory_agent(
         interrupt_on=interrupt_on,
         context_schema=CLIContextSchema,
         checkpointer=checkpointer,
+        store=store,
         subagents=all_subagents or None,
         name=_sanitize_agent_message_name(assistant_id),
-    ).with_config({**config, "recursion_limit": effective_recursion_limit})
+    )
+    if effective_recursion_limit is not None:
+        # `Pregel.with_config` uses `merge_configs`, which discards a value equal
+        # to LangGraph's environment-derived default. Replace the copied graph's
+        # config directly so that inherited default can override the SDK's 9,999.
+        agent = agent.copy(
+            {
+                "config": {
+                    **(agent.config or {}),
+                    "recursion_limit": effective_recursion_limit,
+                }
+            }
+        )
     return agent, composite_backend

@@ -1,10 +1,11 @@
 """Workspace scaffolding for a ``langgraph dev`` server on the factory graph.
 
 Port of the workspace-scaffolding half of
-``deepagents_code.client.launch.server_manager`` (monorepo ``8da0ccb13``), with
-two changes: the generated ``langgraph.json`` references
-``lc_factory.server_graph:make_graph``, and the generated runtime pyproject
-depends on ``lc_factory`` (which transitively pins ``deepagents-code``).
+``deepagents_code.client.launch.server_manager`` at
+``deepagents-code==0.1.64`` (release commit ``d8686f74``). The generated
+``langgraph.json`` references ``lc_factory.server_graph:make_graph`` and its
+factory offload adapter, while the generated runtime pyproject depends on
+``lc_factory`` (which transitively pins ``deepagents-code``).
 
 :func:`scaffold_workspace` is the rebind target for the TUI launch seam — see
 :mod:`lc_factory.tui`. Everything else about starting the server (the
@@ -20,6 +21,7 @@ re-application. Recover it from history if a non-TUI embedding ever needs one.
 
 from __future__ import annotations
 
+import json
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -45,11 +47,20 @@ def scaffold_workspace(work_dir: Path) -> None:
     # `graph_ref` is a dotted import of the installed `lc_factory` package;
     # `checkpointer_path` stays cwd-relative because checkpointer.py is
     # generated fresh into work_dir and is not an importable package module.
-    generate_langgraph_json(
+    config_path = generate_langgraph_json(
         work_dir,
         graph_ref=GRAPH_REF,
         checkpointer_path="./checkpointer.py:create_checkpointer",
     )
+    # Upstream registers /offload only for its built-in graph reference. The
+    # factory owns an equivalent ServerRuntime, so add the narrow adapter with
+    # the same route-auth opt-in after parsing the generated config structurally.
+    config = json.loads(config_path.read_text())
+    config["http"] = {
+        "app": "lc_factory.offload_api:app",
+        "enable_custom_route_auth": True,
+    }
+    config_path.write_text(json.dumps(config, indent=2))
 
 
 def _write_pyproject(work_dir: Path) -> None:
@@ -61,7 +72,7 @@ def _write_pyproject(work_dir: Path) -> None:
     content = f"""[project]
 name = "lc-factory-server-runtime"
 version = "0.0.1"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "{_runtime_package_dependency()}",
 ]

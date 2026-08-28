@@ -34,7 +34,7 @@ def _headless_env(home: Path) -> dict[str, str]:
         key: value
         for key, value in os.environ.items()
         if not key.startswith(
-            ("DEEPAGENTS_CODE_", "LANGSMITH_", "LANGCHAIN_", "LC_FACTORY_")
+            ("DEEPAGENTS_", "LANGSMITH_", "LANGCHAIN_", "LC_FACTORY_")
         )
     }
     child_env["HOME"] = str(home)

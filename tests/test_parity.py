@@ -57,7 +57,7 @@ _UNSTABLE_STATE_KEYS = frozenset({"_sandbox_id", "_env"})
 # auto_mode) outside the tripwire.
 _SUMMARIZED_TYPES = frozenset({"CompiledStateGraph", "Pregel"})
 
-_MAX_DEPTH = 6
+_MAX_DEPTH = 9
 """Recursion bound for `_normalize`, to keep failure output readable.
 
 State nested deeper than this is invisible to the tripwire. Nothing is
