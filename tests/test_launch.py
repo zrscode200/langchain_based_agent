@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
 from importlib.metadata import version
@@ -80,7 +81,7 @@ async def test_offload_adapter_operation_route_uses_factory_runtime(monkeypatch,
         config_fingerprint=config.workspace_fingerprint(),
     )
     monkeypatch.setattr(server_graph, "_workspace_runtimes", server_graph.OrderedDict())
-    monkeypatch.setattr(server_graph, "_workspace_runtime_locks", {})
+    monkeypatch.setattr(server_graph, "_workspace_runtime_lock", asyncio.Lock())
 
     checkpoint = {
         "checkpoint": {"checkpoint_id": "checkpoint-1"},

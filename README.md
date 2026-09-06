@@ -35,6 +35,35 @@ Bumping the upstream pin follows [`UPGRADING.md`](UPGRADING.md) — the parity
 suite gates it. Every bump so far, and what each cost, is recorded in
 [`VERSION_BUMPS.md`](VERSION_BUMPS.md).
 
+## Current upstream baseline
+
+Python **3.12+** is required. Code **0.1.66** and SDK **0.7.13** are installed
+from the exact upstream revision `6c89fe2197a2dfe4f3851cda38565bcadba6066b`, which includes
+post-release fixes absent from the same-numbered PyPI releases. QuickJS is
+pinned to the published **0.3.7** package. `uv sync --locked` reproduces this
+baseline; smoke tests verify Git provenance as well as package versions.
+
+Both `create_factory_agent` and the owned server assembly include workspace
+configuration isolation. The server snapshots each workspace's environment and
+credentials, then passes `environ`, `credentials_snapshot`, and `model_result`
+to the constructor. Model switching, compaction, grader/classifier models, MCP
+discovery, and shell execution use the supported upstream snapshot paths.
+For direct embedding, supply an immutable environment and matching credential
+snapshot; run model/tool setup inside upstream's `use_environment` scope.
+
+The launch workspace and request paths share one runtime cache. With a configured
+process-wide sandbox, a second workspace is refused with HTTP 409, including
+after a failed first build. Without that sandbox, distinct workspaces can have
+separate cached runtimes. This is configuration isolation; independent tenant
+permissions and OS/container isolation remain hosting responsibilities. Plugins
+that read global `os.environ` need explicit workspace-aware integration.
+
+The Git requirements survive wheel packaging. Installation currently needs
+access to the pinned source, or an internally mirrored, provenance-verified
+build. Runtime hosting and model calls can stay on company infrastructure.
+See [`UPSTREAM_REVIEW.md`](UPSTREAM_REVIEW.md) for the transfer assessment and
+[`VERSION_BUMPS.md`](VERSION_BUMPS.md) for implementation validation.
+
 ## Middleware injection
 
 The factory's first capability beyond v0. `create_cli_agent` has no middleware

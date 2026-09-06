@@ -17,19 +17,101 @@ stay a constant-length document no matter how many bumps accumulate.
 
 | Date | `deepagents-code` | `deepagents` | Port changes | Effort | Commit |
 |---|---|---|---|---|---|
-| 2026-09-06 | 0.1.64 → **0.1.66** | 0.7.10 → **0.7.13** | **constructor + workspace runtime + fork seam** | ~36 min | this commit |
+| 2026-09-06 | 0.1.66 release → **6c89fe2 source** | 0.7.13 release → **6c89fe2 source** | **workspace snapshots + sandbox ownership; QuickJS 0.3.7** | ~18 min | this commit |
+| 2026-09-06 | 0.1.64 → **0.1.66** | 0.7.10 → **0.7.13** | **constructor + workspace runtime + fork seam** | ~36 min | `7bade13` |
 | 2026-08-28 | 0.1.54 → **0.1.64** | 0.7.5 → **0.7.10** | **broad runtime rebase** | ~1 hr | `eaf8a12` |
 | 2026-08-10 | 0.1.52 → **0.1.54** | 0.7.1 → **0.7.5** | **none** (proven) | <30 min | `cb43e40` |
 | 2026-08-06 | 0.1.48 → **0.1.52** | 0.7.0b2 → **0.7.1** | **7 hunks re-applied** | ~1 hr | `304f8a8` |
 | 2026-07-27 | 0.1.47 → **0.1.48** | 0.7.0b2 (held) | **none** (inferred) | ~15 min | `45c40bd` |
 
-Two free bumps and three re-applications. The 0.1.66 bump also changes an
+Two free bumps and four re-applications. The 0.1.66 bump also changes an
 extension contract: default forked subagents inherit main middleware. Package
 parity alone cannot prove that previously documented injection scopes survive.
 
 ---
 
-## 2026-09-06 — 0.1.64 → 0.1.66 (SDK 0.7.10 → 0.7.13) — this commit
+## 2026-09-06 — reviewed source baseline 6c89fe2 + QuickJS 0.3.7 — this commit
+
+**Verdict: coordinated constructor and server re-application.** The user
+explicitly authorized bringing the reviewed upstream fixes into this repository.
+Both Code and SDK now pin full revision
+`6c89fe2197a2dfe4f3851cda38565bcadba6066b` from the official upstream Git
+repository. Metadata versions remain **0.1.66 / 0.7.13**; these are unreleased
+source builds, not the same-numbered PyPI artifacts. QuickJS moves from
+**0.3.4 to the published 0.3.7**. Python remains **>=3.12,<4**.
+
+**Delta and provenance:** reviewed the complete Code delta from release
+`3812967c84d90619848f3185f22470204fc88bd8` and SDK delta from release
+`1aae3746682a65c837c5dd0f165b685253fe9465`. Installed Code's **257** and SDK's
+**53** Python source files match the exact Git archive byte for byte.
+Distribution `direct_url.json` records the full revision and correct package
+subdirectories; smoke tests now enforce both. QuickJS's wheel SHA-256 is
+`50f384b209f0f0f472c043024e2c74276900352591422df1aeae7a0fbcf8566f`, previously
+verified against PyPI metadata and now recorded in `uv.lock`.
+
+**Ported:** constructor arguments `environ`, `credentials_snapshot`, and
+`model_result`; workspace-aware model middleware, compaction, classifier,
+grader/criteria construction, prompt metadata, and shell environment/tracing
+restoration. The server builds immutable workspace snapshots without global
+dotenv mutation, scopes setup with `use_environment`, supplies tool credentials,
+and carries all three snapshots into `create_factory_agent`. All three factory
+middleware targets and their existing scope/order guards are preserved.
+
+**Server ownership:** one initialization lock and shared launch/workspace cache;
+process-lifetime sandbox ownership, including after failed construction; and
+workspace conflict errors. The existing offload adapter automatically consumes
+the updated upstream HTTP implementation, providing 409 on conflict and 503 on
+startup exit before creating thread state. Scaffolding and the TUI rebind still
+match upstream. Configuration, model loading, tool/MCP helpers, and HTTP code
+arrive through the source-pinned dependency instead of additional local copies.
+
+**Other adopted fixes:** SDK rejects empty edit targets and correctly formats
+blank windows of nonempty files. QuickJS has private per-agent interpreter state
+and native PTC streaming. The optional snapshot HMAC feature remains unconfigured;
+this update supplies no signing key. Talon product features were not transferred.
+
+**Tripwire maintenance:** environment fields `_env` and `_environ` are now
+fingerprinted by SHA-256 digest rather than omitted or treated as opaque.
+An explicit workspace case passes parity; dropping the factory model middleware's
+snapshot makes its fingerprint diverge. Existing recursion/schema/fork/argument
+negative controls and the depth-9 rich-case guard pass. No factory-specific
+normalization exemption was added. Server tests were updated for the new lock
+and snapshot API instead of mocking the removed credential reload.
+
+**Verification:** Python 3.12.12; **200 passed, 7 deselected** in the default suite
+(parity 31, seam 94, boundary/smoke 10, server/launch 53, workspace/interpreter 9,
+assembly 3). Live-server suite **7 passed, 200 deselected**. The new tests prove
+concurrent workspace configuration separation, frozen shell execution and lazy
+model wrappers after a process environment change, sandbox refusal after failed
+initialization, startup cache reuse, error markers, and the factory HTTP adapter's
+409/503 ordering. A real factory graph executes JavaScript, forks, and verifies
+distinct interpreter slots and absent parent JavaScript globals in the child.
+
+Additionally, **16 targeted upstream SDK regressions passed** across utils,
+filesystem/state/store/sandbox backends and filesystem middleware (700 unrelated
+tests deselected). These run against this repository's installed environment.
+Wheel and sdist build successfully. Wheel metadata retains both full Git
+references and QuickJS 0.3.7; `uv sync --locked --offline` succeeds from the populated
+cache. Disabling upstream monorepo source overrides keeps ACP 0.0.11 and QuickJS
+0.3.7 on registry artifacts. The sdist excludes local `.code-workspace` files.
+`git diff --check` passes.
+
+**Effort:** approximately 18 minutes of implementation and verification from
+2026-09-06 05:26:58 UTC through final packaging, excluding the earlier transfer
+assessment. Includes source installation, both owned ports, regression tests,
+provenance verification, and documentation; initial dependency investigation
+before that timestamp is not included.
+
+**Limits:** configuration isolation covers supported consumers, not arbitrary
+plugins reading `os.environ`, tenant authorization, or OS process isolation.
+A sandbox-enabled process still serves one workspace. Company model endpoints,
+real-provider reasoning quality, external MCP services, and AWS deployment were
+not exercised. Git source access (or reviewed internal mirrors) is needed to
+install this baseline; runtime hosting does not require a LangChain service.
+
+---
+
+## 2026-09-06 — 0.1.64 → 0.1.66 (SDK 0.7.10 → 0.7.13) — `7bade13`
 
 **Verdict: re-application owed.** The released constructor has 10 changed
 hunks (55 additions / 16 deletions). `_make_graphs` has eight changed hunks;

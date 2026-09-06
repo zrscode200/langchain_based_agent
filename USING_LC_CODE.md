@@ -15,6 +15,12 @@ It is the user-facing entry point for:
 You do **not** need to install, launch, or learn `dcode` first. `uv sync`
 installs this project's pinned `deepagents-code` dependency, and `lc-code`
 launches that dependency's normal TUI against the factory constructor.
+The current baseline pins Code and SDK to a reviewed Git revision; their
+package version strings alone do not identify the installed behavior. Use
+`uv sync --locked` and see the [baseline details](README.md#current-upstream-baseline).
+Installation needs the source or an approved internal mirror; the running agent
+does not require an external LangChain hosting service.
+
 
 The executable is named **`lc-code`**, with a hyphen. There is no `lc_code`
 shell command.
@@ -28,7 +34,7 @@ You need:
 
 - Git;
 - a terminal;
-- `uv`; and
+- `uv` and Python 3.12 or newer (`uv` can install Python); and
 - a credential for a model provider supported by Deep Agents Code.
 
 Check whether `uv` is installed:

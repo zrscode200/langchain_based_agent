@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import dataclasses
 import functools
+import hashlib
+import json
 import inspect
 from pathlib import Path, PurePath
 from typing import Any
@@ -44,11 +46,19 @@ CONFIG_MATRIX: dict[str, dict[str, Any]] = {
     "summary_model": {"summarization_model": "openai:summary-fixture"},
 }
 
-# State that is not port-controlled and would produce false drift reports:
-# `_sandbox_id` is regenerated per backend instance, and `_env` is a snapshot
-# of `os.environ` (the port never sets it — and putting it in the fingerprint
-# would dump every credential into `-vv` failure output).
-_UNSTABLE_STATE_KEYS = frozenset({"_sandbox_id", "_env"})
+# Random backend identities are outside the constructor contract. Environment
+# snapshots now ARE port-controlled: compare their digests without printing
+# credentials in a failing assertion.
+_UNSTABLE_STATE_KEYS = frozenset({"_sandbox_id"})
+_ENVIRONMENT_STATE_KEYS = frozenset({"_env", "_environ"})
+
+
+def _environment_fingerprint(value):
+    if value is None:
+        return None
+    payload = json.dumps(dict(value), sort_keys=True).encode()
+    return {"environment_sha256": hashlib.sha256(payload).hexdigest()}
+
 
 # Nested compiled graphs are summarized rather than walked: full recursion
 # produced megabytes of failure output, but they cannot be fully opaque —
@@ -146,7 +156,8 @@ def _normalize(value: Any, depth: int = 0, memo: dict[int, str] | None = None) -
         memo[id(value)] = f"{type(value).__name__}#{len(memo)}"
         return {
             type(value).__name__: {
-                key: _normalize(item, depth + 1, memo)
+                key: (_environment_fingerprint(item) if key in _ENVIRONMENT_STATE_KEYS
+                      else _normalize(item, depth + 1, memo))
                 for key, item in sorted(state.items())
                 if key not in _UNSTABLE_STATE_KEYS
             }
@@ -784,3 +795,44 @@ def test_fingerprint_detects_dropped_constructor_kwargs(tmp_path):
     assert _fingerprint(drifted) != _fingerprint(v0), (
         "parity suite is blind to dropped constructor kwargs"
     )
+
+
+def test_composition_parity_with_workspace_snapshot(tmp_path, monkeypatch):
+    from types import MappingProxyType
+    from deepagents_code.config import Credentials, ModelResult
+    from lc_factory import assembly
+
+    environment = MappingProxyType({
+        "PATH": "/usr/bin:/bin", "FACTORY_WORKSPACE_PROBE": "workspace-a",
+        "OPENAI_API_KEY": "test-key-a", "OPENAI_BASE_URL": "https://a.invalid/v1",
+    })
+    kwargs = {
+        "environ": environment,
+        "credentials_snapshot": Credentials.snapshot_from_environment(
+            start_path=tmp_path, environ=environment,
+        ),
+        "model_result": ModelResult(
+            model=_fake_model(), model_name="workspace-model", provider="openai",
+            context_limit=12345, unsupported_modalities=frozenset({"video"}),
+        ),
+    }
+    ours, upstream = _run_both(kwargs, tmp_path)
+    assert _fingerprint(ours) == _fingerprint(upstream)
+    # Negative control: a port that drops the environment must fail parity,
+    # even though both constructors still receive the same model object.
+    original = assembly.ConfigurableModelMiddleware
+    def drop_environment(*args, **options):
+        options.pop("environ", None)
+        return original(*args, **options)
+    monkeypatch.setattr(assembly, "ConfigurableModelMiddleware", drop_environment)
+    drifted, baseline = _run_both(kwargs, tmp_path)
+    assert _fingerprint(drifted) != _fingerprint(baseline)
+
+
+def test_environment_fingerprint_redacts_values():
+    from types import SimpleNamespace, MappingProxyType
+    left = _normalize(SimpleNamespace(_environ=MappingProxyType({"KEY": "secret-a"})))
+    right = _normalize(SimpleNamespace(_environ=MappingProxyType({"KEY": "secret-b"})))
+    assert left != right
+    assert "secret-a" not in repr(left)
+    assert "secret-b" not in repr(right)

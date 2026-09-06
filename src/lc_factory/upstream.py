@@ -4,8 +4,9 @@ Every project source module imports ``deepagents-code``, ``deepagents``, and
 LangChain runtime symbols through this module. A pin bump therefore fails at
 one explicit boundary before copied assembly or launch code can drift silently.
 
-Verified against deepagents-code==0.1.66 / deepagents==0.7.13. The factory's
-owned assembly and server runtime are ports of those exact released sources;
+Verified against deepagents-code 0.1.66 / deepagents 0.7.13 from commit
+``6c89fe2197a2dfe4f3851cda38565bcadba6066b``, plus langchain-quickjs 0.3.7.
+The factory's owned assembly and server runtime port this unreleased baseline;
 private names remain intentionally guarded by tests and the bump ledger.
 """
 
@@ -95,8 +96,11 @@ from deepagents_code.client.remote_client import RemoteAgent
 
 # --- config, runtime state, and model policy ---
 from deepagents_code.config import (
+    Credentials,
     DEFAULT_MODEL_RETRIES,
     _ShellAllowAll,
+    _preview_dotenv_environ,
+    apply_inherited_user_tracing,
     configure_langsmith_secret_redaction,
     create_model,
     credentials,
@@ -107,6 +111,7 @@ from deepagents_code.config import (
     restore_user_tracing_api_keys,
     restore_user_tracing_env,
     runtime_state,
+    use_environment,
 )
 from deepagents_code.config_manifest import (
     resolve_auto_classifier_timeout,
@@ -177,7 +182,11 @@ from deepagents_code.offload_middleware import (
 from deepagents_code.plugins.adapters.skills_middleware import PluginSkillsMiddleware
 from deepagents_code.project_utils import ProjectContext, get_server_project_context
 from deepagents_code.subagents import list_subagents
-from deepagents_code.workspace import require_thread_workspace
+from deepagents_code.workspace import (
+    WorkspaceConflictError,
+    require_thread_workspace,
+    resolve_workspace,
+)
 
 # --- server graph internals reused by lc_factory.server_graph ---
 from deepagents_code.server_graph import (
@@ -225,6 +234,8 @@ TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
     ("deepagents_code.extensions.registry", "ExtensionRegistry"),
     ("deepagents_code.mcp_tools", "MCPServerInfo"),
     ("deepagents_code.workspace", "WorkspaceBinding"),
+    ("deepagents_code.config", "CredentialsSnapshot"),
+    ("deepagents_code.config", "ModelResult"),
 )
 """Annotation-only imports explicitly resolved by the boundary test."""
 
@@ -243,6 +254,7 @@ if TYPE_CHECKING:
     from deepagents_code.extensions.registry import ExtensionRegistry
     from deepagents_code.mcp_tools import MCPServerInfo
     from deepagents_code.workspace import WorkspaceBinding
+    from deepagents_code.config import CredentialsSnapshot, ModelResult
 
 
 __all__ = [
@@ -256,6 +268,7 @@ __all__ = [
     "CompositeBackend",
     "ConfigurableModelMiddleware",
     "CostTrackingMiddleware",
+    "Credentials",
     "DEFAULT_MODEL_RETRIES",
     "EXPERIMENTAL",
     "FORKED_SUBAGENTS",
@@ -292,6 +305,7 @@ __all__ = [
     "ServerRuntime",
     "ShellAllowListMiddleware",
     "ToolErrorMiddleware",
+    "WorkspaceConflictError",
     "_AsyncExecutableBackend",
     "_ContextToolCallBudgetMiddleware",
     "_CriteriaContextBudgetMiddleware",
@@ -318,6 +332,7 @@ __all__ = [
     "_inject_fs_tools_into_subagents",
     "_normalize_rubric_grader_context_tools",
     "_offload_fallback_root",
+    "_preview_dotenv_environ",
     "_resolve_ptc_option",
     "_resolve_retry_owned_model",
     "_resolve_shell_allow_list",
@@ -330,6 +345,7 @@ __all__ = [
     "_sanitize_agent_message_name",
     "_write_checkpointer",
     "attach_offload_operation",
+    "apply_inherited_user_tracing",
     "bind_runtime_host_policy",
     "bind_server_extensions",
     "configure_langsmith_secret_redaction",
@@ -367,6 +383,7 @@ __all__ = [
     "resolve_auto_classifier_model_for_provider",
     "resolve_auto_classifier_timeout",
     "resolve_recursion_limit",
+    "resolve_workspace",
     "restore_user_tracing_api_keys",
     "restore_user_tracing_env",
     "runtime_state",
@@ -375,4 +392,5 @@ __all__ = [
     "start_server_and_get_agent",
     "suppress_langchain_beta_warning",
     "validate_backend_route",
+    "use_environment",
 ]

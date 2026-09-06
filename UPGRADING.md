@@ -6,15 +6,22 @@ This file is the procedure.
 
 ## The dual pin
 
-`pyproject.toml` pins two packages exactly:
+`pyproject.toml` pins Code and the SDK as one reviewed unit, plus an explicit
+QuickJS version when interpreter fixes are adopted. Normally use exact published
+versions and verify their artifacts. The current user-authorized exception pins
+both Code and SDK via PEP 508 Git references at
+`6c89fe2197a2dfe4f3851cda38565bcadba6066b`; their metadata still says **0.1.66 / 0.7.13**.
+QuickJS is the published **0.3.7** release.
 
-- `deepagents-code==<version>` — the v0 baseline whose assembly we port.
-- `deepagents==<version>` — pinned to exactly what `deepagents-code`
-  requires. Declared directly because `upstream.py` imports it, and because
-  uv only resolves a pre-release when it is a direct requirement.
+Keep source references in project dependencies so built wheels retain them.
+`[tool.uv] no-sources = true` prevents the upstream monorepo's editable source
+overrides from silently pulling ACP or QuickJS from Git too. The smoke suite
+checks each Code/SDK distribution's `direct_url.json` commit and subdirectory,
+not just its version. For an internal artifact mirror, review and record the
+replacement artifact hashes and provenance before changing that assertion.
 
-**Bump both together.** They are one unit; a mismatch fails resolution, which
-is the intended loud failure.
+**Review both together.** Check Code's SDK requirement even when the SDK version
+string stays fixed. Do not mix an updated constructor with old helper packages.
 
 ## What the port is coupled to
 
@@ -32,7 +39,7 @@ tags before touching anything:
 | `deepagents/graph.py` (`_apply_custom_middleware`, the core/tail split, fork inheritance merge) | `src/lc_factory/assembly.py` — the main and fresh-subagent phase contracts depend on the SDK splice; forks additionally inherit the parent's middleware and retain parent positions on same-name replacement. `tests/test_seam.py` |
 | `deepagents/middleware/subagents.py` (fork state/prompt inheritance and final compilation) | `src/lc_factory/assembly.py` — re-check shared middleware instances, private-state inheritance, recursive-delegation guards, and SDK-reserved names added after the graph-level merge, including `_ForkTaskToolMiddleware`. |
 | `langchain/agents/factory.py` (hook wiring, duplicate-name check) | `src/lc_factory/assembly.py` — the seam documents `before_*` forward / `after_*` reversed. A reversal inverts every phase guarantee. `tests/test_seam.py` |
-| `deepagents_code/config.py` (`credentials`, `_load_dotenv`, runtime state) | `src/lc_factory/_env.py`, `src/lc_factory/assembly.py`, and `src/lc_factory/server_graph.py` — D4 depends on shell-first dotenv precedence and the server must apply model metadata to runtime state. |
+| `deepagents_code/config.py` (`credentials`, `_load_dotenv`, runtime state) | `src/lc_factory/_env.py`, `src/lc_factory/assembly.py`, and `src/lc_factory/server_graph.py` — D4 depends on shell-first dotenv precedence and the server must freeze workspace environment/credentials and pass model metadata to the constructor and lazy consumers. |
 | `deepagents_code/extensions/hosting.py`, `extensions/runtime.py`, `model_retry.py` | `src/lc_factory/assembly.py`, `src/lc_factory/server_graph.py` — extension composition and retry middleware now cross the seam's positional contract. |
 | `deepagents_code/client/launch/server.py` (`_build_server_env` denylist) | `src/lc_factory/server_graph.py` — the `LC_FACTORY_MIDDLEWARE` transport works only because filtering is denylist-based, not prefix-based. Prefix filtering would sever it silently. |
 
@@ -42,8 +49,11 @@ private (underscore) names that carry no semver protection.
 
 ## Procedure
 
-1. **Read the release delta.** Diff the *published artifact*, not the
-   monorepo — the wheel is what we pin, and this needs no upstream checkout:
+1. **Read the baseline delta.** For release pins, diff the *published artifact*.
+   For an explicitly authorized unreleased fix, pin one full source revision,
+   inspect the complete package delta, and verify installed sources against it.
+   Never identify unreleased code only by its retained version string.
+   The ordinary published-artifact workflow needs no upstream checkout:
 
    ```sh
    # download + unpack the new wheel/sdist to a scratch dir, then:
@@ -76,7 +86,8 @@ private (underscore) names that carry no semver protection.
    composition change to re-apply or an internal change inherited free.
 
 2. **Update the pins** in `pyproject.toml` — and the matching constants in
-   `tests/test_smoke.py`, which assert the installed versions. `deepagents`
+   `tests/test_smoke.py`, which assert installed versions and, for source pins,
+   exact provenance. `deepagents`
    may or may not move with `deepagents-code`; check the new release's
    `requires_dist`. Then `uv sync`.
 
@@ -91,8 +102,8 @@ private (underscore) names that carry no semver protection.
    line-faithful to the new upstream body plus the exhaustive divergence list
    below. Treat the agent, cached `ServerRuntime`, generated HTTP app, and TUI
    scaffold rebind as one runtime contract. Re-check thread/workspace binding,
-   persisted workspace policy, runtime cache selection, credential reload and
-   runtime-state application, model-policy/retry and summarization arguments,
+   persisted workspace policy, runtime cache selection, immutable workspace
+   environment/credential snapshots, model metadata, retry and summarization arguments,
    interpreter/store plumbing, extension load/host/shutdown, workspace-aware
    offload publication, and every `# SEAM` marker before calling the port
    current. Preserve upstream defaults, including forked general-purpose
@@ -129,7 +140,10 @@ private (underscore) names that carry no semver protection.
    applies equally to upstream and the factory; it is not a factory-specific
    exemption. Keep `_MAX_DEPTH` at 9 unless observed nesting requires a reviewed
    change, and retain negative controls for changed schema identity/annotations
-   and subagent mode as well as the rich-case truncation guard.
+   and subagent mode as well as the rich-case truncation guard. Environment
+   fields `_env` and `_environ` are now compared by SHA-256 digest, keeping
+   credential values out of assertion output while detecting lost snapshots.
+   Retain the explicit workspace case and dropped-environment negative control.
 
 5b. **Run the seam suite.** `uv run pytest tests/test_seam.py` — it asserts the
    injection seam's positional contract against the **final** composed stack
@@ -348,11 +362,12 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      merely because `lc-code` was launched inside it (decisions.md D4).
 
      This is *enforced*, not merely unimplemented, and the enforcement is
-     load-bearing: upstream loads `.env` files straight into `os.environ` on
-     two paths that both precede resolution — the client's first access to the
-     lazy `credentials` proxy bootstraps from the cwd, and the server's
-     `credentials.reload_from_environment` re-reads the project directory. Either
-     would otherwise let a committed `.env` name the module. Upstream keeps its
+     load-bearing: the client's lazy `credentials` proxy and explicit credential
+     reload API can load `.env` into `os.environ` before transport. The server
+     now previews dotenv into an immutable snapshot without mutating that global
+     environment. The reservation protects both dotenv precedence paths, while
+     `_factory_middleware` still reads the reserved process variable. Upstream
+     keeps its
      own denylist of keys that "turn `.env` loading into code execution", but
      it is a `frozenset` and cannot know about ours.
 
@@ -570,7 +585,9 @@ be re-verified on a bump:
 - Validates execution's persisted thread/workspace binding and resolves the
   runtime through the workspace resource-policy cache. Preserve configuration
   fingerprint checks, cache keys, locking, and eviction behavior alongside the
-  default runtime used for non-execution graph access.
+  default runtime used for non-execution graph access. Both paths now share
+  the same cache and initialization lock. Preserve the process-lifetime sandbox
+  claim after failed construction and HTTP 409/503 behavior before thread creation.
 
 **`offload_api.py`**:
 - Reuses upstream's Starlette app rather than copying its security-sensitive

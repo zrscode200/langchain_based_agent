@@ -1,8 +1,8 @@
 """Factory assembly: an owned recomposition of upstream's ``create_cli_agent``.
 
 ``create_factory_agent`` is a line-faithful port of
-``deepagents_code.agent.create_cli_agent`` (``agent.py:2391-3484`` at the
-``deepagents-code==0.1.66`` release tag, commit ``3812967c``), with every
+``deepagents_code.agent.create_cli_agent`` (``agent.py:2417-3540`` at
+commit ``6c89fe2197a2dfe4f3851cda38565bcadba6066b``, retaining version ``0.1.66``), with every
 upstream import routed through :mod:`lc_factory.upstream`.
 
 **One deliberate behavioral delta**: the middleware injection seam
@@ -35,6 +35,7 @@ from lc_factory.upstream import (
     CONVERSATION_HISTORY_DIRNAME,
     DEFAULT_MODEL_RETRIES,
     FORKED_SUBAGENTS,
+    EXPERIMENTAL,
     REPOSITORY_TOOL_CALL_LIMIT,
     AsyncApprovalHITLMiddleware,
     CLIContextSchema,
@@ -75,6 +76,7 @@ from lc_factory.upstream import (
     _sanitize_agent_message_name,
     _ShellAllowAll,
     _has_resolvable_model_provider,
+    apply_inherited_user_tracing,
     attach_offload_operation,
     credentials,
     create_deep_agent,
@@ -106,6 +108,8 @@ if TYPE_CHECKING:
         BaseStore,
         BaseTool,
         CompiledSubAgent,
+        CredentialsSnapshot,
+        ModelResult,
         ExtensionRegistry,
         FsToolName,
         InterruptOnConfig,
@@ -712,6 +716,9 @@ def create_factory_agent(
     summarization_model: str | None = None,
     enforce_model_policy: bool = True,
     extension_registry: ExtensionRegistry | None = None,
+    environ: Mapping[str, str] | None = None,
+    credentials_snapshot: CredentialsSnapshot | None = None,
+    model_result: ModelResult | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[FactoryPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
@@ -814,8 +821,9 @@ def create_factory_agent(
             `langchain-quickjs` into the main agent.
 
             Local-mode only — passing a non-`None` `sandbox` while
-            `enable_interpreter=True` raises `ValueError`. Subagents do not
-            receive the interpreter in v1.
+            `enable_interpreter=True` raises `ValueError`. Fresh subagents do
+            not receive this interpreter; forked subagents inherit it with
+            the parent's main middleware.
 
             PTC (`tools.*` host bridge) calls bypass `interrupt_on`/HITL
             approval, so `InterpreterConfig.ptc` is the only effective
@@ -1025,6 +1033,9 @@ def create_factory_agent(
             listing rather than raising. Any caller that can run the graph must
             leave this `True`.
         extension_registry: Server-owned Python extension registrations.
+        environ: Environment snapshot frozen into local shell execution.
+        credentials_snapshot: Credentials resolved from `environ` for this runtime.
+        model_result: Workspace model metadata used in the generated prompt.
 
     Returns:
         2-tuple of `(agent_graph, backend)`
@@ -1052,11 +1063,14 @@ def create_factory_agent(
             a prebuilt `BaseChatModel` came from a path that already checked.
     """  # noqa: DOC502 - propagates from `ModelConfig.require_model_allowed`
     tools = list(tools or [])
-    if extension_registry is not None:
-        from lc_factory.upstream import EXPERIMENTAL
-
-        if not is_env_truthy(EXPERIMENTAL):
-            extension_registry = None
+    environment = os.environ if environ is None else environ
+    runtime_credentials = (
+        credentials if credentials_snapshot is None else credentials_snapshot
+    )
+    if extension_registry is not None and not is_env_truthy(
+        EXPERIMENTAL, environ=environment
+    ):
+        extension_registry = None
     mcp_tools = tuple(mcp_tools or ())
     # SEAM (resolve): up front, so a bad phase key or entry fails before any
     # setup work. The three splice sites below depend on this binding.
@@ -1137,7 +1151,7 @@ def create_factory_agent(
     project_agents_dir = (
         project_context.project_agents_dir()
         if project_context is not None
-        else get_project_agents_dir(credentials.project_root)
+        else get_project_agents_dir(runtime_credentials.project_root)
     )
 
     def _subagent_cli_middleware(
@@ -1158,6 +1172,7 @@ def create_factory_agent(
                 ConfigurableModelMiddleware(
                     persist_model_state=False,
                     cli_max_retries=cli_max_retries,
+                    environ=environment,
                 )
             )
         # Checkpoint nested spend before HITL can pause the subgraph, then hand
@@ -1319,7 +1334,11 @@ def create_factory_agent(
     agent_middleware: list[AgentMiddleware[Any, Any]] = [
         # SEAM (phase "first"): ahead of every factory middleware.
         *injected_middleware["first"],
-        ConfigurableModelMiddleware(cli_max_retries=cli_max_retries),
+        ConfigurableModelMiddleware(
+            cli_max_retries=cli_max_retries,
+            environ=environment,
+            model_result=model_result,
+        ),
     ]
     if not interactive:
         agent_middleware.append(_GlmTerminalStallRecovery())
@@ -1371,7 +1390,7 @@ def create_factory_agent(
         project_agent_md_paths = (
             project_context.project_agent_md_paths()
             if project_context is not None
-            else get_project_agent_md_path(credentials.project_root)
+            else get_project_agent_md_path(runtime_credentials.project_root)
         )
         memory_sources.extend(str(p) for p in project_agent_md_paths)
 
@@ -1426,14 +1445,23 @@ def create_factory_agent(
             # separately. When they had none, drop the agent's override (the
             # `deepagents-code` default applied at bootstrap) entirely so shell
             # commands don't inherit it.
-            shell_env = os.environ.copy()
+            shell_env = dict(environment)
             shell_env["GIT_TERMINAL_PROMPT"] = "0"
-            if credentials.user_langchain_project is not None:
-                shell_env["LANGSMITH_PROJECT"] = credentials.user_langchain_project
+            if runtime_credentials.user_langchain_project is not None:
+                shell_env["LANGSMITH_PROJECT"] = (
+                    runtime_credentials.user_langchain_project
+                )
             else:
                 shell_env.pop("LANGSMITH_PROJECT", None)
-            restore_user_tracing_env(shell_env)
-            restore_user_tracing_api_keys(shell_env)
+            # Restore the caller's tracing flags and key so `execute` commands
+            # never run under the agent's session credentials. On the server
+            # path the client relays its pre-bootstrap values through
+            # `_INHERITED_USER_TRACING_ENV`, because this process's own
+            # `_bootstrap_state` already holds the agent's values; when nothing
+            # was relayed, the local capture is authoritative.
+            if not apply_inherited_user_tracing(shell_env):
+                restore_user_tracing_env(shell_env)
+                restore_user_tracing_api_keys(shell_env)
             # Re-apply a launch-time PYTHONPATH that was stripped from the server
             # interpreter but relayed for approval-gated `execute` commands.
             _apply_inherited_pythonpath(shell_env)
@@ -1442,11 +1470,11 @@ def create_factory_agent(
             # The SDK's FilesystemMiddleware exposes per-command timeout
             # on the execute tool natively.
             # `inherit_env=False`: `shell_env` is already a complete, curated
-            # copy of `os.environ`. Inheriting again would re-copy `os.environ`
-            # and resurrect the popped carrier var, leaking it into `execute`.
-            # `restore_user_tracing_api_keys` above depends on this too: flipping
-            # to `inherit_env=True` would re-copy the agent's overridden
-            # `LANGSMITH_API_KEY` and undo the restore, leaking it into `execute`.
+            # copy of the active environment. Inheriting again would re-copy
+            # `os.environ` and resurrect the popped carrier vars, leaking them
+            # into `execute`. The tracing restore above depends on this too:
+            # flipping to `inherit_env=True` would re-copy the agent's
+            # overridden `LANGSMITH_API_KEY` and undo the restore.
             backend = LocalShellBackend(
                 root_dir=root_dir,
                 virtual_mode=False,
@@ -1511,7 +1539,7 @@ def create_factory_agent(
                 backend=backend,
                 mcp_server_info=mcp_server_info,
                 tracing_project=get_langsmith_project_name(),
-                user_tracing_project=credentials.user_langchain_project,
+                user_tracing_project=runtime_credentials.user_langchain_project,
             )
         )
 
@@ -1527,6 +1555,8 @@ def create_factory_agent(
             interactive=interactive,
             cwd=effective_cwd,
             fs_tools=fs_tools,
+            has_tavily=runtime_credentials.has_tavily,
+            model_result=model_result,
         )
 
     interrupt_on: dict[str, bool | InterruptOnConfig] = {}
@@ -1618,6 +1648,7 @@ def create_factory_agent(
         composite_backend,
         cli_max_retries=cli_max_retries,
         summarization_model_spec=summarization_model,
+        environ=environment,
     )
     if auto_mode_config is not None and resolved_interrupt_on is not None:
         from lc_factory.upstream import AutoModeHITLMiddleware
@@ -1640,6 +1671,7 @@ def create_factory_agent(
                 shell_allow_list=narrow_allow_list,
                 classifier_model=classifier_model,
                 cli_max_retries=cli_max_retries,
+                environ=environment,
                 classifier_timeout_seconds=resolve_auto_classifier_timeout(),
                 trusted_ask_user_tool=trusted_ask_user_tool,
                 trusted_compaction_tool=compaction_middleware.tools[0],
@@ -1742,11 +1774,13 @@ def create_factory_agent(
             fs_tools=fs_tools,
             model_retries=model_retries,
             cli_max_retries=cli_max_retries,
+            environ=environment,
         )
         criteria_fallback_agent = create_goal_criteria_fallback_agent(
             model=model,
             model_retries=model_retries,
             cli_max_retries=cli_max_retries,
+            environ=environment,
         )
         agent_middleware.append(
             GoalCriteriaMiddleware(criteria_agent, criteria_fallback_agent)
@@ -1818,6 +1852,7 @@ def create_factory_agent(
             persist_model_state=False,
             cli_max_retries=cli_max_retries,
             strict_model_resolution=True,
+            environ=environment,
         ),
         # Both clients filter this nested message stream. A transient fault can
         # safely retry the failed model node without replaying grader tools.

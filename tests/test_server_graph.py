@@ -12,6 +12,7 @@ the transport only exists across a process boundary.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -217,9 +218,9 @@ import os, sys, pathlib
 import lc_factory.server_graph as sg
 from lc_factory.upstream import credentials, get_server_project_context
 
-# Mirror `_make_graphs`: it reloads credentials from the project context before
-# resolving, which is a second, separate chance for a project `.env` to land in
-# os.environ.
+# Exercise the still-supported client/explicit reload API under both dotenv
+# discovery shapes. The server now uses immutable snapshots instead; its real
+# snapshot path is covered in test_workspace_isolation.py.
 ctx = get_server_project_context()
 credentials.reload_from_environment(
     start_path=ctx.user_cwd if ctx is not None else pathlib.Path.cwd()
@@ -319,7 +320,7 @@ def test_the_d4_probe_can_actually_fail(tmp_path, shape):
         tmp_path,
         shape,
         # Undo the reservation, then re-trigger the project .env load the
-        # server performs — i.e. exactly the pre-fix world.
+        # client/reload API supports — i.e. the pre-reservation world.
         sabotage=(
             "import lc_factory\n"
             "os.environ.pop('LC_FACTORY_MIDDLEWARE', None)\n"
@@ -644,7 +645,7 @@ async def test_workspace_runtime_reuses_resources_and_separates_workspaces(
     from lc_factory import server_graph
 
     monkeypatch.setattr(server_graph, "_workspace_runtimes", OrderedDict())
-    monkeypatch.setattr(server_graph, "_workspace_runtime_locks", {})
+    monkeypatch.setattr(server_graph, "_workspace_runtime_lock", asyncio.Lock())
     monkeypatch.setattr(server_graph, "_MAX_WORKSPACE_RUNTIMES", 2)
     config = server_graph.ServerConfig.from_env()
     built = []
@@ -678,7 +679,6 @@ async def test_workspace_runtime_reuses_resources_and_separates_workspaces(
     assert await server_graph._workspace_runtime(bindings[0]) is first
     await server_graph._workspace_runtime(bindings[2])
     assert bindings[1].resource_key not in server_graph._workspace_runtimes
-    assert bindings[1].resource_key not in server_graph._workspace_runtime_locks
     assert bindings[0].resource_key in server_graph._workspace_runtimes
 
 
@@ -694,7 +694,7 @@ async def test_workspace_runtime_rejects_changed_config_before_build(
     from lc_factory import server_graph
 
     monkeypatch.setattr(server_graph, "_workspace_runtimes", OrderedDict())
-    monkeypatch.setattr(server_graph, "_workspace_runtime_locks", {})
+    monkeypatch.setattr(server_graph, "_workspace_runtime_lock", asyncio.Lock())
     config = server_graph.ServerConfig.from_env()
     binding = resolve_workspace(
         str(tmp_path),
@@ -736,12 +736,10 @@ async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_pol
         apply_to_runtime_state=lambda: calls.setdefault("model_applied", True),
     )
 
-    def reload_credentials(*, start_path):
-        calls["credentials_cwd"] = start_path
-
-    async def build_tools(received_config, received_context):
+    async def build_tools(received_config, received_context, **kwargs):
         assert received_config is config
         assert received_context is project_context
+        calls["tool_credentials"] = kwargs
         return [], [], []
 
     def build_agent(**kwargs):
@@ -752,9 +750,6 @@ async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_pol
         assert (provider, classifier) == ("test", "test:reviewer")
         return "resolved:reviewer"
 
-    monkeypatch.setattr(server_graph, "credentials", SimpleNamespace(
-        reload_from_environment=reload_credentials,
-    ))
     monkeypatch.setattr(server_graph, "configure_langsmith_secret_redaction", lambda: None)
     monkeypatch.setattr(server_graph, "_factory_middleware", lambda: {
         "main": main, "subagents": subagents, "grader": grader,
@@ -771,9 +766,15 @@ async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_pol
         config_override=config, project_context_override=project_context,
     )
     assert (runtime.agent, runtime.backend, runtime.offload) == (graph, backend, offload)
-    assert calls["credentials_cwd"] == tmp_path
     assert calls["model_applied"] is True
     kwargs = calls["assembly"]
+    assert calls["tool_credentials"] == {
+        "has_tavily": kwargs["credentials_snapshot"].has_tavily,
+        "tavily_api_key": kwargs["credentials_snapshot"].tavily_api_key,
+    }
+    assert kwargs["model_result"] is result
+    with pytest.raises(TypeError):
+        kwargs["environ"]["mutated"] = "forbidden"
     assert kwargs["middleware"] is main
     assert kwargs["subagent_middleware"] is subagents
     assert kwargs["rubric_grader_middleware"] is grader

@@ -11,14 +11,13 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<4.0"
 dependencies = [
-    # Upstream v0 baseline. The exact pin is deliberate: the factory
-    # recomposes upstream internals, so every bump is a reviewed event
-    # gated by the parity test suite.
-    "deepagents-code==0.1.66",
-    # Direct dependency (upstream.py imports `deepagents` itself), pinned to
-    # the exact version deepagents-code requires. Declaring it directly also
-    # lets uv resolve the pre-release. Bump both pins together.
-    "deepagents==0.7.13",
+    # Reviewed post-release baseline; package versions alone do not identify
+    # these workspace-isolation and filesystem fixes. Keep both source pins
+    # at this exact revision and re-port the owned assembly on every update.
+    "deepagents-code @ git+https://github.com/langchain-ai/deepagents.git@6c89fe2197a2dfe4f3851cda38565bcadba6066b#subdirectory=libs/code",
+    "deepagents @ git+https://github.com/langchain-ai/deepagents.git@6c89fe2197a2dfe4f3851cda38565bcadba6066b#subdirectory=libs/deepagents",
+    # Explicitly guard interpreter streaming and per-agent private state.
+    "langchain-quickjs==0.3.7",
 ]
 
 [project.scripts]
@@ -32,6 +31,17 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lc_factory"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["*.code-workspace"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.uv]
+# Resolve the published metadata of Git packages, rather than inheriting the
+# upstream monorepo's editable workspace overrides for ACP and QuickJS.
+no-sources = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
