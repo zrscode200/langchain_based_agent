@@ -1,8 +1,9 @@
 """Wave 1.3 parity suite: the port composes the SAME agent as v0.
 
 Mechanism: monkeypatch ``create_deep_agent`` in both assembly modules to
-capture the composition kwargs instead of compiling a graph, call both
-assemblies with identical inputs, and compare normalized fingerprints.
+capture the composition kwargs and supply a minimal compiled graph, call both
+assemblies with identical inputs, and compare normalized fingerprints of the
+composition and the effective returned graph configuration.
 
 The fingerprint goes down to middleware *state*, not just class identity:
 the port's real job is re-applying upstream's constructor arguments
@@ -18,7 +19,6 @@ import functools
 import inspect
 from pathlib import Path, PurePath
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -41,6 +41,7 @@ CONFIG_MATRIX: dict[str, dict[str, Any]] = {
     "rubric_tuned": {"rubric_max_iterations": 5, "recursion_limit": 42},
     "explicit_prompt": {"system_prompt": "parity fixture prompt"},
     "no_ask_user": {"enable_ask_user": False},
+    "summary_model": {"summarization_model": "openai:summary-fixture"},
 }
 
 # State that is not port-controlled and would produce false drift reports:
@@ -93,6 +94,19 @@ def _normalize(value: Any, depth: int = 0, memo: dict[int, str] | None = None) -
         return value
     if isinstance(value, PurePath):
         return str(value)
+    if inspect.isclass(value):
+        # Schema classes are constructor arguments, not instances. Preserve
+        # their identity and declared fields without recursively walking
+        # Pydantic's generated validators and typing's self-referential caches.
+        return {
+            "class": f"{value.__module__}.{value.__qualname__}",
+            "annotations": {
+                key: repr(annotation)
+                for key, annotation in sorted(
+                    getattr(value, "__annotations__", {}).items()
+                )
+            },
+        }
     if type(value).__name__ in _SUMMARIZED_TYPES:
         return _graph_summary(value)
     # Routines must be checked BEFORE `__dict__`: functions, lambdas, bound
@@ -214,6 +228,7 @@ def _subagent_fingerprint(subagents: Any) -> list[Any]:
             out.append(
                 {
                     "name": spec.get("name"),
+                    "mode": spec.get("mode", "fresh"),
                     "description": spec.get("description"),
                     "system_prompt": spec.get("system_prompt"),
                     "model": _normalize(spec.get("model")),
@@ -243,17 +258,27 @@ def _fingerprint(captured: dict[str, Any]) -> dict[str, Any]:
         "model_type": type(kwargs.get("model")).__name__,
         "tools": [_normalize(tool) for tool in kwargs.get("tools") or []],
         "checkpointer": _normalize(kwargs.get("checkpointer")),
-        # `.with_config({...recursion_limit...})` is applied to the compiled
-        # graph, so it never reaches `kwargs` — compare it separately.
-        "with_config": _normalize(captured["with_config"]),
+        # Configuration is applied after SDK construction and may use either
+        # `.copy` or `.with_config`. Inspect the effective returned graph,
+        # not calls on the original graph (which can miss a replacement).
+        "graph_config": _normalize(captured["graph_config"]),
     }
 
 
 def _capture_composition(module: Any, attr: str, call: Any, /, **call_kwargs: Any):
     """Run one assembly with create_deep_agent intercepted; return what it composed."""
+    from langgraph.graph import END, START, StateGraph
+
     captured: dict[str, Any] = {}
     original = getattr(module, attr)
-    graph = MagicMock()
+    # Use real LangGraph config semantics without compiling the full agent.
+    # An inherited limit makes a dropped override observable; unrelated
+    # metadata also exposes accidental loss of existing SDK configuration.
+    builder = StateGraph(dict)
+    builder.add_edge(START, END)
+    graph = builder.compile().copy(
+        {"config": {"recursion_limit": 9999, "metadata": {"parity_fixture": True}}}
+    )
 
     def interceptor(**kwargs: Any) -> Any:
         captured["kwargs"] = kwargs
@@ -261,7 +286,7 @@ def _capture_composition(module: Any, attr: str, call: Any, /, **call_kwargs: An
 
     try:
         setattr(module, attr, interceptor)
-        call(**call_kwargs)
+        returned_graph, _backend = call(**call_kwargs)
     finally:
         setattr(module, attr, original)
 
@@ -270,8 +295,7 @@ def _capture_composition(module: Any, attr: str, call: Any, /, **call_kwargs: An
         "moved (e.g. became a function-local import), so this comparison "
         "would be vacuous."
     )
-    with_config_calls = graph.with_config.call_args
-    captured["with_config"] = with_config_calls[0][0] if with_config_calls else None
+    captured["graph_config"] = returned_graph.config
     return captured
 
 
@@ -329,6 +353,45 @@ def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = Tr
 def test_composition_parity(case, tmp_path):
     ours, v0 = _run_both(CONFIG_MATRIX[case], tmp_path)
     assert _fingerprint(ours) == _fingerprint(v0)
+
+
+def test_fingerprint_detects_recursion_limit_drift(tmp_path, monkeypatch):
+    """An accepted recursion-limit argument must reach the returned graph.
+
+    The old capture inspected only `.with_config` calls on the original
+    graph, so both fingerprints remained identical when a constructor used
+    `.copy` and silently replaced the requested limit with 1.
+    """
+    import lc_factory.assembly as ours_module
+
+    case = {"recursion_limit": 42}
+    ours, v0 = _run_both(case, tmp_path)
+    baseline = _fingerprint(v0)
+    assert _fingerprint(ours) == baseline, "precondition: parity holds"
+    assert baseline["graph_config"] == {
+        "recursion_limit": 42,
+        "metadata": {"parity_fixture": True},
+    }
+
+    original = ours_module.create_factory_agent
+
+    def wrong_limit(**kwargs):
+        # Simulate a factory that accepts the caller's limit but propagates
+        # a different value into the compiled graph configuration.
+        return original(**{**kwargs, "recursion_limit": 1})
+
+    monkeypatch.setattr(ours_module, "create_factory_agent", wrong_limit)
+    drifted, v0 = _run_both(case, tmp_path)
+    actual = _fingerprint(drifted)
+    expected = _fingerprint(v0)
+    assert actual["graph_config"]["recursion_limit"] == 1
+    assert expected["graph_config"]["recursion_limit"] == 42
+    assert actual != expected, "parity suite is blind to recursion-limit drift"
+    # The config must be the sole delta, so incidental nondeterminism cannot
+    # make this negative control pass for the wrong reason.
+    assert {k: v for k, v in actual.items() if k != "graph_config"} == {
+        k: v for k, v in expected.items() if k != "graph_config"
+    }
 
 
 def test_composition_parity_server_realistic(tmp_path):
@@ -640,6 +703,42 @@ def test_fingerprint_detects_constructor_argument_drift(tmp_path):
     assert _allow_lists(drifted) != _allow_lists(v0), (
         "parity suite is blind to middleware constructor drift"
     )
+
+
+def test_fingerprint_detects_dropped_fork_mode(tmp_path, monkeypatch):
+    """A port that omits the new mode must not compare equal to upstream."""
+    monkeypatch.setenv("DEEPAGENTS_CODE_FORKED_SUBAGENTS", "true")
+    ours, v0 = _run_both({}, tmp_path)
+    expected = _fingerprint(v0)
+    assert _fingerprint(ours) == expected
+    general = next(
+        spec for spec in ours["kwargs"]["subagents"]
+        if spec["name"] == "general-purpose"
+    )
+    assert general.pop("mode") == "fork"
+    actual = _fingerprint(ours)
+    assert actual["subagents"] != expected["subagents"]
+    assert {k for k in actual if actual[k] != expected[k]} == {"subagents"}
+
+
+def test_fingerprint_detects_grader_schema_drift(tmp_path, monkeypatch):
+    """Class-valued schema arguments remain visible without Pydantic internals."""
+    from typing_extensions import TypedDict
+
+    import lc_factory.upstream as boundary
+
+    class WrongGraderState(TypedDict):
+        wrong_field: str
+
+    ours, v0 = _run_both({}, tmp_path)
+    expected = _fingerprint(v0)
+    assert _fingerprint(ours) == expected
+    monkeypatch.setattr(boundary, "RubricGraderState", WrongGraderState)
+    drifted, _ = _run_both({}, tmp_path)
+    actual = _fingerprint(drifted)
+    assert actual["middleware"] != expected["middleware"]
+    assert "WrongGraderState" in str(actual["middleware"])
+    assert {k for k in actual if actual[k] != expected[k]} == {"middleware"}
 
 
 def test_fingerprint_detects_dropped_constructor_kwargs(tmp_path):

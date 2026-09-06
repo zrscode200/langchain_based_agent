@@ -1,6 +1,6 @@
 """Server-side graph entry point for ``langgraph dev`` (factory edition).
 
-Port of ``deepagents_code.server_graph`` at ``deepagents-code==0.1.64`` whose
+Port of ``deepagents_code.server_graph`` at ``deepagents-code==0.1.66`` whose
 primary semantic change is that the agent graph is built by
 :func:`lc_factory.assembly.create_factory_agent` instead of upstream's
 ``create_cli_agent``. The factory transport is resolved before provider or
@@ -17,10 +17,12 @@ from __future__ import annotations
 
 import asyncio
 import atexit
+import dataclasses
 import importlib
 import logging
 import os
 import sys
+from collections import OrderedDict
 from collections.abc import Iterable, Mapping
 from collections.abc import Set as AbstractSet
 from pathlib import Path
@@ -28,9 +30,11 @@ from typing import TYPE_CHECKING, Any
 
 from lc_factory._env import MIDDLEWARE_REF_ENV, reserve_middleware_ref_env
 from lc_factory.upstream import (
+    CLIContextSchema,
     EXPERIMENTAL,
     ExtensionMode,
     InterpreterConfig,
+    LangGraphServerRuntime,
     ProjectContext,
     STARTUP_ERROR_MARKER as _STARTUP_ERROR_MARKER,
     ServerConfig,
@@ -50,11 +54,13 @@ from lc_factory.upstream import (
     load_async_subagents,
     load_extensions,
     offload_operation_from,
+    require_thread_workspace,
+    resolve_auto_classifier_model_for_provider,
     shutdown_server_extensions,
 )
 
 if TYPE_CHECKING:
-    from lc_factory.upstream import ExtensionRegistry
+    from lc_factory.upstream import ExtensionRegistry, WorkspaceBinding
 
 logger = logging.getLogger(__name__)
 
@@ -291,15 +297,19 @@ def _print_startup_error(message: str) -> None:
     )
 
 
-async def _make_graphs() -> ServerRuntime:
+async def _make_graphs(
+    *,
+    config_override: ServerConfig | None = None,
+    project_context_override: ProjectContext | None = None,
+) -> ServerRuntime:
     """Build the factory graph and the server-owned runtime resources."""
     from lc_factory.assembly import create_factory_agent
 
-    config = ServerConfig.from_env()
+    config = config_override or ServerConfig.from_env()
 
     # Path resolution and credential reload can perform blocking filesystem IO.
     def _resolve_project_context_and_credentials() -> ProjectContext | None:
-        project_context = get_server_project_context()
+        project_context = project_context_override or get_server_project_context()
         if project_context is not None:
             credentials.reload_from_environment(start_path=project_context.user_cwd)
         return project_context
@@ -414,7 +424,10 @@ async def _make_graphs() -> ServerRuntime:
             interpreter_config=interpreter_config,
             rubric_model=config.rubric_model,
             rubric_max_iterations=config.rubric_max_iterations,
-            auto_classifier_model=config.auto_classifier_model,
+            auto_classifier_model=resolve_auto_classifier_model_for_provider(
+                result.provider,
+                config.auto_classifier_model,
+            ),
             recursion_limit=config.recursion_limit,
             mcp_server_info=mcp_server_info,
             cwd=project_context.user_cwd if project_context is not None else config.cwd,
@@ -424,6 +437,7 @@ async def _make_graphs() -> ServerRuntime:
             rubric_grader_tools=read_only_context_tools,
             model_retries=result.model_retries,
             cli_max_retries=result.cli_max_retries,
+            summarization_model=config.summarization_model,
             extension_registry=extension_registry,
             # All three targets remain reachable through the one reserved
             # process-boundary variable.
@@ -480,6 +494,56 @@ async def _make_graphs() -> ServerRuntime:
 
 
 _get_runtime = _build_runtime_factory(_make_graphs)
+_MAX_WORKSPACE_RUNTIMES = 32
+_workspace_runtimes: OrderedDict[str, ServerRuntime] = OrderedDict()
+_workspace_runtime_locks: dict[str, asyncio.Lock] = {}
+
+
+async def _workspace_runtime(binding: WorkspaceBinding) -> ServerRuntime:
+    """Build or reuse a runtime from the persisted workspace resource policy.
+
+    Returns:
+        The runtime selected by the binding's immutable resource key.
+
+    Raises:
+        RuntimeError: If the authoritative server configuration has changed.
+    """
+    runtime = _workspace_runtimes.get(binding.resource_key)
+    if runtime is not None:
+        _workspace_runtimes.move_to_end(binding.resource_key)
+        return runtime
+    lock = _workspace_runtime_locks.setdefault(binding.resource_key, asyncio.Lock())
+    async with lock:
+        runtime = _workspace_runtimes.get(binding.resource_key)
+        if runtime is None:
+            config = ServerConfig.from_env()
+            current_config = dataclasses.replace(
+                config,
+                cwd=binding.cwd,
+                project_root=binding.project_root,
+            )
+            if (
+                current_config.workspace_fingerprint() != binding.config_fingerprint
+                or current_config.to_workspace_payload() != binding.workspace_config()
+            ):
+                msg = "Server configuration changed after the workspace was bound."
+                raise RuntimeError(msg)
+            config = current_config
+            project_context = ProjectContext(
+                user_cwd=Path(binding.cwd),
+                project_root=Path(binding.project_root)
+                if binding.project_root
+                else None,
+            )
+            runtime = await _make_graphs(
+                config_override=config,
+                project_context_override=project_context,
+            )
+            _workspace_runtimes[binding.resource_key] = runtime
+            if len(_workspace_runtimes) > _MAX_WORKSPACE_RUNTIMES:
+                evicted_key, _ = _workspace_runtimes.popitem(last=False)
+                _workspace_runtime_locks.pop(evicted_key, None)
+    return runtime
 
 
 async def get_server_runtime() -> ServerRuntime:
@@ -487,6 +551,25 @@ async def get_server_runtime() -> ServerRuntime:
     return await _get_runtime()
 
 
-async def make_graph() -> Any:  # noqa: ANN401
-    """Return the cached interactive graph registered in langgraph.json."""
+async def make_graph(
+    config: dict[str, Any] | None = None,
+    runtime: LangGraphServerRuntime[CLIContextSchema] | None = None,
+) -> Any:  # noqa: ANN401
+    """Return the graph after validating execution workspace context.
+
+    The runtime annotation must be importable at runtime: the server resolves
+    it with ``typing.get_type_hints`` when classifying this graph factory.
+
+    Raises:
+        ValueError: If execution context is missing or malformed.
+    """
+    execution = runtime.execution_runtime if runtime is not None else None
+    if execution is not None:
+        context = CLIContextSchema.from_payload(execution.context)
+        thread_id = (config or {}).get("configurable", {}).get("thread_id")
+        if context is None or not isinstance(thread_id, str) or not thread_id:
+            msg = "A thread id and workspace context are required for execution."
+            raise ValueError(msg)
+        binding = await require_thread_workspace(thread_id, context.workspace)
+        return (await _workspace_runtime(binding)).agent
     return (await get_server_runtime()).agent

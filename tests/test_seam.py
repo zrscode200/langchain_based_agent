@@ -6,16 +6,18 @@ that injected middleware lands where the seam promises, and that the two ways
 the SDK's name-based merge can mis-handle an injection are rejected loudly
 instead of silently mis-composing.
 
-Observation points — four, because "the final stack" means something different
-per target, and picking the wrong one makes a placement assertion vacuous:
+Observation points differ by target, because picking the wrong "final stack"
+makes a placement assertion vacuous:
 
 - `deepagents.graph.create_agent` (main agent). The parity suite intercepts
   `create_deep_agent`, which sees only the factory's own block; placement is a
   property of the *final* stack, so these tests go one level deeper, after the
   SDK has merged its base, our block, and its tail.
-- `deepagents.graph._apply_custom_middleware` (subagents, wave 3.1). Subagent
-  stacks are merged there and stored on the processed spec, so neither
-  `create_deep_agent` nor `create_agent` interception ever sees the result.
+- `deepagents.graph._apply_custom_middleware` (fresh subagents, wave 3.1).
+  Subagent stacks are merged there and stored on the processed spec.
+- `deepagents.middleware.subagents.create_agent` (fork subagents). This later
+  call includes the fork task-tool middleware and identifies the child by name;
+  fork inheritance makes main-only class names an invalid discriminator.
 - `ReliableRubricMiddleware._grader_middleware` on the composed instance
   (rubric grader, wave 3.2). The grader list is forwarded verbatim to
   `create_agent` only when the grader is first built, which never happens in
@@ -589,15 +591,21 @@ def test_stack_order_is_an_onion_before_forward_after_reversed():
 # --- wave 3.1: subagent targeting ------------------------------------------
 #
 # Observation point differs again. Subagent stacks are merged by the SDK at
-# `graph.py:699` — `_apply_custom_middleware(subagent_base, spec["middleware"],
+# `_apply_custom_middleware(subagent_base, spec["middleware"],
 # core_names=...)` — and the merged list is stored on the processed spec, so
 # neither `create_deep_agent` nor `create_agent` interception sees it. These
-# tests spy on that merge directly, which is the only place the *final*
-# subagent order exists.
+# fresh-subagent tests spy on that merge directly. Fork tests below observe
+# the later compilation call too, after fork task-tool middleware is inserted.
+
+
+@pytest.fixture
+def fresh_subagents(monkeypatch):
+    """Keep the existing fresh-subagent phase contract explicit on 0.1.66."""
+    monkeypatch.setenv("DEEPAGENTS_CODE_FORKED_SUBAGENTS", "false")
 
 
 def _subagent_merges(tmp_path, **kwargs) -> list[dict[str, list[str]]]:
-    """Compose a factory agent; return every SUBAGENT middleware merge.
+    """Compose with fresh_subagents; return every SUBAGENT middleware merge.
 
     Each entry is `{"base": [...], "custom": [...], "result": [...]}` of
     middleware names. Subagent calls are discriminated from the main-stack call
@@ -724,7 +732,9 @@ def test_subagent_non_middleware_entries_are_rejected():
 # --- the guard, derived from the real SDK subagent base ---
 
 
-def test_subagent_sdk_base_is_covered_by_the_reserved_names_constant(tmp_path):
+def test_subagent_sdk_base_is_covered_by_the_reserved_names_constant(
+    tmp_path, fresh_subagents
+):
     """Derive the real subagent base; the guard must already cover it.
 
     The subagent base is a strict subset of the main stack's reserved set, so
@@ -745,14 +755,16 @@ def test_subagent_sdk_base_is_covered_by_the_reserved_names_constant(tmp_path):
     )
 
 
-def test_subagent_reserved_name_collision_is_rejected(tmp_path):
+def test_subagent_reserved_name_collision_is_rejected(tmp_path, fresh_subagents):
     with pytest.raises(ValueError, match="reserved by the deepagents SDK"):
         _subagent_merges(
             tmp_path, subagent_middleware=[_Probe("FilesystemMiddleware")]
         )
 
 
-def test_subagent_collision_message_names_the_subagent_parameter(tmp_path):
+def test_subagent_collision_message_names_the_subagent_parameter(
+    tmp_path, fresh_subagents
+):
     """A caller with both knobs set must learn which one is at fault."""
     with pytest.raises(ValueError, match="Injected subagent middleware") as excinfo:
         _subagent_merges(
@@ -761,7 +773,9 @@ def test_subagent_collision_message_names_the_subagent_parameter(tmp_path):
     assert "PatchToolCallsMiddleware" in str(excinfo.value)
 
 
-def test_subagent_duplicate_against_the_factory_stack_is_rejected(tmp_path):
+def test_subagent_duplicate_against_the_factory_stack_is_rejected(
+    tmp_path, fresh_subagents
+):
     """Duplicates are caught per composed subagent stack, not just per input."""
     with pytest.raises(ValueError, match="Duplicate middleware name") as excinfo:
         _subagent_merges(
@@ -773,7 +787,9 @@ def test_subagent_duplicate_against_the_factory_stack_is_rejected(tmp_path):
 # --- placement in the final merged subagent stack ---
 
 
-def test_no_subagent_injection_leaves_subagent_stacks_unchanged(tmp_path):
+def test_no_subagent_injection_leaves_subagent_stacks_unchanged(
+    tmp_path, fresh_subagents
+):
     """The subagent seam is inert unless used."""
     baseline = [m["result"] for m in _subagent_merges(tmp_path)]
     assert [
@@ -787,7 +803,7 @@ def test_no_subagent_injection_leaves_subagent_stacks_unchanged(tmp_path):
     ] == baseline
 
 
-def test_subagent_first_phase_leads_the_factory_block(tmp_path):
+def test_subagent_first_phase_leads_the_factory_block(tmp_path, fresh_subagents):
     for merge in _subagent_merges(
         tmp_path, subagent_middleware={"first": [_Probe("probe")]}
     ):
@@ -800,7 +816,7 @@ def test_subagent_first_phase_leads_the_factory_block(tmp_path):
         assert names.index("FilesystemMiddleware") < names.index("probe")
 
 
-def test_subagent_last_phase_trails_the_factory_block(tmp_path):
+def test_subagent_last_phase_trails_the_factory_block(tmp_path, fresh_subagents):
     for merge in _subagent_merges(
         tmp_path, subagent_middleware={"last": [_Probe("probe")]}
     ):
@@ -809,7 +825,7 @@ def test_subagent_last_phase_trails_the_factory_block(tmp_path):
         assert names.index("ServerHooksMiddleware") < names.index("probe")
 
 
-def test_subagent_phases_compose_in_order(tmp_path):
+def test_subagent_phases_compose_in_order(tmp_path, fresh_subagents):
     for merge in _subagent_merges(
         tmp_path,
         subagent_middleware={"first": [_Probe("p-first")], "last": [_Probe("p-last")]},
@@ -818,7 +834,7 @@ def test_subagent_phases_compose_in_order(tmp_path):
         assert names.index("p-first") < names.index("p-last")
 
 
-def test_subagent_injection_reaches_general_purpose(tmp_path):
+def test_subagent_injection_reaches_general_purpose(tmp_path, fresh_subagents):
     """The synthesized `general-purpose` spec is a second call site.
 
     dcode always supplies its own GP spec, so the SDK's auto-created-GP
@@ -835,7 +851,9 @@ def test_subagent_injection_reaches_general_purpose(tmp_path):
     )
 
 
-def test_injected_subagent_middleware_cannot_displace_the_approval_gate(tmp_path):
+def test_injected_subagent_middleware_cannot_displace_the_approval_gate(
+    tmp_path, fresh_subagents
+):
     """The `L2` risk, asserted directly.
 
     Injected middleware must not be able to remove or replace the subagent
@@ -857,7 +875,9 @@ def test_injected_subagent_middleware_cannot_displace_the_approval_gate(tmp_path
         )
 
 
-def test_subagent_middleware_is_spliced_by_reference_not_copied(tmp_path):
+def test_subagent_middleware_is_spliced_by_reference_not_copied(
+    tmp_path, fresh_subagents
+):
     """Pins the documented contract, since it is a footgun if unnoticed.
 
     The caller's instance is spliced into every subagent stack **by
@@ -883,6 +903,152 @@ def test_subagent_middleware_is_spliced_by_reference_not_copied(tmp_path):
         "the shared-state warning in create_factory_agent's docstring is now "
         "wrong, or per-subagent construction changed"
     )
+
+
+# --- fork inheritance: actual named stacks at compilation ------------------
+
+
+def _compiled_stacks(tmp_path, **kwargs):
+    """Observe main and named subagent stacks after all SDK composition.
+
+    Forks inherit main middleware, so main-only class names cannot identify
+    which graph is being compiled. Observe the two explicit compilation call
+    sites instead; this also sees `_ForkTaskToolMiddleware`, which the SDK
+    inserts after the merge observed by the fresh-subagent tests.
+    """
+    import deepagents.graph as sdk_graph
+    import deepagents.middleware.subagents as sdk_subagents
+    from deepagents_code._fake_models import _ToolBindingFakeModel
+
+    from lc_factory.assembly import create_factory_agent
+
+    main_stacks = []
+    subagent_stacks = {}
+    real_main_create = sdk_graph.create_agent
+    real_subagent_create = sdk_subagents.create_agent
+
+    def main_spy(*args, **kw):
+        main_stacks.append(list(kw.get("middleware") or []))
+        return real_main_create(*args, **kw)
+
+    def subagent_spy(*args, **kw):
+        name = kw["name"]
+        # The SDK rebuilds task-tool subgraphs after assigning private state
+        # keys. Keep the final compilation, which is the graph used by task.
+        subagent_stacks[name] = list(kw.get("middleware") or [])
+        return real_subagent_create(*args, **kw)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(sdk_graph, "create_agent", main_spy)
+        patch.setattr(sdk_subagents, "create_agent", subagent_spy)
+        create_factory_agent(
+            model=_ToolBindingFakeModel(messages=iter([])),
+            assistant_id="lc-factory-fork-seam",
+            cwd=tmp_path,
+            **kwargs,
+        )
+
+    assert len(main_stacks) == 1, "main graph observation moved or became vacuous"
+    assert "general-purpose" in subagent_stacks, "default subagent was not compiled"
+    assert "SubAgentMiddleware" in [m.name for m in main_stacks[0]]
+    return main_stacks[0], subagent_stacks
+
+
+def test_default_general_purpose_fork_inherits_main_middleware_by_reference(
+    tmp_path, monkeypatch
+):
+    """The new upstream default extends main middleware reach into the fork."""
+    monkeypatch.delenv("DEEPAGENTS_CODE_FORKED_SUBAGENTS", raising=False)
+    probe = _Probe("main-probe")
+    main, subagents = _compiled_stacks(tmp_path, middleware=[probe])
+    fork = subagents["general-purpose"]
+    names = [m.name for m in fork]
+    assert "_ForkTaskToolMiddleware" in names, "this case did not build a fork"
+    assert "GoalToolsMiddleware" in names
+    assert "ReliableRubricMiddleware" in names
+    fork_only_names = set(names) - {m.name for m in main}
+    assert fork_only_names <= _SDK_RESERVED_MIDDLEWARE_NAMES, (
+        "final fork compilation added unguarded middleware: "
+        f"{fork_only_names - _SDK_RESERVED_MIDDLEWARE_NAMES}"
+    )
+    assert [m for m in main if m.name == probe.name] == [probe]
+    inherited = [m for m in fork if m.name == probe.name]
+    assert len(inherited) == 1
+    assert inherited[0] is probe, "fork inheritance copied or discarded the injection"
+
+
+def test_fork_subagent_last_preserves_placement_and_instance_identity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("DEEPAGENTS_CODE_FORKED_SUBAGENTS", "true")
+    first = _Probe("delegated-last-a")
+    second = _Probe("delegated-last-b")
+    main, subagents = _compiled_stacks(
+        tmp_path, subagent_middleware={"last": [first, second]}
+    )
+    fork = subagents["general-purpose"]
+    names = [m.name for m in fork]
+    assert "_ForkTaskToolMiddleware" in names, "this case did not build a fork"
+    assert names.index(first.name) < names.index(second.name)
+    for before in (
+        "HumanInTheLoopMiddleware",
+        "CostTrackingMiddleware",
+        "ServerHooksMiddleware",
+        "ReliableRubricMiddleware",
+    ):
+        assert names.index(before) < names.index(first.name)
+    assert fork[names.index(first.name)] is first
+    assert fork[names.index(second.name)] is second
+    assert not {first.name, second.name} & {m.name for m in main}
+
+
+def test_fork_subagent_first_follows_inherited_main_and_precedes_new_last(
+    tmp_path, monkeypatch
+):
+    """Fork name merging retains inherited slots before new child additions."""
+    monkeypatch.setenv("DEEPAGENTS_CODE_FORKED_SUBAGENTS", "true")
+    first_a = _Probe("delegated-first-a")
+    first_b = _Probe("delegated-first-b")
+    last = _Probe("delegated-last")
+    _, subagents = _compiled_stacks(
+        tmp_path,
+        middleware={"last": [_Probe("main-last")]},
+        subagent_middleware={"first": [first_a, first_b], "last": [last]},
+    )
+    fork = subagents["general-purpose"]
+    names = [m.name for m in fork]
+    assert "_ForkTaskToolMiddleware" in names, "this case did not build a fork"
+    for inherited in (
+        "CostTrackingMiddleware",
+        "HumanInTheLoopMiddleware",
+        "ServerHooksMiddleware",
+        "ReliableRubricMiddleware",
+        "main-last",
+    ):
+        assert names.index(inherited) < names.index(first_a.name)
+    assert names.index(first_a.name) < names.index(first_b.name) < names.index(last.name)
+    assert fork[names.index(first_a.name)] is first_a
+    assert fork[names.index(first_b.name)] is first_b
+
+
+@pytest.mark.parametrize(
+    "inherited_name", ["GoalToolsMiddleware", "ReliableRubricMiddleware"]
+)
+def test_fork_subagent_injection_cannot_replace_inherited_main_middleware(
+    tmp_path, monkeypatch, inherited_name
+):
+    """Names absent from a fresh subagent still collide in an inherited fork."""
+    monkeypatch.setenv("DEEPAGENTS_CODE_FORKED_SUBAGENTS", "true")
+    _, subagents = _compiled_stacks(tmp_path)
+    assert inherited_name in [m.name for m in subagents["general-purpose"]]
+    with pytest.raises(ValueError) as excinfo:
+        _compiled_stacks(
+            tmp_path, subagent_middleware={"last": [_Probe(inherited_name)]}
+        )
+    message = str(excinfo.value)
+    assert inherited_name in message
+    assert "fork" in message.lower()
+    assert "subagent" in message.lower()
 
 
 # --- wave 3.2: rubric grader targeting -------------------------------------

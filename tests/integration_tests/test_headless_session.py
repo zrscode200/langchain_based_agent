@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 # Upstream owns the marker/content contract for its deterministic test model.
-from deepagents_code._testing_models import TOP_LEVEL_WRITE_CONTENT
+from deepagents_code._testing_models import SUBAGENT_WRITE_CONTENT, TOP_LEVEL_WRITE_CONTENT
 
 pytestmark = pytest.mark.integration
 
@@ -42,12 +42,16 @@ def _headless_env(home: Path) -> dict[str, str]:
     return child_env
 
 
-def _make_home(tmp_path: Path) -> Path:
+def _make_home(
+    tmp_path: Path,
+    *,
+    model_class: str = "deepagents_code._testing_models:ToolCallingIntegrationChatModel",
+) -> Path:
     home = tmp_path / "home"
     (home / ".deepagents").mkdir(parents=True)
     (home / ".deepagents" / "config.toml").write_text(
         "[models.providers.itest]\n"
-        'class_path = "deepagents_code._testing_models:ToolCallingIntegrationChatModel"\n'
+        f'class_path = "{model_class}"\n'
         'models = ["fake"]\n'
     )
     return home
@@ -224,7 +228,8 @@ def test_headless_write_file_round_trip(tmp_path):
     assert (home / ".deepagents" / ".state" / "sessions.db").exists()
 
 
-def test_subagent_middleware_runs_in_a_live_delegated_session(tmp_path):
+@pytest.mark.parametrize("subagent_mode", ["fresh", "fork"])
+def test_subagent_middleware_runs_in_a_live_delegated_session(tmp_path, subagent_mode):
     """SEAM-REACH-TRANSPORT: the level-2 proof Group 3 never had.
 
     Everything Group 3 asserted was composition — where middleware *sits*. This
@@ -239,14 +244,29 @@ def test_subagent_middleware_runs_in_a_live_delegated_session(tmp_path):
     `DCA_TEST_DELEGATE_WRITE` makes upstream's deterministic model emit a real
     `task` call, so no credentials are needed. The middleware is addressed to
     subagents ONLY, so the marker file cannot be written by the main agent.
+
+    Fresh mode uses the upstream fixture unchanged. The default fork uses a
+    local adapter that dispatches markers from the latest task, so the parent
+    delegation marker retained in fork history cannot trigger recursive task.
     """
-    home = _make_home(tmp_path)
+    home = (
+        _make_home(
+            tmp_path,
+            model_class="lc_factory._testing_models:ForkAwareIntegrationChatModel",
+        )
+        if subagent_mode == "fork"
+        else _make_home(tmp_path)
+    )
     workdir = tmp_path / "workdir"
     workdir.mkdir()
     marker = tmp_path / "subagent-middleware-ran.txt"
     delegated = workdir / "delegated.txt"
 
     child_env = _headless_env(home)
+    if subagent_mode == "fresh":
+        child_env["DEEPAGENTS_CODE_FORKED_SUBAGENTS"] = "false"
+    else:
+        assert "DEEPAGENTS_CODE_FORKED_SUBAGENTS" not in child_env
     child_env["LC_FACTORY_MIDDLEWARE"] = (
         "lc_factory._testing_middleware:build_subagent_marker_middleware"
     )
@@ -274,6 +294,7 @@ def test_subagent_middleware_runs_in_a_live_delegated_session(tmp_path):
         "the model never delegated, so this run cannot say anything about "
         f"subagent middleware: {result.stdout[-1500:]}"
     )
+    assert delegated.read_text() == SUBAGENT_WRITE_CONTENT
     assert marker.exists(), (
         "the subagent delegated and wrote its file, but the injected subagent "
         "middleware never ran — subagent_middleware is not reaching live "

@@ -4,7 +4,7 @@ Every project source module imports ``deepagents-code``, ``deepagents``, and
 LangChain runtime symbols through this module. A pin bump therefore fails at
 one explicit boundary before copied assembly or launch code can drift silently.
 
-Verified against deepagents-code==0.1.64 / deepagents==0.7.10. The factory's
+Verified against deepagents-code==0.1.66 / deepagents==0.7.13. The factory's
 owned assembly and server runtime are ports of those exact released sources;
 private names remain intentionally guarded by tests and the bump ledger.
 """
@@ -22,13 +22,15 @@ from deepagents.middleware.subagents import (
 )
 
 # --- LangChain runtime ---
+from langchain.agents.middleware import ToolErrorMiddleware
 from langchain.agents.middleware.types import AgentMiddleware
 from langchain_core._api import suppress_langchain_beta_warning
+from langgraph_sdk.runtime import ServerRuntime as LangGraphServerRuntime
 
 # NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here.
 # Eagerly importing it would pull the full TUI into the server subprocess.
 from deepagents_code._cli_context import CLIContextSchema, INHERIT_CLASSIFIER_MODEL
-from deepagents_code._env_vars import EXPERIMENTAL, is_env_truthy
+from deepagents_code._env_vars import EXPERIMENTAL, FORKED_SUBAGENTS, is_env_truthy
 from deepagents_code._glm_5p2_profile import (
     _ensure_glm_5p2_profile_registered,
     _GlmTerminalStallRecovery,
@@ -54,6 +56,7 @@ from deepagents_code.agent import (
     _add_interrupt_on,
     _apply_inherited_pythonpath,
     _create_rubric_grader_tools,
+    _format_task_error,
     _get_harness_tool_descriptions,
     _has_resolvable_model_provider,
     _inject_fs_tools_into_subagents,
@@ -100,6 +103,7 @@ from deepagents_code.config import (
     get_langsmith_project_name,
     is_memory_auto_save_enabled,
     resolve_auto_classifier_model,
+    resolve_auto_classifier_model_for_provider,
     restore_user_tracing_api_keys,
     restore_user_tracing_env,
     runtime_state,
@@ -130,10 +134,13 @@ from deepagents_code.extensions.runtime import (
 # --- verification pipeline (goals -> criteria -> rubric) ---
 from deepagents_code.goal_rubric import (
     GoalCriteriaMiddleware,
+    RubricGraderState,
     _ContextToolCallBudgetMiddleware,
     _create_goal_criteria_agent,
     _CriteriaContextBudgetMiddleware,
     _rubric_interrupt_on,
+    _rubric_grader_messages,
+    _rubric_grader_state,
     _WebSearchBudgetMiddleware,
     create_goal_criteria_fallback_agent,
 )
@@ -170,6 +177,7 @@ from deepagents_code.offload_middleware import (
 from deepagents_code.plugins.adapters.skills_middleware import PluginSkillsMiddleware
 from deepagents_code.project_utils import ProjectContext, get_server_project_context
 from deepagents_code.subagents import list_subagents
+from deepagents_code.workspace import require_thread_workspace
 
 # --- server graph internals reused by lc_factory.server_graph ---
 from deepagents_code.server_graph import (
@@ -195,6 +203,13 @@ def import_offload_api():  # noqa: ANN201
     return offload_api
 
 
+def import_tool_calling_test_model():  # noqa: ANN201
+    """Load the deterministic model only for subprocess integration fixtures."""
+    from deepagents_code._testing_models import ToolCallingIntegrationChatModel
+
+    return ToolCallingIntegrationChatModel
+
+
 TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
     ("deepagents.backends.protocol", "BackendProtocol"),
     ("deepagents.backends.sandbox", "SandboxBackendProtocol"),
@@ -209,6 +224,7 @@ TYPE_ONLY_IMPORTS: tuple[tuple[str, str], ...] = (
     ("langgraph.store.base", "BaseStore"),
     ("deepagents_code.extensions.registry", "ExtensionRegistry"),
     ("deepagents_code.mcp_tools", "MCPServerInfo"),
+    ("deepagents_code.workspace", "WorkspaceBinding"),
 )
 """Annotation-only imports explicitly resolved by the boundary test."""
 
@@ -226,6 +242,7 @@ if TYPE_CHECKING:
 
     from deepagents_code.extensions.registry import ExtensionRegistry
     from deepagents_code.mcp_tools import MCPServerInfo
+    from deepagents_code.workspace import WorkspaceBinding
 
 
 __all__ = [
@@ -241,6 +258,7 @@ __all__ = [
     "CostTrackingMiddleware",
     "DEFAULT_MODEL_RETRIES",
     "EXPERIMENTAL",
+    "FORKED_SUBAGENTS",
     "ExtensionMode",
     "ExtensionRuntimeMiddleware",
     "FilesystemBackend",
@@ -252,6 +270,7 @@ __all__ = [
     "HeadlessMCPGuardMiddleware",
     "INHERIT_CLASSIFIER_MODEL",
     "InterpreterConfig",
+    "LangGraphServerRuntime",
     "LocalContextMiddleware",
     "LocalShellBackend",
     "ManagedMemoryGuardMiddleware",
@@ -264,6 +283,7 @@ __all__ = [
     "ReliableRubricMiddleware",
     "RemoteAgent",
     "ResumeStateMiddleware",
+    "RubricGraderState",
     "RuntimeSubAgent",
     "STARTUP_ERROR_MARKER",
     "ServerConfig",
@@ -271,6 +291,7 @@ __all__ = [
     "ServerProcess",
     "ServerRuntime",
     "ShellAllowListMiddleware",
+    "ToolErrorMiddleware",
     "_AsyncExecutableBackend",
     "_ContextToolCallBudgetMiddleware",
     "_CriteriaContextBudgetMiddleware",
@@ -291,6 +312,7 @@ __all__ = [
     "_create_rubric_grader_tools",
     "_criteria_context_tools",
     "_ensure_glm_5p2_profile_registered",
+    "_format_task_error",
     "_get_harness_tool_descriptions",
     "_has_resolvable_model_provider",
     "_inject_fs_tools_into_subagents",
@@ -300,6 +322,8 @@ __all__ = [
     "_resolve_retry_owned_model",
     "_resolve_shell_allow_list",
     "_rubric_grader_read_file_prefix",
+    "_rubric_grader_messages",
+    "_rubric_grader_state",
     "_rubric_grader_repository_tool_names",
     "_rubric_grader_system_prompt",
     "_rubric_interrupt_on",
@@ -331,13 +355,16 @@ __all__ = [
     "get_user_agents_dir",
     "import_code_interpreter",
     "import_offload_api",
+    "import_tool_calling_test_model",
     "is_env_truthy",
     "is_memory_auto_save_enabled",
     "list_subagents",
     "load_async_subagents",
     "load_extensions",
     "offload_operation_from",
+    "require_thread_workspace",
     "resolve_auto_classifier_model",
+    "resolve_auto_classifier_model_for_provider",
     "resolve_auto_classifier_timeout",
     "resolve_recursion_limit",
     "restore_user_tracing_api_keys",

@@ -1,8 +1,8 @@
 """Factory assembly: an owned recomposition of upstream's ``create_cli_agent``.
 
 ``create_factory_agent`` is a line-faithful port of
-``deepagents_code.agent.create_cli_agent`` (``agent.py:2356-3410`` at the
-``deepagents-code==0.1.64`` release tag, commit ``d8686f74``), with every
+``deepagents_code.agent.create_cli_agent`` (``agent.py:2391-3484`` at the
+``deepagents-code==0.1.66`` release tag, commit ``3812967c``), with every
 upstream import routed through :mod:`lc_factory.upstream`.
 
 **One deliberate behavioral delta**: the middleware injection seam
@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from lc_factory.upstream import (
     CONVERSATION_HISTORY_DIRNAME,
     DEFAULT_MODEL_RETRIES,
+    FORKED_SUBAGENTS,
     REPOSITORY_TOOL_CALL_LIMIT,
     AsyncApprovalHITLMiddleware,
     CLIContextSchema,
@@ -48,6 +49,7 @@ from lc_factory.upstream import (
     PluginSkillsMiddleware,
     ReliableRubricMiddleware,
     ShellAllowListMiddleware,
+    ToolErrorMiddleware,
     _FALLBACK_ARTIFACTS_ROOT,
     _MEMORY_READONLY_SYSTEM_PROMPT,
     _add_interrupt_on,
@@ -57,6 +59,7 @@ from lc_factory.upstream import (
     _create_cli_compaction_middleware,
     _create_rubric_grader_tools,
     _ensure_glm_5p2_profile_registered,
+    _format_task_error,
     _ExecutableBackend,
     _get_harness_tool_descriptions,
     _GlmTerminalStallRecovery,
@@ -84,6 +87,7 @@ from lc_factory.upstream import (
     get_system_prompt,
     get_user_agent_md_path,
     get_user_agents_dir,
+    is_env_truthy,
     list_subagents,
     OffloadOperation,
     restore_user_tracing_api_keys,
@@ -147,19 +151,18 @@ _DEFAULT_PHASE: FactoryPhase = "before_verification"
 SubagentPhase = Literal["first", "last"]
 """Where caller-supplied middleware is spliced into each *subagent* stack.
 
-Deliberately a smaller vocabulary than `FactoryPhase`: subagent stacks have no
-goal-criteria/rubric verification tail, so `'before_verification'` would name a
-boundary that does not exist. The two phases here are the edges of the factory's
-own subagent block, which is never empty — cost tracking, model retry, and
-server hooks are appended unconditionally — so neither boundary moves with
-configuration.
+The two phases address the edges of the factory's own subagent block, which
+always contains cost tracking, model retry, and server hooks. Fresh subagents
+have no verification tail. Forked subagents inherit the parent's middleware;
+these phases govern child additions within the SDK's inheritance merge.
 """
 
 _SUBAGENT_PHASE_ORDER: tuple[SubagentPhase, ...] = ("first", "last")
 """Subagent phases in stack order.
 
-- ``first`` — ahead of every factory subagent middleware, including the
-  approval gate. Outermost of the factory block.
+- ``first`` — on fresh subagents, ahead of every factory subagent middleware,
+  including the approval gate. On forks, new child entries follow inherited
+  main middleware; inherited names retain their parent positions.
 - ``last`` — after every factory subagent middleware, still ahead of the SDK's
   own subagent tail (harness-profile extras, prompt caching), which is not
   addressable from here.
@@ -202,9 +205,9 @@ _DEFAULT_SUBAGENT_PHASE: SubagentPhase = "last"
 
 ``last`` rather than ``first``, mirroring the main agent's
 ``before_verification`` default: the caller's middleware lands *after* every
-middleware that installs approval policy, hooks, and the memory guard. A caller
-who wants to sit outside the approval gate has to ask for ``first`` explicitly,
-which is the safer direction for a default on a delegated stack.
+middleware that installs approval policy, hooks, and the memory guard. A fresh
+subagent caller who wants to sit outside the approval gate has to ask for
+``first`` explicitly. Forks preserve inherited parent positions.
 """
 
 _SDK_RESERVED_MIDDLEWARE_NAMES = frozenset(
@@ -215,6 +218,7 @@ _SDK_RESERVED_MIDDLEWARE_NAMES = frozenset(
         "SummarizationMiddleware",
         "PatchToolCallsMiddleware",
         "AsyncSubAgentMiddleware",
+        "_ForkTaskToolMiddleware",
         "SkillsMiddleware",
         # Tail, behind the factory block. Reachable for replacement just the
         # same: the SDK's merge compares against its FULLY assembled stack.
@@ -705,6 +709,7 @@ def create_factory_agent(
     rubric_grader_tools: Sequence[BaseTool | Callable[..., Any]] | None = None,
     model_retries: int = DEFAULT_MODEL_RETRIES,
     cli_max_retries: int | None = None,
+    summarization_model: str | None = None,
     enforce_model_policy: bool = True,
     extension_registry: ExtensionRegistry | None = None,
     middleware: Sequence[AgentMiddleware[Any, Any]]
@@ -830,7 +835,9 @@ def create_factory_agent(
             Direct callers may omit this to resolve one for the current
             process. The server supplies a snapshot that incorporates its
             invocation-scoped PTC overrides.
-        rubric_model: Grader model for `RubricMiddleware`.
+        rubric_model: Default grader model. `None` makes the grader follow
+            the active main model. Either way a thread's recorded
+            `_rubric_model_spec` selection takes precedence.
 
             A `'provider:model'` string or `BaseChatModel`.
 
@@ -909,9 +916,11 @@ def create_factory_agent(
                 addressable from here. HITL sits inside the factory stack,
                 before this phase.
 
-            This parameter reaches the **main agent only**. To cover work
-            delegated through `task`, use `subagent_middleware`. The
-            goal-criteria agent remains unreachable: upstream's
+            Forked subagents inherit this middleware by reference. For fresh
+            subagents, use `subagent_middleware`. The synthesized general-purpose
+            agent forks by default; set `DEEPAGENTS_CODE_FORKED_SUBAGENTS=false`
+            for fresh mode. Main phase guarantees above apply to the main graph.
+            The goal-criteria agent remains unreachable: upstream's
             `_create_goal_criteria_agent` takes no middleware argument.
 
             Every injected middleware needs a `.name` that is unique in the
@@ -937,19 +946,21 @@ def create_factory_agent(
             `general-purpose` subagent.
 
             Same two input forms as `middleware`, but a smaller phase
-            vocabulary — subagent stacks have no verification tail:
+            vocabulary for the edges of the factory's child middleware block:
 
             ```python
             create_factory_agent(..., subagent_middleware=[MyMiddleware()])
             create_factory_agent(..., subagent_middleware={"first": [Outer()]})
             ```
 
-            - `'first'`: ahead of every factory subagent middleware, including
-                the approval gate.
+            - `'first'`: on fresh agents, ahead of every factory subagent
+                middleware, including the approval gate. On forks, new child
+                entries follow inherited main middleware. Inherited names
+                retain their parent positions.
             - `'last'` (default): after every factory subagent middleware,
                 still ahead of the SDK's own subagent tail. The default is the
-                later position on purpose — a caller wanting to sit outside the
-                approval gate must ask for `'first'` explicitly.
+                later position on purpose. Only fresh agents can place child
+                middleware outside the approval gate with `'first'`.
 
             `None` (default) composes subagents exactly as v0 does.
 
@@ -957,7 +968,8 @@ def create_factory_agent(
 
                 The middleware objects you pass are spliced into each
                 subagent's stack **by reference**, so a single instance is
-                shared across all of them. Middleware holding per-agent state
+                shared across all of them. Forks also share inherited main
+                middleware instances. Middleware holding per-agent state
                 will see that state shared; construct stateless middleware, or
                 key any state by something available at runtime.
 
@@ -968,8 +980,9 @@ def create_factory_agent(
             through the SDK's name-based merge too (`_apply_custom_middleware`
             against a subagent base), so a reserved name would be silently
             replaced rather than land at the requested phase. The guarded set
-            is the main stack's, which is a superset of the subagent base — a
-            few names are refused that only the main stack could own.
+            also covers the SDK's fork task middleware. On forks, injected
+            child names colliding with inherited main middleware are rejected
+            before the SDK can silently replace the inherited behavior.
         rubric_grader_middleware: Caller-supplied middleware spliced into the
             rubric grader's own stack.
 
@@ -1002,6 +1015,10 @@ def create_factory_agent(
             Forwarded to subagent, Auto classifier, and runtime offload models
             so each one resolves its own provider's configured budget unless the
             user overrode it globally.
+        summarization_model: Model spec used only for context-compaction summaries.
+
+            The model is resolved lazily when compaction first runs. `None`
+            reuses the effective main model.
         enforce_model_policy: Check every model string against `models.allowed`.
             Pass `False` **only** from callers that compile a graph they never
             invoke (tool enumeration), so a blocked subagent model degrades the
@@ -1036,7 +1053,7 @@ def create_factory_agent(
     """  # noqa: DOC502 - propagates from `ModelConfig.require_model_allowed`
     tools = list(tools or [])
     if extension_registry is not None:
-        from lc_factory.upstream import EXPERIMENTAL, is_env_truthy
+        from lc_factory.upstream import EXPERIMENTAL
 
         if not is_env_truthy(EXPERIMENTAL):
             extension_registry = None
@@ -1292,6 +1309,8 @@ def create_factory_agent(
             "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
             "middleware": _subagent_cli_middleware(has_explicit_model=False),
         }
+        if is_env_truthy(FORKED_SUBAGENTS, default=True):
+            general_purpose_subagent["mode"] = "fork"
         if resolved_interrupt_on is not None:
             general_purpose_subagent["interrupt_on"] = {}
         custom_subagents.append(general_purpose_subagent)
@@ -1598,6 +1617,7 @@ def create_factory_agent(
         model,
         composite_backend,
         cli_max_retries=cli_max_retries,
+        summarization_model_spec=summarization_model,
     )
     if auto_mode_config is not None and resolved_interrupt_on is not None:
         from lc_factory.upstream import AutoModeHITLMiddleware
@@ -1741,7 +1761,12 @@ def create_factory_agent(
     # with a non-zero request-time budget.
     from lc_factory.upstream import CodeModelRetryMiddleware
 
-    agent_middleware.append(CodeModelRetryMiddleware(max_retries=model_retries))
+    agent_middleware.extend(
+        [
+            CodeModelRetryMiddleware(max_retries=model_retries),
+            ToolErrorMiddleware(_format_task_error, tools=["task"]),
+        ]
+    )
 
     grader_context_tools = _normalize_rubric_grader_context_tools(
         rubric_grader_tools or ()
@@ -1776,8 +1801,11 @@ def create_factory_agent(
         fs_tools=fs_tools,
     )
     from lc_factory.upstream import (
+        RubricGraderState,
         _ContextToolCallBudgetMiddleware,
         _CriteriaContextBudgetMiddleware,
+        _rubric_grader_messages,
+        _rubric_grader_state,
         _rubric_interrupt_on,
         _WebSearchBudgetMiddleware,
     )
@@ -1786,6 +1814,11 @@ def create_factory_agent(
         # SEAM (grader phase "first"): outside the budget middlewares. Opt-in
         # only — the default phase is "last", which keeps budgets wrapping.
         *injected_grader_middleware["first"],
+        ConfigurableModelMiddleware(
+            persist_model_state=False,
+            cli_max_retries=cli_max_retries,
+            strict_model_resolution=True,
+        ),
         # Both clients filter this nested message stream. A transient fault can
         # safely retry the failed model node without replaying grader tools.
         CodeModelRetryMiddleware(
@@ -1858,6 +1891,16 @@ def create_factory_agent(
             "tools": grader_tools,
             "grader_middleware": grader_middleware,
             "grader_context_schema": CLIContextSchema,
+            "grader_state_schema": RubricGraderState,
+            "prepare_messages_for_grader": _rubric_grader_messages,
+            "build_grader_state": _rubric_grader_state,
+            # The bootstrap only scaffolds the runtime grader's graph;
+            # `ConfigurableModelMiddleware` swaps in the thread-selected model
+            # before any call. Pass the main model through even as an
+            # unresolved spec so a runtime selection never depends on the
+            # startup rubric model resolving.
+            "runtime_bootstrap_model": model,
+            "inherit_main_model": rubric_model is None,
         }
         if rubric_max_iterations is not None:
             rubric_kwargs["max_iterations"] = rubric_max_iterations
@@ -1912,19 +1955,39 @@ def create_factory_agent(
     # middleware and its runtime host, immediately ahead of the SDK's own tail.
     agent_middleware.extend(injected_middleware["last"])
     _validate_injected_middleware(agent_middleware, injected_middleware)
-    agent = create_deep_agent(
-        model=model,
-        system_prompt=system_prompt,
-        tools=tools,
-        backend=composite_backend,
-        middleware=agent_middleware,
-        interrupt_on=interrupt_on,
-        context_schema=CLIContextSchema,
-        checkpointer=checkpointer,
-        store=store,
-        subagents=all_subagents or None,
-        name=_sanitize_agent_message_name(assistant_id),
-    )
+    # SEAM (fork inheritance): the SDK merges parent and child middleware by
+    # name. A child injection must not silently replace inherited behavior.
+    if _injected_subagent_names and any(
+        spec.get("mode") == "fork" and "runnable" not in spec
+        for spec in all_subagents
+    ):
+        inherited_names = {item.name for item in agent_middleware}
+        if collisions := sorted(_injected_subagent_names & inherited_names):
+            msg = (
+                "Injected subagent middleware collides with inherited main "
+                f"middleware on a fork: {collisions}. Override `.name` on the "
+                "injected subagent middleware to avoid replacing parent behavior."
+            )
+            raise ValueError(msg)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="The feature `forked subagents` is in beta",
+            category=Warning,
+        )
+        agent = create_deep_agent(
+            model=model,
+            system_prompt=system_prompt,
+            tools=tools,
+            backend=composite_backend,
+            middleware=agent_middleware,
+            interrupt_on=interrupt_on,
+            context_schema=CLIContextSchema,
+            checkpointer=checkpointer,
+            store=store,
+            subagents=all_subagents or None,
+            name=_sanitize_agent_message_name(assistant_id),
+        )
     if effective_recursion_limit is not None:
         # `Pregel.with_config` uses `merge_configs`, which discards a value equal
         # to LangGraph's environment-derived default. Replace the copied graph's

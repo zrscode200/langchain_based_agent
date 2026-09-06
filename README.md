@@ -82,29 +82,47 @@ deliberately rules out `.env` as a source, including your own global one.
 
 ### Reaching delegated work
 
-`middleware=` covers the main agent. Two further parameters reach the stacks
+`middleware=` covers the main agent and is inherited by forked subagents.
+Two further parameters reach the stacks
 the factory composes for delegated work:
 
 ```python
 agent, backend = create_factory_agent(
     model="anthropic:claude-sonnet-4-6",
     assistant_id="my-agent",
-    middleware=[MainOnly()],                       # main agent
+    middleware=[ParentAudit()],                    # main agent and its forks
     subagent_middleware=[EverySubagent()],         # every subagent stack
     rubric_grader_middleware=[GraderOnly()],       # the rubric grader
 )
 ```
 
-Both use a two-phase vocabulary — `first` and `last`, defaulting to `last` —
-because neither stack has a verification tail. `last` is the deliberate
-default: on subagents it sits after the approval gate, and on the grader it
-sits inside the budget middlewares that bound grader spend, so both keep
-wrapping the injection.
+Both use `first` and `last`, defaulting to `last`. On fresh subagents,
+`first` precedes the factory's subagent middleware and `last` follows it.
+On the grader, `last` sits inside the budget middleware that bounds spending.
 
-Two things worth knowing:
+Starting with Code **0.1.66**, the synthesized general-purpose subagent uses
+upstream's **fork** mode by default. It inherits the parent's conversation,
+state, and main middleware. Its `first` phase places new child middleware
+after the inherited parent block; it cannot move ahead of inherited approval
+or verification middleware. `last` follows the child additions. Upstream child
+overrides of inherited middleware retain the parent's positions. Injected child
+names that collide with inherited main names are rejected to prevent silent
+replacement.
+
+For independent general-purpose subagents with the previous middleware scope
+and ordering, explicitly set this before constructing or launching the agent:
+
+```sh
+export DEEPAGENTS_CODE_FORKED_SUBAGENTS=false
+```
+
+This flag controls the synthesized general-purpose agent. File-defined custom
+subagents remain fresh at this pinned release; their parser does not accept a
+fork-mode setting.
 
 - **Subagent middleware is spliced by reference**, so one instance is shared
-  across every subagent stack. Keep it stateless.
+  across every subagent stack. Forks also share inherited main middleware
+  instances. Keep middleware stateless or key its state by execution context.
 - **The goal-criteria agent stays unreachable.** Upstream's
   `_create_goal_criteria_agent` takes no middleware argument.
 

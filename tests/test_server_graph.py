@@ -557,3 +557,226 @@ def test_per_target_errors_name_the_target():
     with pytest.raises(ValueError, match="for target 'subagents'") as excinfo:
         _resolve_middleware_ref(f"{__name__}:_bad_subagent_phase")
     assert MIDDLEWARE_REF_ENV in str(excinfo.value)
+
+
+def test_graph_factory_runtime_annotation_is_resolvable():
+    """LangGraph resolves the annotation to recognize a context-aware factory."""
+    from typing import get_type_hints
+
+    from lc_factory import server_graph
+
+    hints = get_type_hints(server_graph.make_graph)
+    assert hints["runtime"] == (
+        server_graph.LangGraphServerRuntime[server_graph.CLIContextSchema] | None
+    )
+
+
+async def test_graph_discovery_keeps_default_runtime(monkeypatch):
+    from types import SimpleNamespace
+
+    from lc_factory import server_graph
+
+    graph = object()
+
+    async def get_runtime():
+        return SimpleNamespace(agent=graph)
+
+    monkeypatch.setattr(server_graph, "_get_runtime", get_runtime)
+    assert await server_graph.make_graph() is graph
+    assert await server_graph.make_graph(
+        runtime=SimpleNamespace(execution_runtime=None)
+    ) is graph
+
+
+@pytest.mark.parametrize(
+    ("config", "context"),
+    [(None, {}), ({"configurable": {"thread_id": ""}}, {}), ({}, None)],
+)
+async def test_execution_requires_thread_and_context(config, context):
+    from types import SimpleNamespace
+
+    from lc_factory import server_graph
+
+    runtime = SimpleNamespace(execution_runtime=SimpleNamespace(context=context))
+    with pytest.raises(ValueError, match="thread id and workspace context"):
+        await server_graph.make_graph(config=config, runtime=runtime)
+
+
+async def test_execution_validates_durable_workspace_before_selecting_graph(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    from deepagents_code.workspace import WorkspaceConflictError, bind_thread_workspace
+
+    from lc_factory import server_graph
+
+    monkeypatch.setenv("DEEPAGENTS_CODE_SERVER_DB_PATH", str(tmp_path / "sessions.db"))
+    binding = await bind_thread_workspace("factory-thread", str(tmp_path))
+    graph = object()
+    selected = []
+
+    async def workspace_runtime(verified_binding):
+        selected.append(verified_binding)
+        return SimpleNamespace(agent=graph)
+
+    monkeypatch.setattr(server_graph, "_workspace_runtime", workspace_runtime)
+    context = {"workspace": binding.to_payload()}
+    runtime = SimpleNamespace(execution_runtime=SimpleNamespace(context=context))
+    config = {"configurable": {"thread_id": "factory-thread"}}
+    assert await server_graph.make_graph(config=config, runtime=runtime) is graph
+    assert selected == [binding]
+
+    context["workspace"]["resource_key"] = "another-workspace"
+    with pytest.raises(WorkspaceConflictError, match="does not match"):
+        await server_graph.make_graph(config=config, runtime=runtime)
+    assert selected == [binding]
+
+
+async def test_workspace_runtime_reuses_resources_and_separates_workspaces(
+    monkeypatch, tmp_path
+):
+    import asyncio
+    from collections import OrderedDict
+
+    from deepagents_code.workspace import resolve_workspace
+
+    from lc_factory import server_graph
+
+    monkeypatch.setattr(server_graph, "_workspace_runtimes", OrderedDict())
+    monkeypatch.setattr(server_graph, "_workspace_runtime_locks", {})
+    monkeypatch.setattr(server_graph, "_MAX_WORKSPACE_RUNTIMES", 2)
+    config = server_graph.ServerConfig.from_env()
+    built = []
+
+    async def build(*, config_override, project_context_override):
+        await asyncio.sleep(0)  # Overlap requests while initialization holds its lock.
+        assert config_override.cwd == str(project_context_override.user_cwd)
+        result = object()
+        built.append((config_override.cwd, result))
+        return result
+
+    monkeypatch.setattr(server_graph, "_make_graphs", build)
+    bindings = []
+    for name in ("first", "second", "third"):
+        cwd = tmp_path / name
+        cwd.mkdir()
+        bindings.append(resolve_workspace(
+            str(cwd),
+            config.to_workspace_payload(),
+            config_fingerprint=config.workspace_fingerprint(),
+        ))
+
+    first, duplicate = await asyncio.gather(
+        server_graph._workspace_runtime(bindings[0]),
+        server_graph._workspace_runtime(bindings[0]),
+    )
+    assert first is duplicate
+    assert len(built) == 1
+    second = await server_graph._workspace_runtime(bindings[1])
+    assert second is not first
+    assert await server_graph._workspace_runtime(bindings[0]) is first
+    await server_graph._workspace_runtime(bindings[2])
+    assert bindings[1].resource_key not in server_graph._workspace_runtimes
+    assert bindings[1].resource_key not in server_graph._workspace_runtime_locks
+    assert bindings[0].resource_key in server_graph._workspace_runtimes
+
+
+@pytest.mark.parametrize("drift", ["fingerprint", "resource_policy"])
+async def test_workspace_runtime_rejects_changed_config_before_build(
+    monkeypatch, tmp_path, drift
+):
+    from collections import OrderedDict
+    from dataclasses import replace
+
+    from deepagents_code.workspace import resolve_workspace
+
+    from lc_factory import server_graph
+
+    monkeypatch.setattr(server_graph, "_workspace_runtimes", OrderedDict())
+    monkeypatch.setattr(server_graph, "_workspace_runtime_locks", {})
+    config = server_graph.ServerConfig.from_env()
+    binding = resolve_workspace(
+        str(tmp_path),
+        config.to_workspace_payload(),
+        config_fingerprint=config.workspace_fingerprint(),
+    )
+    if drift == "fingerprint":
+        binding = replace(binding, config_fingerprint="stale-fingerprint")
+    else:
+        binding = replace(binding, workspace_config_json='{"enable_shell": false}')
+
+    async def unexpected_build(**kwargs):
+        pytest.fail("A changed workspace policy reached graph construction")
+
+    monkeypatch.setattr(server_graph, "_make_graphs", unexpected_build)
+    with pytest.raises(RuntimeError, match="configuration changed"):
+        await server_graph._workspace_runtime(binding)
+
+
+async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_policy(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    from lc_factory import assembly, server_graph
+
+    main, subagents, grader = object(), object(), object()
+    calls = {}
+    graph, backend, offload = object(), object(), object()
+    config = server_graph.ServerConfig(
+        model="test:worker",
+        summarization_model="test:summarizer",
+        auto_classifier_model="test:reviewer",
+        enable_interpreter=False,
+    )
+    project_context = server_graph.ProjectContext(user_cwd=tmp_path, project_root=None)
+    result = SimpleNamespace(
+        model=object(), provider="test", model_retries=2, cli_max_retries=3,
+        apply_to_runtime_state=lambda: calls.setdefault("model_applied", True),
+    )
+
+    def reload_credentials(*, start_path):
+        calls["credentials_cwd"] = start_path
+
+    async def build_tools(received_config, received_context):
+        assert received_config is config
+        assert received_context is project_context
+        return [], [], []
+
+    def build_agent(**kwargs):
+        calls["assembly"] = kwargs
+        return graph, backend
+
+    def resolve_classifier(provider, classifier):
+        assert (provider, classifier) == ("test", "test:reviewer")
+        return "resolved:reviewer"
+
+    monkeypatch.setattr(server_graph, "credentials", SimpleNamespace(
+        reload_from_environment=reload_credentials,
+    ))
+    monkeypatch.setattr(server_graph, "configure_langsmith_secret_redaction", lambda: None)
+    monkeypatch.setattr(server_graph, "_factory_middleware", lambda: {
+        "main": main, "subagents": subagents, "grader": grader,
+    })
+    monkeypatch.setattr(server_graph, "create_model", lambda *args, **kwargs: result)
+    monkeypatch.setattr(server_graph, "_build_tools", build_tools)
+    monkeypatch.setattr(server_graph, "load_async_subagents", lambda: [])
+    monkeypatch.setattr(server_graph, "is_memory_auto_save_enabled", lambda: False)
+    monkeypatch.setattr(server_graph, "resolve_auto_classifier_model_for_provider", resolve_classifier)
+    monkeypatch.setattr(server_graph, "offload_operation_from", lambda value: offload)
+    monkeypatch.setattr(assembly, "create_factory_agent", build_agent)
+
+    runtime = await server_graph._make_graphs(
+        config_override=config, project_context_override=project_context,
+    )
+    assert (runtime.agent, runtime.backend, runtime.offload) == (graph, backend, offload)
+    assert calls["credentials_cwd"] == tmp_path
+    assert calls["model_applied"] is True
+    kwargs = calls["assembly"]
+    assert kwargs["middleware"] is main
+    assert kwargs["subagent_middleware"] is subagents
+    assert kwargs["rubric_grader_middleware"] is grader
+    assert kwargs["summarization_model"] == "test:summarizer"
+    assert kwargs["auto_classifier_model"] == "resolved:reviewer"
+    assert kwargs["project_context"] is project_context

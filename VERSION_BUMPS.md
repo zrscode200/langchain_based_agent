@@ -17,18 +17,113 @@ stay a constant-length document no matter how many bumps accumulate.
 
 | Date | `deepagents-code` | `deepagents` | Port changes | Effort | Commit |
 |---|---|---|---|---|---|
-| 2026-08-28 | 0.1.54 → **0.1.64** | 0.7.5 → **0.7.10** | **broad runtime rebase** | ~1 hr | this commit |
+| 2026-09-06 | 0.1.64 → **0.1.66** | 0.7.10 → **0.7.13** | **constructor + workspace runtime + fork seam** | ~36 min | this commit |
+| 2026-08-28 | 0.1.54 → **0.1.64** | 0.7.5 → **0.7.10** | **broad runtime rebase** | ~1 hr | `eaf8a12` |
 | 2026-08-10 | 0.1.52 → **0.1.54** | 0.7.1 → **0.7.5** | **none** (proven) | <30 min | `cb43e40` |
 | 2026-08-06 | 0.1.48 → **0.1.52** | 0.7.0b2 → **0.7.1** | **7 hunks re-applied** | ~1 hr | `304f8a8` |
 | 2026-07-27 | 0.1.47 → **0.1.48** | 0.7.0b2 (held) | **none** (inferred) | ~15 min | `45c40bd` |
 
-Two free bumps and two real re-applications. The 0.1.64 jump is the largest
-data point so far: every copied/private surface changed, yet the rebase stayed
-inside one maintenance wave and retained executable parity and drift tripwires.
+Two free bumps and three re-applications. The 0.1.66 bump also changes an
+extension contract: default forked subagents inherit main middleware. Package
+parity alone cannot prove that previously documented injection scopes survive.
 
 ---
 
-## 2026-08-28 — 0.1.54 → 0.1.64 (SDK 0.7.5 → 0.7.10) — this commit
+## 2026-09-06 — 0.1.64 → 0.1.66 (SDK 0.7.10 → 0.7.13) — this commit
+
+**Verdict: re-application owed.** The released constructor has 10 changed
+hunks (55 additions / 16 deletions). `_make_graphs` has eight changed hunks;
+`make_graph` changes its execution contract and gains a workspace runtime
+cache. The scaffold body and TUI rebind still match their upstream call sites.
+
+**Delta-read method:** downloaded PyPI wheels and sdists, checked metadata and
+SHA-256 hashes, and compared package Python sources to release tags. All 257
+Code and 53 SDK source files match across wheel, sdist, and tag, excluding
+generated `_build_info.py`; installed sources also match the verified wheels.
+Code's generated `BUILD_COMMIT="3812967"` identifies release commit
+`3812967c84d90619848f3185f22470204fc88bd8`; the SDK tag points to
+`1aae3746682a65c837c5dd0f165b685253fe9465`. The local development checkout
+contains later changes despite sharing the release version, so it was not used
+as the port baseline. Code requires Python `>=3.12,<4` and SDK exactly 0.7.13.
+
+| Artifact | SHA-256 |
+|---|---|
+| Code wheel | `4f8ff4033abeb59511292ea574005ad25d001eed7a001f7370c076cdc3a15d19` |
+| Code sdist | `320491fd11ade2241270cf0925318eac9d1f5a01999ffc9fb2f143a8625d9e5b` |
+| SDK wheel | `d717ee8ee092a91c475a6124ed578d5e4154d54120769a1081bfe1aece87c248` |
+| SDK sdist | `99fc1855b1387c1c6e6035ba3600edbd933f59c39a4863ef3a7d5a0272ea67ab` |
+
+**Ported changes:** lazy summarization-model selection; default general-purpose
+forks; task error middleware; runtime grader model selection with strict
+resolution, state schema, and message/state preparation. Server graph execution
+now requires a durable thread/workspace binding and uses a 32-entry runtime
+cache. The offload adapter follows that workspace runtime; model/provider
+classifier settings and all three middleware targets survive the server path.
+
+**Seam migration:** retain upstream's default fork with no-injection parity.
+Main injections are inherited by reference. Unique child `first` entries follow
+the inherited main block; upstream child overrides retain parent positions.
+Fresh subagents preserve the previous scope/order contract. Document
+`DEEPAGENTS_CODE_FORKED_SUBAGENTS=false` for fresh general-purpose delegation.
+Reject child injections colliding with inherited parent names, and reserve the
+SDK's `_ForkTaskToolMiddleware` name. Fresh and fork tests inspect each mode
+separately, including the final fork compilation.
+
+**Tripwire maintenance:** `tests/test_parity.py` needed instrumentation changes.
+Its former `.with_config` spy missed graph copies, so it now checks the returned
+graph's effective configuration using a minimal real compiled graph. Subagent
+mode and class-valued grader schemas are visible; schema fingerprints preserve
+qualified identity and declared annotations without walking generated Pydantic
+internals. Depth stays 9 and the rich-case truncation guard passes. Negative
+controls cover recursion, fork mode, schema, and existing constructor drift;
+no factory-specific comparison exemption was added. The summarization-model
+configuration joins the parity matrix.
+
+**Guard re-checks:** SDK main core/tail/profile merging is unchanged; fork
+inheritance adds a separate merge. LangChain 1.4.0 preserves before/after hook
+direction and wrapper ordering; its factory diff changes one model-to-tools
+routing condition. The environment denylist, first-write-wins dotenv behavior,
+factory reservation before upstream use, private server working directory, and
+scaffold global rebind still hold. Test isolation now establishes profile paths
+before collection and replaces each test's immutable path snapshot, since
+changing HOME alone no longer isolates Code's launch-time paths. Model and
+configuration-service caches are cleared on both profile transitions; a
+two-profile probe confirmed cache invalidation and reproduced stale settings
+when that reset was disabled.
+
+**Live fixture migration:** upstream's deterministic marker model scans the
+entire conversation. In a fork it sees the parent's delegation marker again,
+requests recursive delegation, and stops when the runtime refuses it. A local
+test-only adapter scopes marker dispatch to the latest human task and its tool
+results; real runtime history remains intact. Positive delegation is tested in
+both fresh mode with the upstream fake and default fork mode with the adapter,
+asserting exact file contents. The no-delegation negative control remains on
+the default fork configuration.
+
+**Verification:** Python 3.12.12; exact installed release pair; LangChain 1.4.0.
+Final default suite **187 passed, 7 deselected** (including parity **29**, seam
+**94**, server/launch **53**, and boundary/smoke **8**). Final live suite
+**7 passed, 187 deselected**, covering fresh and forked delegation, ordinary
+execution/persistence, transport, and startup failures. A separate intentional
+recursion-limit mutation fails parity specifically on `graph_config` (1 instead
+of 42), proving the corrected tripwire. Source and contract review findings
+were resolved before the final runs. `uv build --offline` produced the wheel
+and sdist; `git diff --check` is clean.
+
+**Effort:** approximately 36 minutes from artifact verification starting at
+2026-09-06 04:34:41 UTC through final verification and packaging, including
+the fork contract migration, fixture repair, and independent review.
+
+**Watches:** upstream fork mode remains beta; inherited middleware instances
+must not keep unkeyed per-agent mutable state. Third-party registered harness
+profiles remain outside the static reserved-name set. D4 still assumes the
+factory loads first, and factory-reference resolution still runs on the server
+event loop. Real-provider quality, a live extension-enabled server, and a live
+HTTP offload session are outside this bump's validation.
+
+---
+
+## 2026-08-28 — 0.1.54 → 0.1.64 (SDK 0.7.5 → 0.7.10) — `eaf8a12`
 
 **Verdict: re-application owed across every coupled runtime surface.** This was
 not a lock-only bump: 905 additions / 270 deletions landed across upstream's

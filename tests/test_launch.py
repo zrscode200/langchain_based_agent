@@ -34,10 +34,10 @@ def test_offload_adapter_reuses_upstream_app_with_factory_runtime():
     import deepagents_code.offload_api as upstream_offload_api
 
     from lc_factory import offload_api
-    from lc_factory.server_graph import get_server_runtime
+    from lc_factory.server_graph import _workspace_runtime
 
     assert offload_api.app is upstream_offload_api.app
-    assert upstream_offload_api.get_server_runtime is get_server_runtime
+    assert upstream_offload_api.get_server_runtime is _workspace_runtime
 
 
 async def test_offload_adapter_serves_upstream_operation_routes():
@@ -59,16 +59,28 @@ async def test_offload_adapter_serves_upstream_operation_routes():
     assert response.json() == {"status": "cancelled"}
 
 
-async def test_offload_adapter_operation_route_uses_factory_runtime(monkeypatch):
+async def test_offload_adapter_operation_route_uses_factory_runtime(monkeypatch, tmp_path):
     import httpx
     import deepagents_code.offload_api as upstream_offload_api
     from deepagents_code.offload_middleware import (
         OffloadExecution,
         unchanged_offload_result,
     )
+    from deepagents_code.workspace import bind_thread_workspace
 
     from lc_factory import offload_api, server_graph
-    from lc_factory.upstream import ServerRuntime
+    from lc_factory.upstream import ServerConfig, ServerRuntime
+
+    monkeypatch.setenv("DEEPAGENTS_CODE_SERVER_DB_PATH", str(tmp_path / "sessions.db"))
+    config = ServerConfig.from_env()
+    binding = await bind_thread_workspace(
+        "factory-offload",
+        str(tmp_path),
+        config.to_workspace_payload(),
+        config_fingerprint=config.workspace_fingerprint(),
+    )
+    monkeypatch.setattr(server_graph, "_workspace_runtimes", server_graph.OrderedDict())
+    monkeypatch.setattr(server_graph, "_workspace_runtime_locks", {})
 
     checkpoint = {
         "checkpoint": {"checkpoint_id": "checkpoint-1"},
@@ -106,13 +118,15 @@ async def test_offload_adapter_operation_route_uses_factory_runtime(monkeypatch)
             result = unchanged_offload_result("noop", messages=1, tokens=0)
             return OffloadExecution({}, result)
 
-    async def fake_get_runtime():
+    async def fake_make_graphs(*, config_override, project_context_override):
         calls["factory_runtime"] = True
+        assert config_override.cwd == binding.cwd
+        assert str(project_context_override.user_cwd) == binding.cwd
         agent = type("FakeAgent", (), {"store": "factory-store"})()
         return ServerRuntime(agent=agent, backend=object(), offload=FakeOffload())
 
     monkeypatch.setattr(upstream_offload_api, "_client", FakeClient())
-    monkeypatch.setattr(server_graph, "_get_runtime", fake_get_runtime)
+    monkeypatch.setattr(server_graph, "_make_graphs", fake_make_graphs)
 
     transport = httpx.ASGITransport(app=offload_api.app)
     async with httpx.AsyncClient(
@@ -121,7 +135,10 @@ async def test_offload_adapter_operation_route_uses_factory_runtime(monkeypatch)
     ) as client:
         response = await client.post(
             "/dcode/threads/factory-offload/offload",
-            json={"operation_id": "positive-operation", "context": {}},
+            json={
+                "operation_id": "positive-operation",
+                "context": {"workspace": binding.to_payload()},
+            },
         )
 
     assert response.status_code == 200, response.text
@@ -221,15 +238,19 @@ async def test_upstream_launcher_serves_the_factory_graph(monkeypatch, tmp_path)
             return None
 
     monkeypatch.setattr(upstream_server, "ServerProcess", FakeServerProcess)
-    monkeypatch.setattr(
-        upstream_remote,
-        "RemoteAgent",
-        lambda **kwargs: captured.setdefault("remote", kwargs),
-    )
+    class FakeRemoteAgent:
+        def __init__(self, **kwargs):
+            captured["remote"] = kwargs
+
+        def set_workspace(self, cwd, workspace_config, *, config_fingerprint):
+            captured["workspace"] = (cwd, workspace_config, config_fingerprint)
+
+    monkeypatch.setattr(upstream_remote, "RemoteAgent", FakeRemoteAgent)
 
     await server_manager_module.start_server_and_get_agent(
         assistant_id="lc-factory-seam",
         no_mcp=True,
+        cwd=str(tmp_path),
     )
 
     work_dir = Path(captured["config_dir"])
@@ -243,6 +264,11 @@ async def test_upstream_launcher_serves_the_factory_graph(monkeypatch, tmp_path)
     assert captured["remote"]["graph_name"] == "agent"
     # And the rescaffold-on-missing-config path carries the factory scaffold.
     assert captured["scaffold"] is launch.scaffold_workspace
+    workspace_cwd, workspace_config, workspace_fingerprint = captured["workspace"]
+    assert workspace_cwd == str(tmp_path.resolve())
+    assert workspace_config["assistant_id"] == "lc-factory-seam"
+    assert workspace_config["no_mcp"] is True
+    assert workspace_fingerprint
 
 
 def test_tui_main_rebinds_scaffold_seam(monkeypatch):

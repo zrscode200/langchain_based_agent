@@ -498,8 +498,18 @@ def build_middleware():
 
 Each target's value may be a bare sequence or a phase-keyed mapping. Phases
 differ per target — the main agent has `first` / `before_verification` /
-`last`, while subagents and the grader have only `first` / `last`, since
-neither has a verification tail.
+`last`, while subagents and the grader have only `first` / `last` to address
+the edges of their factory middleware block.
+
+Code 0.1.66 defaults the general-purpose subagent to fork mode. It inherits
+main middleware, including `AuditMain()` above, by reference. Child `first`
+injections follow the inherited parent middleware; they cannot move ahead of
+inherited approval or verification. For fresh general-purpose delegation with
+independent middleware scopes, export `DEEPAGENTS_CODE_FORKED_SUBAGENTS=false`
+before launching `lc-code`. File-defined custom subagents remain fresh at this
+pinned release; their parser does not accept a fork-mode setting. See
+[`README.md`](README.md#reaching-delegated-work) for ordering and shared-state
+details.
 
 Omitting a target leaves it composed exactly as before. The older forms still
 work: a bare sequence or a phase-keyed mapping both address the main agent.

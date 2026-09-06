@@ -2,7 +2,7 @@
 
 Port of the workspace-scaffolding half of
 ``deepagents_code.client.launch.server_manager`` at
-``deepagents-code==0.1.64`` (release commit ``d8686f74``). The generated
+``deepagents-code==0.1.66`` (release commit ``3812967c``). The generated
 ``langgraph.json`` references ``lc_factory.server_graph:make_graph`` and its
 factory offload adapter, while the generated runtime pyproject depends on
 ``lc_factory`` (which transitively pins ``deepagents-code``).
@@ -52,8 +52,8 @@ def scaffold_workspace(work_dir: Path) -> None:
         graph_ref=GRAPH_REF,
         checkpointer_path="./checkpointer.py:create_checkpointer",
     )
-    # Upstream registers /offload only for its built-in graph reference. The
-    # factory owns an equivalent ServerRuntime, so add the narrow adapter with
+    # Upstream registers its workspace/offload app only for its built-in graph
+    # reference. The factory owns equivalent runtimes, so add the adapter with
     # the same route-auth opt-in after parsing the generated config structurally.
     config = json.loads(config_path.read_text())
     config["http"] = {

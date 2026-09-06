@@ -14,11 +14,11 @@ dependencies = [
     # Upstream v0 baseline. The exact pin is deliberate: the factory
     # recomposes upstream internals, so every bump is a reviewed event
     # gated by the parity test suite.
-    "deepagents-code==0.1.64",
+    "deepagents-code==0.1.66",
     # Direct dependency (upstream.py imports `deepagents` itself), pinned to
     # the exact version deepagents-code requires. Declaring it directly also
     # lets uv resolve the pre-release. Bump both pins together.
-    "deepagents==0.7.10",
+    "deepagents==0.7.13",
 ]
 
 [project.scripts]

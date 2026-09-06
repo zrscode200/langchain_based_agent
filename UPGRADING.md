@@ -24,12 +24,13 @@ tags before touching anything:
 | Upstream file | Ported into |
 |---|---|
 | `deepagents_code/agent.py` (`create_cli_agent` body) | `src/lc_factory/assembly.py` |
-| `deepagents_code/server_graph.py` (`_make_graphs`, `ServerRuntime`, runtime cache) | `src/lc_factory/server_graph.py` |
-| `deepagents_code/offload_api.py` (HTTP app and runtime lookup) | `src/lc_factory/offload_api.py`, plus the generated `http` block in `src/lc_factory/launch.py` |
+| `deepagents_code/server_graph.py` (`_make_graphs`, `ServerRuntime`, workspace binding and runtime caches) | `src/lc_factory/server_graph.py` — thread/workspace validation, resource-policy cache keys, and the graph/backend/offload runtime must remain one contract. |
+| `deepagents_code/offload_api.py` (HTTP app and workspace-aware runtime lookup) | `src/lc_factory/offload_api.py`, plus the generated `http` block in `src/lc_factory/launch.py` — the adapter must resolve the same workspace runtime as graph execution. |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace`, `_write_pyproject`) | `src/lc_factory/launch.py` — **the live surface; re-apply changes here** |
 | `deepagents_code/client/launch/server_manager.py` (`start_server_and_get_agent`) | *Nothing* — a standalone port of this was deleted at the Group 2 closeout. It had no production caller (the TUI seam routes through upstream's own) and owed re-application on every bump. **Nothing to re-apply.** |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace` global) | `src/lc_factory/tui.py` — **rebind seam, re-verify every bump** |
-| `deepagents/graph.py` (`_apply_custom_middleware`, the core/tail split) | `src/lc_factory/assembly.py` — the injection seam's **positional contract** depends on it: our block must keep landing contiguous and order-preserving, and the SDK's reserved name set (core, tail, and harness-profile extras) must not gain a member. `tests/test_seam.py` |
+| `deepagents/graph.py` (`_apply_custom_middleware`, the core/tail split, fork inheritance merge) | `src/lc_factory/assembly.py` — the main and fresh-subagent phase contracts depend on the SDK splice; forks additionally inherit the parent's middleware and retain parent positions on same-name replacement. `tests/test_seam.py` |
+| `deepagents/middleware/subagents.py` (fork state/prompt inheritance and final compilation) | `src/lc_factory/assembly.py` — re-check shared middleware instances, private-state inheritance, recursive-delegation guards, and SDK-reserved names added after the graph-level merge, including `_ForkTaskToolMiddleware`. |
 | `langchain/agents/factory.py` (hook wiring, duplicate-name check) | `src/lc_factory/assembly.py` — the seam documents `before_*` forward / `after_*` reversed. A reversal inverts every phase guarantee. `tests/test_seam.py` |
 | `deepagents_code/config.py` (`credentials`, `_load_dotenv`, runtime state) | `src/lc_factory/_env.py`, `src/lc_factory/assembly.py`, and `src/lc_factory/server_graph.py` — D4 depends on shell-first dotenv precedence and the server must apply model metadata to runtime state. |
 | `deepagents_code/extensions/hosting.py`, `extensions/runtime.py`, `model_retry.py` | `src/lc_factory/assembly.py`, `src/lc_factory/server_graph.py` — extension composition and retry middleware now cross the seam's positional contract. |
@@ -57,13 +58,16 @@ private (underscore) names that carry no semver protection.
    tag blobs first, then prove the wheel and sdist sources match the target tag.
    The published artifacts remain authoritative: verify their hashes against
    PyPI metadata, their `Requires-Python` and `Requires-Dist`, and any generated
-   build provenance before trusting the clone.
+   build provenance before trusting the clone. A matching version string on
+   `main` is insufficient: post-release commits can retain that version while
+   changing constructor arguments and runtime behavior.
 
    Also diff every module inventoried by `src/lc_factory/upstream.py`. At
    minimum, re-read `config.py`, `_server_config.py`, `model_retry.py`, the
    extension modules, goal/rubric/local-context modules, offload modules,
-   `client/launch/server.py`, `client/remote_client.py`, and the SDK graph and
-   harness profiles. Skim the artifact's `CHANGELOG.md` when one is present.
+   `client/launch/server.py`, `client/remote_client.py`, workspace binding
+   modules, and the SDK graph, subagent middleware, and harness profiles. Skim
+   the artifact's `CHANGELOG.md` when one is present.
 
    **Check changed line ranges before reading hunks.** `agent.py` is large and
    only `create_cli_agent` is ported. Locate that function at both tags instead
@@ -86,17 +90,25 @@ private (underscore) names that carry no semver protection.
 4. **Re-apply composition changes** to the ported files, keeping the port
    line-faithful to the new upstream body plus the exhaustive divergence list
    below. Treat the agent, cached `ServerRuntime`, generated HTTP app, and TUI
-   scaffold rebind as one runtime contract. Re-check credential reload and
-   runtime-state application, model-policy/retry arguments, interpreter/store
-   plumbing, extension load/host/shutdown, offload publication, and every
-   `# SEAM` marker before calling the port current.
+   scaffold rebind as one runtime contract. Re-check thread/workspace binding,
+   persisted workspace policy, runtime cache selection, credential reload and
+   runtime-state application, model-policy/retry and summarization arguments,
+   interpreter/store plumbing, extension load/host/shutdown, workspace-aware
+   offload publication, and every `# SEAM` marker before calling the port
+   current. Preserve upstream defaults, including forked general-purpose
+   delegation, and review any resulting changes to the factory's documented
+   injection scope and ordering explicitly.
 
 5. **Run the parity suite.** `uv run pytest tests/test_parity.py` — it
    compares our composed agent against upstream's across a config matrix,
    down to middleware *state* (constructor arguments, not just classes),
-   interrupt gating including the `when` predicates, subagent wiring, backend
-   composition, prompt, schema, and `.with_config`. A mismatch means the port
-   drifted; fix the port, not the test.
+   interrupt gating including the `when` predicates, subagent wiring and
+   context mode, backend composition, prompt, schema, and effective returned
+   graph configuration. A mismatch means the port drifted; fix the port, not
+   the test. Capture the returned graph's config rather than observing only
+   `.with_config` calls: upstream can apply overrides through `.copy`, which
+   the old call observer missed. A negative control must detect a changed
+   recursion limit regardless of which method applied it.
 
    The matrix must keep covering the shape the server actually boots with
    (`server_graph.py` always passes goal-criteria and rubric-grader tools) —
@@ -110,17 +122,29 @@ private (underscore) names that carry no semver protection.
    upstream state observable is tripwire maintenance, not an exemption; it
    still requires the rich-case truncation guard and drift injection.
 
+   Class-valued constructor arguments, including grader state schemas, are
+   fingerprinted by fully qualified class identity and the `repr` of their
+   declared annotations. Do not recursively traverse generated Pydantic
+   validators or typing caches to compare a schema class. This normalization
+   applies equally to upstream and the factory; it is not a factory-specific
+   exemption. Keep `_MAX_DEPTH` at 9 unless observed nesting requires a reviewed
+   change, and retain negative controls for changed schema identity/annotations
+   and subagent mode as well as the rich-case truncation guard.
+
 5b. **Run the seam suite.** `uv run pytest tests/test_seam.py` — it asserts the
    injection seam's positional contract against the **final** composed stack
    (after SDK and extension composition, not just the factory block),
-   re-derives the SDK's middleware names — core, tail, AND the harness-profile
-   union — and
-   checks `_SDK_RESERVED_MIDDLEWARE_NAMES` still covers them, rejects extension
-   replacement of caller middleware, and proves hook direction by running the
-   hooks. These are the
-   upstream behaviors the seam's public promises rest on, so a bump that
-   changes any of them fails here rather than silently inverting a documented
-   guarantee.
+   re-derives the SDK's middleware names — core, tail, harness-profile union,
+   and fork-only additions during final compilation — and checks
+   `_SDK_RESERVED_MIDDLEWARE_NAMES` still covers them. Verify both fresh and
+   forked subagents: main middleware is inherited by reference in forks,
+   unique child injections follow inherited parent entries, and upstream
+   same-name child overrides retain parent positions. Reject injected child
+   names that would replace inherited parent middleware, and extension names
+   that would replace caller middleware. Prove hook direction by running the
+   hooks. These are the upstream behaviors the seam's public promises rest on,
+   so a bump that changes any of them fails here rather than silently
+   invalidating a documented guarantee.
 
 6. **Full verification.**
 
@@ -189,9 +213,10 @@ and `lc_factory.upstream` for ones it imports lazily inside the function
 (e.g. `_create_goal_criteria_agent`). Patching only the port — never
 upstream — is what makes the two sides diverge.
 
-Three permanent negative controls live in the suite itself
-(`test_fingerprint_detects_*`), so the most important cases are protected
-from regression without any manual step.
+Permanent negative controls live in the suite itself
+(`test_fingerprint_detects_*`), covering constructor state, dropped arguments,
+effective graph configuration, schema fingerprints, and subagent mode. Keep
+them effective when changing the observation or normalization code.
 
 ### Known blind spots
 
@@ -275,6 +300,14 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    with caller-injected main middleware is rejected before that replacement can
    discard the requested phase. `tests/test_seam.py` asserts placement and all
    three collision cases in the final stack.
+
+   These phase promises describe the **main** graph. Since the 0.1.66/0.7.13
+   baseline, the default general-purpose subagent forks the parent. The SDK
+   inherits this main middleware by reference into that fork, including caller
+   injections and extensions; the parameter is no longer main-only. The same
+   instance can therefore run in the parent and child, so keep per-run state in
+   graph state or key mutable state by run identity. Fresh subagents do not
+   inherit this block, and remote async subagents are unaffected.
 
 2. **Factory-reference transport** (`LC_FACTORY_MIDDLEWARE`, wave 2.2;
    extended to all targets by `SEAM-REACH-TRANSPORT`). The server subprocess
@@ -403,10 +436,21 @@ which is what `tests/test_parity.py` asserts *unmodified*):
    synthesized `general-purpose` one. Inert when omitted. Async subagents are
    unaffected — they never receive the local stack.
 
-   - **Own phase vocabulary**, deliberately smaller than the main agent's:
-     `SubagentPhase` is `first`/`last` only, because subagent stacks have no
-     verification tail and `before_verification` would name a boundary that
-     does not exist. Default is `last` — the later, less privileged position.
+   - **Own phase vocabulary:** `SubagentPhase` is `first`/`last` only. Fresh
+     subagent stacks have no verification tail, so there is no common
+     `before_verification` boundary across fresh and forked stacks. Default is
+     `last`. On a fresh subagent, `first` precedes the factory child middleware,
+     including approval, and `last` follows it before the SDK tail.
+   - **Forks adopt upstream inheritance and ordering.** The default
+     general-purpose subagent is forked unless
+     `DEEPAGENTS_CODE_FORKED_SUBAGENTS` disables it. The SDK merges parent custom
+     middleware first, then child middleware by name. Existing upstream child
+     overrides replace parent entries at the parent's position; a unique child
+     `first` injection comes after inherited parent entries, rather than
+     outside their approval or verification middleware. Child-only `first` and
+     `last` injections retain their relative order, but the fresh-agent phase
+     promises do not describe the entire fork stack. Main and child injections
+     can both run in the same fork.
    - **Two `# SEAM (subagent ...)` sites**, both inside
      `_subagent_cli_middleware`: `first` in the list initializer, `last`
      immediately before the per-stack validation and `return`.
@@ -420,10 +464,18 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      core_names=...)` — so the silent-replacement hazard is real, but against a
      **different base** (`FilesystemMiddleware`, summarization,
      `PatchToolCallsMiddleware`, optional `SkillsMiddleware`, profile extras,
-     prompt caching). That base is a strict subset of
+     prompt caching). That base is a subset of
      `_SDK_RESERVED_MIDDLEWARE_NAMES`, so the constant is reused and
      **over-rejects** by design. `tests/test_seam.py` derives the real base and
-     asserts the subset relation, so an upstream addition fails there.
+     asserts the subset relation, so an upstream addition fails there. Fork
+     compilation also inserts `_ForkTaskToolMiddleware` after the graph-level
+     merge; reserve that name and inspect the final compiled stack rather than
+     assuming the merge observer sees every SDK-owned entry.
+   - **Fork collision guard:** injected child names cannot collide with any
+     inherited parent middleware, including parent injections and extensions.
+     Reject those collisions before SDK composition rather than allowing
+     name-based replacement to discard the caller's intended scope or phase.
+     This guard does not prohibit upstream's intentional child overrides.
    - Duplicate checking runs **per composed subagent stack**, not once:
      subagent stacks differ by configuration (`ConfigurableModelMiddleware`
      only without an explicit model, stall recovery only headless, shell
@@ -438,11 +490,11 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      through `task` and asserts the injected middleware actually *ran* inside
      the subagent — with a negative control proving the marker tracks
      execution, not composition.
-   - **On a bump, re-check:** that `graph.py` still merges subagent specs via
-     `_apply_custom_middleware` with `core_names` (if it stops, the position
-     guarantee changes), and that the derived subagent base is still a subset
-     of the reserved constant. Both are test-pinned; they fail in
-     `tests/test_seam.py` rather than silently.
+   - **On a bump, re-check:** the SDK merge with `core_names`, fork inheritance
+     scope and same-name ordering, final fork compilation, and coverage of all
+     SDK-owned names by the reserved constant. Keep fresh-mode phase tests,
+     fork-mode inheritance/order/collision tests, and shared-instance checks
+     distinct so one mode cannot hide a regression in the other.
    - **Local rename in the ported region:** upstream's
      `subagent_middleware = _subagent_cli_middleware(...)` is `subagent_stack`
      here, because `subagent_middleware` is now the factory's own parameter and
@@ -479,15 +531,19 @@ which is what `tests/test_parity.py` asserts *unmodified*):
      only the class, so a rename would not fail `test_boundary.py`. The helper
      asserts the attribute exists with a message saying where to re-point.
 
-5. **`src/lc_factory/_testing_middleware.py`** — test support shipped inside
+5. **`src/lc_factory/_testing_middleware.py` and `_testing_models.py`** — test support shipped inside
    the package, mirroring upstream's own `_testing_models` / `_fake_models`.
    Needed because `_build_server_env` strips `PYTHONPATH` from the server
    interpreter, leaving an installed package as the only place the integration
    test can put a fixture the subprocess will import. (The server's own cwd is
    also on `sys.path`, but it is a private `mkdtemp` the CLI path gives no hook
    to write into — and relying on it would make an untrusted-cwd import path
-   load bearing. See that module's docstring.) Nothing in `lc_factory` imports
-   it.
+   load bearing. See the modules' docstrings.) Production code imports neither.
+   The model adapter changes only deterministic fixture dispatch: it selects
+   the latest human task and subsequent tool results so inherited parent markers
+   cannot trigger recursive delegation in a fork. Keep the runtime's full
+   inherited history intact, retain a fresh-mode case using upstream's model,
+   and preserve the no-delegation negative control.
 
 **Structural divergences** — what makes the recomposition possible. Each must
 be re-verified on a bump:
@@ -511,11 +567,16 @@ be re-verified on a bump:
   setup and threads all three targets to `create_factory_agent`.
 - Returns the same cached `ServerRuntime` shape as upstream, including the
   backend-published offload operation, and preserves extension bind/shutdown.
+- Validates execution's persisted thread/workspace binding and resolves the
+  runtime through the workspace resource-policy cache. Preserve configuration
+  fingerprint checks, cache keys, locking, and eviction behavior alongside the
+  default runtime used for non-execution graph access.
 
 **`offload_api.py`**:
 - Reuses upstream's Starlette app rather than copying its security-sensitive
-  operation implementation, rebinding only that module's `get_server_runtime`
-  lookup to the factory's cached runtime.
+  operation implementation, rebinding that module's `get_server_runtime` alias
+  to the factory's `_workspace_runtime(binding)`. Rebinding it to the default
+  no-argument runtime would route offload requests to the wrong workspace.
 
 **`launch.py`** (ported from `server_manager.py`):
 - `GRAPH_REF` targets `lc_factory.server_graph:make_graph` instead of
@@ -524,7 +585,9 @@ be re-verified on a bump:
   `pyproject.toml` depends on this package rather than `deepagents-code`.
 - Because upstream registers its HTTP app only for the built-in graph ref, the
   factory structurally adds `lc_factory.offload_api:app` with custom-route auth
-  enabled after generating `langgraph.json`.
+  enabled after generating `langgraph.json`. Preserve the upstream workspace
+  API configuration with the offload routes: the client must bind a workspace
+  before executing the factory graph.
 - Upstream's private `_scaffold_workspace` is public `scaffold_workspace`.
 - `_default_package_project_root` probes two ancestor levels for
   `pyproject.toml` (src layout) rather than upstream's fixed `parent.parent`.
