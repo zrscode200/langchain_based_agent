@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 # --- SDK (deepagents) ---
 from deepagents import FsToolName, create_deep_agent
 from deepagents.middleware.filesystem import FilesystemPermission
+from deepagents.middleware.subagents import SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY
+from langchain_core.tools import StructuredTool
 from deepagents.backends import CompositeBackend, LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware import FilesystemMiddleware, MemoryMiddleware
@@ -280,6 +282,14 @@ if TYPE_CHECKING:
     from deepagents_code.config import CredentialsSnapshot, ModelResult
 
 
+def import_subagent_dispatch():
+    """Pinned QuickJS dispatch and model-authored schema budget helpers."""
+    from langchain_quickjs._subagent import (
+        call_subagent_task_tool, _validate_response_schema, _ensure_schema_title,
+    )
+    return call_subagent_task_tool, _validate_response_schema, _ensure_schema_title
+
+
 __all__ = [
     "ToolStrategy",
     "OmitFromSchema",
@@ -334,6 +344,9 @@ __all__ = [
     "FilesystemMiddleware",
     "FsToolName",
     "FilesystemPermission",
+    "SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY",
+    "StructuredTool",
+    "import_subagent_dispatch",
     "GENERAL_PURPOSE_SUBAGENT",
     "GoalCriteriaMiddleware",
     "GoalToolsMiddleware",

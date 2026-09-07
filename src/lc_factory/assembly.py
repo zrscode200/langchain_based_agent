@@ -703,6 +703,7 @@ def create_factory_agent(
     enable_skills: bool = True,
     enable_shell: bool = True,
     enable_interpreter: bool = False,
+    enable_settled_dispatch: bool = False,
     interpreter_config: InterpreterConfig | None = None,
     verification_model: str | BaseChatModel | None = None,
     rubric_model: str | BaseChatModel | None = None,
@@ -847,8 +848,12 @@ def create_factory_agent(
             `interpreter_ptc_acknowledge_unsafe=True`.
 
             Requires the core `langchain-quickjs` dependency.
+        enable_settled_dispatch: Install the foreground task_settled tool with
+            validated outcome envelopes. With the interpreter enabled, also
+            expose tools.taskSettled and replay-aware eval lifecycle events.
+            Interpreter dispatch bypasses parent per-dispatch approval; child
+            gates remain active. False preserves the original tool surface.
         interpreter_config: Resolver-backed interpreter settings snapshot.
-
             Direct callers may omit this to resolve one for the current
             process. The server supplies a snapshot that incorporates its
             invocation-scoped PTC overrides.
@@ -1185,6 +1190,20 @@ def create_factory_agent(
         if hitl_active
         else None
     )
+    if resolved_interrupt_on is not None:
+        for enabled, name in ((enable_settled_dispatch, "task_settled"),
+                              ("BackgroundTasks" in _injected_main_names, "start_background_task")):
+            if enabled:
+                resolved_interrupt_on[name] = {
+                    **resolved_interrupt_on["task"],
+                    "description": "Delegate work to a configured subagent.",
+                }
+    child_interrupt_on = resolved_interrupt_on
+    if resolved_interrupt_on is not None and (enable_settled_dispatch or "BackgroundTasks" in _injected_main_names):
+        # Raw interpreter dispatch has no parent Auto classifier step. Child
+        # stacks contain async HITL, not their own classifier, so Auto must
+        # remain gated here. Live YOLO and hook decisions still bypass normally.
+        child_interrupt_on = _add_interrupt_on(mcp_tools=mcp_tools, auto_mode_enabled=False)
 
     user_agents_dir = get_user_agents_dir(assistant_id)
     project_agents_dir = (
@@ -1206,7 +1225,7 @@ def create_factory_agent(
             *injected_subagent_middleware["first"],
         ]
         if resolved_interrupt_on is not None:
-            middleware.append(AsyncApprovalHITLMiddleware(resolved_interrupt_on))
+            middleware.append(AsyncApprovalHITLMiddleware(child_interrupt_on))
         if not has_explicit_model:
             middleware.append(
                 ConfigurableModelMiddleware(
@@ -1514,6 +1533,10 @@ def create_factory_agent(
         # Note: Shell middleware not used in sandbox mode
         # File operations and execute tool are provided by the sandbox backend
 
+    if enable_settled_dispatch:
+        from lc_factory.interpreter_dispatch import SettledDispatchMiddleware
+        agent_middleware.append(SettledDispatchMiddleware(spec["name"] for spec in custom_subagents))
+
     if enable_interpreter:
         if sandbox is not None:
             msg = (
@@ -1538,6 +1561,8 @@ def create_factory_agent(
             acknowledge_unsafe=interpreter.ptc_acknowledge_unsafe,
             auto_approve=auto_approve,
         )
+        if enable_settled_dispatch:
+            ptc_names = [*(ptc_names or []), "task_settled"]
         ptc_option: PTCOption | None = (
             cast("PTCOption", list(ptc_names)) if ptc_names is not None else None
         )
@@ -1555,6 +1580,9 @@ def create_factory_agent(
                     ptc=ptc_option,
                 )
             )
+            if enable_settled_dispatch:
+                from lc_factory.interpreter_dispatch import instrument_interpreter_lifecycle
+                instrument_interpreter_lifecycle(agent_middleware[-1])
 
     # Local context middleware (git info, directory tree, etc.).
     if isinstance(backend, (_ExecutableBackend, _AsyncExecutableBackend)):
@@ -2060,6 +2088,15 @@ def create_factory_agent(
             subagents=all_subagents or None,
             name=_sanitize_agent_message_name(assistant_id),
         )
+    if "BackgroundTasks" in _injected_main_names:
+        # Generation-owned metadata travels with the compiled task retained by
+        # a detached worker; never consult a newer runtime's definitions.
+        task_tool = agent.nodes["tools"].bound.tools_by_name.get("task")
+        if task_tool is not None:
+            task_tool.metadata = {**(task_tool.metadata or {}),
+                "lc_factory_subagent_names": tuple(spec["name"] for spec in custom_subagents),
+                "lc_factory_structured_subagents": tuple(spec["name"] for spec in custom_subagents
+                                                        if spec.get("response_format") is not None)}
     if effective_recursion_limit is not None:
         # `Pregel.with_config` uses `merge_configs`, which discards a value equal
         # to LangGraph's environment-derived default. Replace the copied graph's

@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import json
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from uuid import uuid4
+from typing import Any
 
 from lc_factory.upstream import (
     AgentMiddleware, Command, GraphInterrupt, HumanMessage, SystemMessage,
@@ -38,6 +40,8 @@ class Job:
     status: str = "running"
     result: str | None = None
     acknowledged: bool = False
+    structured: bool = False
+    outcome: dict | None = None
 
 
 class BackgroundTasks(AgentMiddleware):
@@ -73,10 +77,17 @@ class BackgroundTasks(AgentMiddleware):
             await self.cancel(owner, task_id=task_id)
             return job.status
 
-        self.tools = [list_background_tasks, cancel_background_task]
+        @tool
+        async def start_background_task(description: str, subagent_type: str, runtime: ToolRuntime[Any, Any]) -> dict:
+            """Start a local subagent in the background; return its running task ID or a failure."""
+            task_tool = next((t for t in runtime.tools if getattr(t, "name", None) == "task"), None)
+            return self._submit(task_tool, {"name": "task", "id": runtime.tool_call_id,
+                "type": "tool_call", "args": {"description": description, "subagent_type": subagent_type}}, runtime)
+
+        self.tools = [list_background_tasks, cancel_background_task, start_background_task]
 
     def list(self, owner):
-        return [dict(task_id=key, name=j.name, status=j.status, result=j.result)
+        return [dict(task_id=key, name=j.name, status=j.status, result=j.result, outcome=deepcopy(j.outcome))
                 for key, j in self.jobs.items() if j.owner == owner]
 
     def pending(self, owner):
@@ -104,7 +115,8 @@ class BackgroundTasks(AgentMiddleware):
         # by the runtime's before-agent middleware using the graph config.
         blocks = request.system_message.content_blocks if request.system_message else []
         system = SystemMessage(content_blocks=[*blocks, {"type": "text", "text":
-            "The task tool starts local background work and immediately returns an ID. "
+            "The task and start_background_task tools start local background work and immediately return an ID. "
+            "task_settled and JavaScript task() wait for foreground completion. "
             "Continue the conversation while it runs. Use list_background_tasks or "
             "cancel_background_task when needed; do not repeatedly poll. Results are "
             "delivered on the next conversation turn. Remote async tools keep their "
@@ -114,29 +126,46 @@ class BackgroundTasks(AgentMiddleware):
     async def awrap_tool_call(self, request, handler):
         if request.tool_call["name"] != "task" or is_child(request.runtime.state):
             return await handler(request)
-        owner = thread_id(request.runtime.config)
+        result = self._submit(getattr(request, "tool", None), request.tool_call, request.runtime)
+        content = (f"Started background task: {result['task_id']}" if result.get("ok")
+                   else result["error"]["message"])
+        return ToolMessage(content, tool_call_id=request.tool_call["id"],
+                           status="success" if result.get("ok") else "error")
+
+    def _submit(self, task_tool, call, parent_runtime):
+        def failure(message):
+            return {"ok": False, "error": {"type": "SubmissionError", "message": message}}
+        if is_child(parent_runtime.state):
+            return failure("Background submission is available to the main agent only.")
+        owner = thread_id(parent_runtime.config)
         self.jobs = {k: j for k, j in self.jobs.items()
                      if not (j.acknowledged and j.worker is not None and j.worker.done())}
         if self.closed or len(self.jobs) >= self.max_jobs or sum(
                 j.worker is not None and not j.worker.done() for j in self.jobs.values()
         ) >= self.max_running:
-            return ToolMessage("Background task capacity unavailable.",
-                               tool_call_id=request.tool_call["id"])
+            return failure("Background task capacity unavailable.")
+        if task_tool is None:
+            return failure("No permitted compiled task tool is available.")
+        metadata = getattr(task_tool, "metadata", None) or {}
+        name = str(call["args"].get("subagent_type", ""))
+        names = metadata.get("lc_factory_subagent_names")
+        if names is not None and name not in names:
+            return failure("Unknown local subagent.")
         key = f"background-{uuid4().hex}"
-        job = Job(owner, str(request.tool_call["args"].get("subagent_type", "")))
+        job = Job(owner, name, structured=name in metadata.get("lc_factory_structured_subagents", ()))
         # Snapshot before detaching; no mutable parent state, callbacks, stream
         # writer, checkpoint namespace or Pregel runner survives this boundary.
-        state = deepcopy(request.runtime.state)
-        context = deepcopy(request.runtime.context)
+        state = deepcopy(parent_runtime.state)
+        context = deepcopy(parent_runtime.context)
         config = {"configurable": {"thread_id": key,
-                  "__pregel_runtime": Runtime(context=context, store=request.runtime.store)},
-                  "recursion_limit": request.runtime.config.get("recursion_limit", 500)}
-        runtime = replace(request.runtime, config=config, state=state,
+                  "__pregel_runtime": Runtime(context=context, store=parent_runtime.store)},
+                  "recursion_limit": parent_runtime.config.get("recursion_limit", 500)}
+        runtime = replace(parent_runtime, config=config, state=state,
                           context=context, stream_writer=lambda _: None)
         self.jobs[key] = job
-        job.worker = asyncio.create_task(self._run(job, request.tool, request.tool_call, runtime),
+        job.worker = asyncio.create_task(self._run(job, task_tool, call, runtime),
                                         name=key, context=contextvars.Context())
-        return ToolMessage(f"Started background task: {key}", tool_call_id=request.tool_call["id"])
+        return {"ok": True, "task_id": key, "status": "running"}
 
     async def _run(self, job, task_tool, call, runtime):
         _IN_WORKER.set(True)
@@ -154,10 +183,20 @@ class BackgroundTasks(AgentMiddleware):
                     job.result = "Subagent needs approval; the protected action has not run. Restart this task interactively to approve it."
                 else:
                     messages = update.get("messages", [])
-                    job.result = str(messages[-1].content) if messages else "No result returned."
+                    if not messages:
+                        raise ValueError("No result returned")
+                    if getattr(messages[-1], "status", None) == "error":
+                        raise ValueError("Subagent returned a tool error")
+                    job.result = str(messages[-1].content)
             else:
+                if getattr(result, "status", None) == "error" or result is None:
+                    raise ValueError("Subagent returned an error or no result")
                 job.result = str(getattr(result, "content", result))
             if job.status == "running":
+                if len(job.result) > 64000:
+                    raise ValueError("Subagent result exceeds the output limit")
+                value = json.loads(job.result) if job.structured else job.result
+                job.outcome = {"ok": True, "value": value}
                 job.status = "completed"
             job.result = job.result[:64000]
         except GraphInterrupt:
@@ -169,6 +208,8 @@ class BackgroundTasks(AgentMiddleware):
         except Exception:
             job.status, job.result = "failed", "Background task failed before returning a result."
         finally:
+            if job.outcome is None:
+                job.outcome = {"ok": False, "error": {"type": job.status, "message": job.result}}
             async with self.changed:
                 self.changed.notify_all()
 
@@ -188,6 +229,7 @@ class BackgroundTasks(AgentMiddleware):
             for job in cancelled_jobs:
                 if job.status == "running":
                     job.status, job.result = "cancelled", "Background task cancelled."
+                    job.outcome = {"ok": False, "error": {"type": job.status, "message": job.result}}
             async with self.changed:
                 self.changed.notify_all()
 

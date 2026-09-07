@@ -415,7 +415,7 @@ def test_no_module_writes_the_reference_into_the_environment():
             node.func.attr == "setdefault"
             and len(node.args) == 2
             and ((isinstance(node.args[0], ast.Name) and node.args[0].id in {"MIDDLEWARE_REF_ENV", "VERIFICATION_MODEL_ENV"})
-                 or (isinstance(node.args[0], ast.Constant) and node.args[0].value in {"LC_FACTORY_CAPABILITIES", "LC_FACTORY_HISTORY_OWNER"}))
+                 or (isinstance(node.args[0], ast.Constant) and node.args[0].value in {"LC_FACTORY_CAPABILITIES", "LC_FACTORY_HISTORY_OWNER", "LC_FACTORY_SETTLED_DISPATCH"}))
             and isinstance(node.args[1], ast.Constant)
             and node.args[1].value == ""
         )
@@ -589,7 +589,8 @@ async def test_graph_discovery_keeps_default_runtime(monkeypatch):
     ) is graph
 
 
-async def test_verification_selection_reaches_server_factory_in_workspace(monkeypatch, tmp_path):
+@pytest.mark.parametrize("settled_enabled", [False, True])
+async def test_verification_selection_reaches_server_factory_in_workspace(monkeypatch, tmp_path, settled_enabled):
     from deepagents_code._fake_models import _ToolBindingFakeModel
     from deepagents_code.config import ModelResult, active_environment
 
@@ -597,6 +598,7 @@ async def test_verification_selection_reaches_server_factory_in_workspace(monkey
     from lc_factory.upstream import ServerConfig
 
     main, verifier = _ToolBindingFakeModel(), _ToolBindingFakeModel()
+    monkeypatch.setenv("LC_FACTORY_SETTLED_DISPATCH", "1" if settled_enabled else "")
     monkeypatch.setattr(server_graph, "create_model", lambda *a, **k:
                         ModelResult(model=main, model_name="main", provider="fixture"))
     marker = "verification-workspace"
@@ -627,6 +629,32 @@ async def test_verification_selection_reaches_server_factory_in_workspace(monkey
     assert constructions[0]["verification_model"] is verifier
     assert constructions[0]["model"] is main
     assert constructions[0]["model_result"].model is main
+    assert constructions[0]["enable_settled_dispatch"] is settled_enabled
+    assert ("task_settled" in runtime.agent.nodes["tools"].bound.tools_by_name) is settled_enabled
+
+
+def test_project_dotenv_cannot_enable_settled_dispatch(tmp_path):
+    import json
+    import subprocess
+
+    (tmp_path / ".env").write_text("LC_FACTORY_SETTLED_DISPATCH=1\n")
+    env = dict(os.environ)
+    env.pop("LC_FACTORY_SETTLED_DISPATCH", None)
+    env.pop("DEEPAGENTS_CODE_SERVER_CWD", None)
+    probe = '''
+import json, os, pathlib
+import lc_factory
+from lc_factory.upstream import credentials
+credentials.reload_from_environment(start_path=pathlib.Path.cwd())
+guarded = os.environ.get("LC_FACTORY_SETTLED_DISPATCH")
+os.environ.pop("LC_FACTORY_SETTLED_DISPATCH", None)
+credentials.reload_from_environment(start_path=pathlib.Path.cwd())
+print(json.dumps([guarded, os.environ.get("LC_FACTORY_SETTLED_DISPATCH")]))
+'''
+    result = subprocess.run([sys.executable, "-c", probe], cwd=tmp_path, env=env,
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert json.loads(result.stdout.strip().splitlines()[-1]) == ["", "1"]
 
 
 @pytest.mark.parametrize(

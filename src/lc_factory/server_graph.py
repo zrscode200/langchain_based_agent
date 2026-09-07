@@ -496,6 +496,7 @@ async def _make_graphs_in_environment(
             enable_skills=config.enable_skills,
             enable_shell=config.enable_shell,
             enable_interpreter=config.enable_interpreter,
+            enable_settled_dispatch=is_env_truthy("LC_FACTORY_SETTLED_DISPATCH", environ=workspace_env),
             interpreter_config=interpreter_config,
             verification_model=verification_model,
             rubric_model=config.rubric_model,

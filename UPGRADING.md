@@ -11,6 +11,11 @@ capture timing, and LangChain raw JSON-schema validation. The explicit child
 model slot must continue to prevent inherited runtime model switches. Default
 parity and the actual policy execution tests cover these seams.
 
+[DELEGATION.md](DELEGATION.md) describes opt-in settled dispatch and explicit
+background submission. Verify the private QuickJS dispatch/schema helper tuple,
+ToolRuntime injection, ExecutionInfo replay identity, exception propagation
+through JavaScript, and event completion timing when changing the pins.
+
 ## The dual pin
 
 `pyproject.toml` pins Code and the SDK as one reviewed unit, plus an explicit

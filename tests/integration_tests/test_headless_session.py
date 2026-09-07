@@ -21,6 +21,22 @@ from deepagents_code._testing_models import SUBAGENT_WRITE_CONTENT, TOP_LEVEL_WR
 pytestmark = pytest.mark.integration
 
 
+def test_settled_dispatch_completes_a_live_server_child(tmp_path):
+    home = _make_home(tmp_path, model_class="lc_factory._testing_models:SettledIntegrationChatModel")
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    target = workdir / "settled.txt"
+    env = _headless_env(home)
+    env["LC_FACTORY_SETTLED_DISPATCH"] = "1"
+    result = subprocess.run([
+        str(_lc_code()), "--timeout", "240", "-M", "itest:fake", "-q", "--no-stream",
+        "-n", f"DCA_TEST_DELEGATE_WRITE={target}",
+    ], cwd=workdir, env=env, capture_output=True, text=True, timeout=300)
+    assert result.returncode == 0, result.stderr[-2000:]
+    assert target.exists(), result.stdout[-1500:]
+    assert target.read_text() == SUBAGENT_WRITE_CONTENT
+
+
 def _headless_env(home: Path) -> dict[str, str]:
     """Hermetic child env: drop inherited agent/tracing/factory configuration.
 

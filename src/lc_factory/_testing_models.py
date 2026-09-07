@@ -35,3 +35,19 @@ class ForkAwareIntegrationChatModel(import_tool_calling_test_model()):
         return super()._generate(
             messages[start:], stop=stop, run_manager=run_manager, **kwargs
         )
+
+
+class SettledIntegrationChatModel(ForkAwareIntegrationChatModel):
+    """Exercise the opt-in native settled tool through the real server transport."""
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+        result = super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+        for generation in result.generations:
+            message = generation.message
+            if any(call["name"] == "task" for call in getattr(message, "tool_calls", [])):
+                generation.message = message.model_copy(update={"tool_calls": [
+                    {**call, "name": "task_settled", "args": {
+                        "description": call["args"]["description"],
+                        "subagentType": call["args"]["subagent_type"],
+                    }} if call["name"] == "task" else call for call in message.tool_calls
+                ]})
+        return result

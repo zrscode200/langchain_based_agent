@@ -47,6 +47,7 @@ def test_factory_only_parameters_are_keyword_only_and_default_off():
     # the factory's surface silently.
     added = sorted(set(ours) - set(v0))
     assert added == [
+        "enable_settled_dispatch",
         "middleware",
         "rubric_grader_middleware",
         "subagent_definitions",
@@ -59,7 +60,7 @@ def test_factory_only_parameters_are_keyword_only_and_default_off():
         assert ours[name].kind is inspect.Parameter.KEYWORD_ONLY, (
             f"{name}: factory-only parameters must be keyword-only"
         )
-        assert ours[name].default is None, (
+        assert ours[name].default is (False if name == "enable_settled_dispatch" else None), (
             f"{name}: factory-only parameters must default to inert"
         )
 
