@@ -642,3 +642,16 @@ be re-verified on a bump:
   `tests/test_launch.py::test_tui_main_rebinds_scaffold_seam` covers the
   rebind itself; the grep to run is `_scaffold_workspace` across
   `deepagents_code/`. Upstreaming a pluggable `graph_ref` would retire this.
+
+## Optional runtime adaptation checks
+
+`TALON_ADAPTATIONS.md` records the adapted Talon/Code source and owned behavior.
+On an upstream bump, also verify `ConversationSaver` against delta checkpoints,
+committed pending messages, cancellation and thread deletion; private
+`_DeltaSnapshot` is now part of the import-boundary tripwire. Check that stateless
+MCP tools capture immutable connections with `session_manager=None`. Re-run the
+real MCP reconfiguration test and approval-resume generation tests: plain graph
+composition parity cannot detect these failures. Background detachment depends
+on the pinned SDK task tool and the innermost factory seam; verify both main and
+child approval tests and fork suppression. Server capabilities require the
+factory execution-time saver, proved by the live optional-capabilities test.

@@ -343,3 +343,28 @@ def test_subagent_marker_stays_absent_without_delegation(tmp_path):
         "composition rather than execution, so the positive test above proves "
         "nothing about whether subagent middleware actually runs"
     )
+
+
+def test_optional_capabilities_use_server_execution_saver(tmp_path):
+    """The actual lc-code server archives committed turns through our saver."""
+    import sqlite3
+    home = _make_home(tmp_path)
+    workdir = tmp_path / "workdir"
+    workdir.mkdir()
+    env = _headless_env(home)
+    env["LC_FACTORY_CAPABILITIES"] = "reload,background,history"
+    env["LC_FACTORY_HISTORY_OWNER"] = "local-test-user"
+    result = subprocess.run(
+        [str(_lc_code()), "--timeout", "120", "-M", "itest:fake", "-q", "--no-stream",
+         "-n", f"DCA_TEST_WRITE_FILE={workdir / 'out.txt'}"],
+        cwd=workdir, env=env, capture_output=True, text=True, timeout=180,
+    )
+    assert result.returncode == 0, (result.stdout + result.stderr)[-6000:]
+    assert (workdir / "out.txt").exists()
+    archives = list(home.rglob("*.factory-history.sqlite"))
+    assert len(archives) == 1
+    with sqlite3.connect(archives[0]) as conn:
+        texts = [row[0] for row in conn.execute("SELECT text FROM conversation_chunks")]
+        assert any("DCA_TEST_WRITE_FILE=" in text for text in texts)
+        assert any("write_file" in text for text in texts)
+        assert conn.execute("SELECT DISTINCT chat FROM conversation_sessions").fetchall() == [("local-test-user",)]

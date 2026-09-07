@@ -78,3 +78,6 @@ def reserve_middleware_ref_env() -> None:
     in ``UPGRADING.md``.
     """
     os.environ.setdefault(MIDDLEWARE_REF_ENV, "")
+    # Runtime behavior and history grouping must also be host-owned.
+    os.environ.setdefault("LC_FACTORY_CAPABILITIES", "")
+    os.environ.setdefault("LC_FACTORY_HISTORY_OWNER", "")

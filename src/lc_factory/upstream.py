@@ -24,9 +24,29 @@ from deepagents.middleware.subagents import (
 
 # --- LangChain runtime ---
 from langchain.agents.middleware import ToolErrorMiddleware
-from langchain.agents.middleware.types import AgentMiddleware
+from langchain.agents.middleware.types import AgentMiddleware, AgentState, OmitFromSchema
 from langchain_core._api import suppress_langchain_beta_warning
 from langgraph_sdk.runtime import ServerRuntime as LangGraphServerRuntime
+
+# --- Optional owned runtime / Talon adaptations ---
+from langchain.tools import ToolRuntime
+from langchain.tools.tool_node import ToolCallRequest
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMessage, SystemMessage, convert_to_messages, MessageLikeRepresentation
+from langchain_core.tools import tool, BaseTool
+from langchain_core.runnables import RunnableConfig
+from langchain_core.runnables.utils import ConfigurableFieldSpec
+from langgraph.checkpoint.base import BaseCheckpointSaver, ChannelVersions, Checkpoint, CheckpointMetadata, CheckpointTuple, DeltaChannelHistory
+from langgraph.checkpoint.serde.types import _DeltaSnapshot
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.errors import GraphInterrupt
+from langgraph.types import Command
+from langgraph.runtime import Runtime
+from deepagents_code.subagents import _parse_subagent_file
+
+from deepagents_code.tools import create_web_search_tool, fetch_url, get_current_thread_id
+from deepagents_code.plugins.adapters.mcp import discover_plugin_mcp_configs
+from deepagents_code.mcp_tools import resolve_and_load_mcp_tools
+from deepagents_code.configuration.service import get_config_sources
 
 # NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here.
 # Eagerly importing it would pull the full TUI into the server subprocess.
@@ -185,6 +205,7 @@ from deepagents_code.subagents import list_subagents
 from deepagents_code.workspace import (
     WorkspaceConflictError,
     require_thread_workspace,
+    get_thread_workspace,
     resolve_workspace,
 )
 
@@ -258,6 +279,38 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "OmitFromSchema",
+    "get_config_sources",
+    "create_web_search_tool", "fetch_url", "get_current_thread_id",
+    "discover_plugin_mcp_configs", "resolve_and_load_mcp_tools",
+    "get_thread_workspace",
+    "AgentState",
+    "Runtime",
+    'ToolRuntime',
+    'ToolCallRequest',
+    'AIMessage',
+    'BaseMessage',
+    'HumanMessage',
+    'ToolMessage',
+    'SystemMessage',
+    'convert_to_messages',
+    'MessageLikeRepresentation',
+    'tool',
+    'BaseTool',
+    'RunnableConfig',
+    'ConfigurableFieldSpec',
+    'BaseCheckpointSaver',
+    'ChannelVersions',
+    'Checkpoint',
+    'CheckpointMetadata',
+    'CheckpointTuple',
+    'DeltaChannelHistory',
+    '_DeltaSnapshot',
+    'AsyncSqliteSaver',
+    'GraphInterrupt',
+    'Command',
+    '_parse_subagent_file',
+
     "AgentMiddleware",
     "AskUserMiddleware",
     "AsyncApprovalHITLMiddleware",

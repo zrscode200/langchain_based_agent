@@ -414,8 +414,8 @@ def test_no_module_writes_the_reference_into_the_environment():
         return (
             node.func.attr == "setdefault"
             and len(node.args) == 2
-            and isinstance(node.args[0], ast.Name)
-            and node.args[0].id == "MIDDLEWARE_REF_ENV"
+            and ((isinstance(node.args[0], ast.Name) and node.args[0].id == "MIDDLEWARE_REF_ENV")
+                 or (isinstance(node.args[0], ast.Constant) and node.args[0].value in {"LC_FACTORY_CAPABILITIES", "LC_FACTORY_HISTORY_OWNER"}))
             and isinstance(node.args[1], ast.Constant)
             and node.args[1].value == ""
         )
@@ -617,7 +617,8 @@ async def test_execution_validates_durable_workspace_before_selecting_graph(
     graph = object()
     selected = []
 
-    async def workspace_runtime(verified_binding):
+    async def workspace_runtime(verified_binding, *, session=None):
+        assert session == "factory-thread"
         selected.append(verified_binding)
         return SimpleNamespace(agent=graph)
 

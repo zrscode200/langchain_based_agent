@@ -397,7 +397,10 @@ async def _make_graphs_in_environment(
     )
     result.apply_to_runtime_state()
 
-    tools, mcp_server_info, mcp_tools = await _build_tools(
+    from lc_factory.runtime import RuntimeOptions
+    from lc_factory.mcp_reload import build_reloadable_tools, load_async_subagent_snapshot
+    build_tools = build_reloadable_tools if RuntimeOptions.from_environment().reload else _build_tools
+    tools, mcp_server_info, mcp_tools = await build_tools(
         config,
         project_context,
         has_tavily=workspace_credentials.has_tavily,
@@ -452,7 +455,7 @@ async def _make_graphs_in_environment(
 
     extension_registry: ExtensionRegistry | None = None
 
-    def _create_factory_runtime_sync() -> ServerRuntime:
+    def _factory_kwargs_sync() -> dict[str, Any]:
         targets = injected_middleware or {}
         async_subagents = load_async_subagents() or None
         auto_mode_enabled = config.interactive and sandbox_backend is None
@@ -466,7 +469,7 @@ async def _make_graphs_in_environment(
             else None
         )
 
-        agent, composite_backend = create_factory_agent(
+        return dict(
             model=result.model,
             assistant_id=config.assistant_id,
             tools=tools,
@@ -513,18 +516,6 @@ async def _make_graphs_in_environment(
             subagent_middleware=targets.get("subagents"),
             rubric_grader_middleware=targets.get("grader"),
         )
-        offload = offload_operation_from(composite_backend)
-        if offload is None:
-            msg = (
-                "Agent backend did not publish its offload operation; "
-                "/offload has no server implementation."
-            )
-            raise RuntimeError(msg)
-        return ServerRuntime(
-            agent=agent,
-            backend=composite_backend,
-            offload=offload,
-        )
 
     if is_env_truthy(EXPERIMENTAL, environ=workspace_env):
         extension_result = await load_extensions(
@@ -554,7 +545,34 @@ async def _make_graphs_in_environment(
             extension_registry = extension_result.registry
             bind_server_extensions(extension_result)
     try:
-        return await asyncio.to_thread(_create_factory_runtime_sync)
+        kwargs = await asyncio.to_thread(_factory_kwargs_sync)
+        from lc_factory.runtime import FactoryRuntime, RuntimeOptions
+        options = RuntimeOptions.from_environment()
+        if options.enabled:
+            from lc_factory.server_checkpointer import get_archive, server_scope
+
+            async def reload_tools():
+                return await build_tools(
+                    config, project_context,
+                    has_tavily=workspace_credentials.has_tavily,
+                    tavily_api_key=workspace_credentials.tavily_api_key,
+                )
+
+            owner = await FactoryRuntime.create(
+                agent_kwargs=kwargs, options=options,
+                workspace_id=str(project_context.user_cwd if project_context else config.cwd),
+                reload_tools=reload_tools, reload_async_subagents=load_async_subagent_snapshot if options.reload else None,
+                archive=get_archive() if options.history else None,
+                scope_resolver=server_scope if options.history else None,
+                server_managed_checkpointer=True,
+            )
+            _factory_runtime_owners[id(owner.current.agent)] = owner
+            return owner.current
+        agent, composite_backend = await asyncio.to_thread(create_factory_agent, **kwargs)
+        offload = offload_operation_from(composite_backend)
+        if offload is None:
+            raise RuntimeError("Agent backend did not publish its offload operation")
+        return ServerRuntime(agent, composite_backend, offload)
     except BaseException:
         if extension_registry is not None:
             await shutdown_server_extensions()
@@ -562,6 +580,32 @@ async def _make_graphs_in_environment(
 
 
 _get_runtime = _build_runtime_factory(_make_graphs)
+_factory_runtime_owners: dict[int, Any] = {}
+
+
+async def _select_factory_runtime(runtime, session=None):
+    if not _factory_runtime_owners:
+        return runtime
+    owner = _factory_runtime_owners.get(id(runtime.agent))
+    return await owner.select(session) if owner is not None else runtime
+
+
+def factory_checkpoint_committed(session, checkpoint, new_versions):
+    for owner in _factory_runtime_owners.values():
+        owner.checkpoint_committed(session, checkpoint, new_versions)
+
+
+async def cancel_factory_background(session):
+    await asyncio.gather(*(owner.cancel_background(session) for owner in _factory_runtime_owners.values()))
+
+
+async def close_factory_runtimes():
+    """Called by the server saver lifespan after graph execution shuts down."""
+    owners = list(_factory_runtime_owners.values())
+    await asyncio.gather(*(owner.close() for owner in owners))
+    _factory_runtime_owners.clear()
+
+
 _MAX_WORKSPACE_RUNTIMES = 32
 _workspace_runtimes: OrderedDict[str, ServerRuntime] = OrderedDict()
 _workspace_runtime_lock = asyncio.Lock()
@@ -626,7 +670,7 @@ async def _default_workspace_binding(config: ServerConfig) -> WorkspaceBinding |
     )
 
 
-async def _workspace_runtime(binding: WorkspaceBinding) -> ServerRuntime:
+async def _workspace_runtime(binding: WorkspaceBinding, *, session=None) -> ServerRuntime:
     """Build or reuse a runtime from the persisted workspace resource policy.
 
     Returns:
@@ -634,11 +678,14 @@ async def _workspace_runtime(binding: WorkspaceBinding) -> ServerRuntime:
     """
     cached = _cached_workspace_runtime(binding)
     if cached is not None:
-        return cached
+        return await _select_factory_runtime(cached, session)
     async with _workspace_runtime_lock:
         cached = _cached_workspace_runtime(binding)
         if cached is not None:
-            return cached
+            return await _select_factory_runtime(cached, session)
+        from lc_factory.runtime import RuntimeOptions
+        if RuntimeOptions.from_environment().enabled and len(_workspace_runtimes) >= _MAX_WORKSPACE_RUNTIMES:
+            raise RuntimeError("Factory workspace capacity reached; use a separate server process")
         config = ServerConfig.from_env()
         current_config = dataclasses.replace(
             config,
@@ -664,7 +711,7 @@ async def _workspace_runtime(binding: WorkspaceBinding) -> ServerRuntime:
             project_context_override=project_context,
         )
         _remember_workspace_runtime(binding, runtime)
-        return runtime
+        return await _select_factory_runtime(runtime, session)
 
 
 async def get_server_runtime() -> ServerRuntime:
@@ -692,10 +739,10 @@ async def get_server_runtime() -> ServerRuntime:
         sys.exit(1)
     async with _workspace_runtime_lock:
         if binding is None:
-            return await _get_runtime()
+            return await _select_factory_runtime(await _get_runtime())
         cached = _cached_workspace_runtime(binding)
         if cached is not None:
-            return cached
+            return await _select_factory_runtime(cached)
         _claim_sandbox_workspace(config.sandbox_type, binding)
         runtime = await _get_runtime()
         _remember_workspace_runtime(binding, runtime)
@@ -721,5 +768,5 @@ async def make_graph(
         from lc_factory.upstream import require_thread_workspace
 
         binding = await require_thread_workspace(thread_id, context.workspace)
-        return (await _workspace_runtime(binding)).agent
+        return (await _workspace_runtime(binding, session=thread_id)).agent
     return (await get_server_runtime()).agent

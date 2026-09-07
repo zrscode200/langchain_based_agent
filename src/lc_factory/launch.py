@@ -43,6 +43,11 @@ def scaffold_workspace(work_dir: Path) -> None:
         work_dir: Temporary directory that will become the server's cwd.
     """
     _write_checkpointer(work_dir)
+    from lc_factory.runtime import RuntimeOptions
+    if RuntimeOptions.from_environment().enabled:
+        (work_dir / "checkpointer.py").write_text(
+            "from lc_factory.server_checkpointer import create_checkpointer\n"
+        )
     _write_pyproject(work_dir)
 
     # `graph_ref` is a dotted import of the installed `lc_factory` package;

@@ -725,6 +725,7 @@ def create_factory_agent(
     subagent_middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[SubagentPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
+    subagent_definitions: Sequence[Mapping[str, Any]] | None = None,
     rubric_grader_middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[GraderPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
@@ -875,6 +876,8 @@ def create_factory_agent(
         project_context: Explicit project path context for project-sensitive
             behavior such as project `AGENTS.md` files, skills, subagents, and
             MCP trust.
+        subagent_definitions: Optional host-validated file-definition snapshot.
+            None preserves upstream directory discovery. Used by managed reload.
         async_subagents: Remote LangGraph deployments to expose as async subagent tools.
 
             Loaded from `[async_subagents]` in `config.toml` or passed directly.
@@ -1256,10 +1259,10 @@ def create_factory_agent(
         and auto_classifier_model != INHERIT_CLASSIFIER_MODEL
     ):
         model_policy.require_model_allowed(auto_classifier_model.strip())
-    for subagent_meta in list_subagents(
+    for subagent_meta in (subagent_definitions if subagent_definitions is not None else list_subagents(
         user_agents_dir=user_agents_dir,
         project_agents_dir=project_agents_dir,
-    ):
+    )):
         # Treat a falsy spec (`None` or `""`) as "no explicit model" so an empty
         # `model:` in subagent frontmatter inherits the runtime model rather than
         # being forwarded verbatim to `resolve_model("")`.

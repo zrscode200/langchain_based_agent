@@ -18,6 +18,8 @@ dependencies = [
     "deepagents @ git+https://github.com/langchain-ai/deepagents.git@6c89fe2197a2dfe4f3851cda38565bcadba6066b#subdirectory=libs/deepagents",
     # Explicitly guard interpreter streaming and per-agent private state.
     "langchain-quickjs==0.3.7",
+    # Direct use by the optional persistent conversation archive.
+    "aiosqlite==0.22.1",
 ]
 
 [project.scripts]

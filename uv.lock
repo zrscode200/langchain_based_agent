@@ -1258,6 +1258,7 @@ name = "lc-factory"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "aiosqlite" },
     { name = "deepagents" },
     { name = "deepagents-code" },
     { name = "langchain-quickjs" },
@@ -1271,6 +1272,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aiosqlite", specifier = "==0.22.1" },
     { name = "deepagents", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=6c89fe2197a2dfe4f3851cda38565bcadba6066b" },
     { name = "deepagents-code", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fcode&rev=6c89fe2197a2dfe4f3851cda38565bcadba6066b" },
     { name = "langchain-quickjs", specifier = "==0.3.7" },

@@ -216,3 +216,8 @@ with a real model.
 `lc_factory` is licensed under the [MIT License](LICENSE). Portions are derived
 from LangChain's MIT-licensed `deepagents` project; its copyright notice is
 retained in the license.
+
+Optional [runtime capabilities](TALON_ADAPTATIONS.md) add MCP/subagent reload,
+background delegation, and searchable checkpoint history around the existing
+factory. Enable them explicitly for `lc-code` or use `FactoryRuntime` when
+embedding; the default constructor remains compatible with the pinned harness.
