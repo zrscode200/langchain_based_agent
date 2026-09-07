@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 # --- SDK (deepagents) ---
 from deepagents import FsToolName, create_deep_agent
+from deepagents.middleware.filesystem import FilesystemPermission
 from deepagents.backends import CompositeBackend, LocalShellBackend
 from deepagents.backends.filesystem import FilesystemBackend
 from deepagents.middleware import FilesystemMiddleware, MemoryMiddleware
@@ -24,6 +25,7 @@ from deepagents.middleware.subagents import (
 
 # --- LangChain runtime ---
 from langchain.agents.middleware import ToolErrorMiddleware
+from langchain.agents.structured_output import ToolStrategy
 from langchain.agents.middleware.types import AgentMiddleware, AgentState, OmitFromSchema
 from langchain_core._api import suppress_langchain_beta_warning
 from langgraph_sdk.runtime import ServerRuntime as LangGraphServerRuntime
@@ -279,6 +281,7 @@ if TYPE_CHECKING:
 
 
 __all__ = [
+    "ToolStrategy",
     "OmitFromSchema",
     "get_config_sources",
     "create_web_search_tool", "fetch_url", "get_current_thread_id",
@@ -330,6 +333,7 @@ __all__ = [
     "FilesystemBackend",
     "FilesystemMiddleware",
     "FsToolName",
+    "FilesystemPermission",
     "GENERAL_PURPOSE_SUBAGENT",
     "GoalCriteriaMiddleware",
     "GoalToolsMiddleware",

@@ -13,6 +13,7 @@ from typing import Annotated, NotRequired
 from lc_factory.assembly import create_factory_agent, _normalize_injected_middleware
 from lc_factory.background import BackgroundTasks, is_child, thread_id
 from lc_factory.archive import ArchiveScope, conversation_tools
+from lc_factory.workspace_subagents import load_subagent_policy
 from lc_factory.upstream import (
     AgentMiddleware, AgentState, OmitFromSchema, HumanMessage, RunnableConfig, ToolRuntime, tool,
     Credentials, get_user_agents_dir, get_project_agents_dir, _parse_subagent_file,
@@ -168,6 +169,7 @@ class FactoryRuntime:
                  reload_tools=None, reload_async_subagents=None, archive=None, scope_resolver=None,
                  server_managed_checkpointer=False):
         self.kwargs = dict(agent_kwargs)
+        self._policy_from_workspace = agent_kwargs.get("subagent_policy") is None
         self.options, self.workspace_id, self.owner_id = options, workspace_id, owner_id
         self.server_managed_checkpointer = server_managed_checkpointer
         self._completion_candidates = {}
@@ -228,6 +230,12 @@ class FactoryRuntime:
         with use_environment(self.environ):
             if self.options.reload:
                 candidate["subagent_definitions"] = await asyncio.to_thread(load_subagent_snapshot, candidate)
+                if self._policy_from_workspace:
+                    context = candidate.get("project_context")
+                    snapshot = candidate.get("credentials_snapshot")
+                    root = ((context.project_root or context.user_cwd) if context is not None
+                            else (candidate.get("cwd") or getattr(snapshot, "project_root", None) or Path.cwd()))
+                    candidate["subagent_policy"] = await asyncio.to_thread(load_subagent_policy, root)
             if not initial and self.reload_tools is not None:
                 tools, info, mcp = await self.reload_tools()
                 if any((x.get("status") if isinstance(x, dict) else getattr(x, "status", None)) in {"error", "unauthenticated"} for x in (info or [])):

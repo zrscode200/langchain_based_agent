@@ -1261,7 +1261,9 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "deepagents" },
     { name = "deepagents-code" },
+    { name = "jsonschema" },
     { name = "langchain-quickjs" },
+    { name = "referencing" },
 ]
 
 [package.dev-dependencies]
@@ -1275,7 +1277,9 @@ requires-dist = [
     { name = "aiosqlite", specifier = "==0.22.1" },
     { name = "deepagents", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fdeepagents&rev=6c89fe2197a2dfe4f3851cda38565bcadba6066b" },
     { name = "deepagents-code", git = "https://github.com/langchain-ai/deepagents.git?subdirectory=libs%2Fcode&rev=6c89fe2197a2dfe4f3851cda38565bcadba6066b" },
+    { name = "jsonschema", specifier = "==4.26.0" },
     { name = "langchain-quickjs", specifier = "==0.3.7" },
+    { name = "referencing", specifier = "==0.37.0" },
 ]
 
 [package.metadata.requires-dev]

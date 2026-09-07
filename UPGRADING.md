@@ -4,6 +4,13 @@
 **deliberate, reviewed event** — never an incidental `uv lock --upgrade`.
 This file is the procedure.
 
+The factory also owns declarative subagent policy composition and JSON-schema
+result validation; see [SUBAGENTS.md](SUBAGENTS.md). On a bump, verify SDK fork
+middleware merge ordering, filesystem permission/tool composition, QuickJS PTC
+capture timing, and LangChain raw JSON-schema validation. The explicit child
+model slot must continue to prevent inherited runtime model switches. Default
+parity and the actual policy execution tests cover these seams.
+
 ## The dual pin
 
 `pyproject.toml` pins Code and the SDK as one reviewed unit, plus an explicit

@@ -20,6 +20,10 @@ dependencies = [
     "langchain-quickjs==0.3.7",
     # Direct use by the optional persistent conversation archive.
     "aiosqlite==0.22.1",
+    # Validate delegated JSON results locally, without remote schema retrieval.
+    # Both versions already occur in the reviewed transitive lock.
+    "jsonschema==4.26.0",
+    "referencing==0.37.0",
 ]
 
 [project.scripts]

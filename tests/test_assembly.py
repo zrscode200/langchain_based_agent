@@ -51,6 +51,8 @@ def test_factory_only_parameters_are_keyword_only_and_default_off():
         "rubric_grader_middleware",
         "subagent_definitions",
         "subagent_middleware",
+        "subagent_policy",
+        "subagents",
         "verification_model",
     ], f"undeclared factory-only parameters: {added}"
     for name in added:

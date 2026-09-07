@@ -31,6 +31,11 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
+from lc_factory.subagent_policy import (
+    POLICY_MIDDLEWARE_NAMES, FixedSubagentModel, checked_specs, finish_specs, prepare_specs,
+)
+from lc_factory.workspace_subagents import load_subagent_policy, validate_subagent_policy
+
 from lc_factory.upstream import (
     CONVERSATION_HISTORY_DIRNAME,
     DEFAULT_MODEL_RETRIES,
@@ -727,6 +732,8 @@ def create_factory_agent(
     | Mapping[SubagentPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
     subagent_definitions: Sequence[Mapping[str, Any]] | None = None,
+    subagents: Sequence[Mapping[str, Any]] | None = None,
+    subagent_policy: Mapping[str, Mapping[str, Any]] | None = None,
     rubric_grader_middleware: Sequence[AgentMiddleware[Any, Any]]
     | Mapping[GraderPhase, Sequence[AgentMiddleware[Any, Any]]]
     | None = None,
@@ -879,6 +886,15 @@ def create_factory_agent(
             MCP trust.
         subagent_definitions: Optional host-validated file-definition snapshot.
             None preserves upstream directory discovery. Used by managed reload.
+        subagents: Optional declarative child specs. Each requires a unique name
+            and description; replaces a same-named file definition. Supports
+            tools, model, middleware, mode, skills, response_format, fs_tools,
+            and allow/deny filesystem permissions. Factory approval routing is
+            retained. Compiled and remote kinds use separate integration paths.
+        subagent_policy: Strict named policy snapshot applied to both file and
+            programmatic specs. None loads workspace .deepagents/subagents.toml;
+            an explicit empty mapping disables discovery. Tool lists are
+            exhaustive. See SUBAGENTS.md for inheritance and isolation limits.
         async_subagents: Remote LangGraph deployments to expose as async subagent tools.
 
             Loaded from `[async_subagents]` in `config.toml` or passed directly.
@@ -1113,6 +1129,22 @@ def create_factory_agent(
         if cwd is not None
         else (project_context.user_cwd if project_context is not None else None)
     )
+    policy_root = (
+        (project_context.project_root or project_context.user_cwd)
+        if project_context is not None
+        else (effective_cwd or runtime_credentials.project_root or Path.cwd())
+    )
+    supplied_subagents = checked_specs(subagents)
+    resolved_subagent_policy = (
+        load_subagent_policy(policy_root) if subagent_policy is None
+        else validate_subagent_policy(subagent_policy)
+    )
+    owned_names = _injected_main_names | _injected_subagent_names
+    if extension_registry is not None:
+        owned_names |= {entry.name for entry in extension_registry.middleware}
+    owned_names |= {m.name for spec in supplied_subagents for m in spec.get("middleware", [])}
+    if conflict := owned_names & POLICY_MIDDLEWARE_NAMES:
+        raise ValueError(f"Middleware names reserved by factory subagent policy: {sorted(conflict)}")
 
     # Setup agent directory for persistent memory (if enabled)
     if enable_memory or enable_skills:
@@ -1164,6 +1196,7 @@ def create_factory_agent(
     def _subagent_cli_middleware(
         *,
         has_explicit_model: bool,
+        extra: Sequence[AgentMiddleware[Any, Any]] = (),
     ) -> list[AgentMiddleware[Any, Any]]:
         from lc_factory.upstream import CostTrackingMiddleware
 
@@ -1222,6 +1255,7 @@ def create_factory_agent(
             )
         # SEAM (subagent phase "last"): after every factory subagent
         # middleware, still ahead of the SDK's own subagent tail.
+        middleware.extend(extra)
         middleware.extend(injected_subagent_middleware["last"])
         # Validated per stack, not once: subagent stacks differ by
         # configuration, so a name unique against one can collide on another.
@@ -1276,79 +1310,49 @@ def create_factory_agent(
         and auto_classifier_model != INHERIT_CLASSIFIER_MODEL
     ):
         model_policy.require_model_allowed(auto_classifier_model.strip())
-    for subagent_meta in (subagent_definitions if subagent_definitions is not None else list_subagents(
-        user_agents_dir=user_agents_dir,
-        project_agents_dir=project_agents_dir,
-    )):
-        # Treat a falsy spec (`None` or `""`) as "no explicit model" so an empty
-        # `model:` in subagent frontmatter inherits the runtime model rather than
-        # being forwarded verbatim to `resolve_model("")`.
-        model_spec = subagent_meta["model"]
-        has_explicit_model = bool(model_spec)
-        subagent: SubAgent = {
-            "name": subagent_meta["name"],
-            "description": subagent_meta["description"],
-            "system_prompt": subagent_meta["system_prompt"],
-        }
-        if model_spec:
-            # Name the declaring file: this raise aborts the whole CLI launch,
-            # and across a dozen `agents/*.md` files the model alone is not
-            # enough to find the one to edit.
-            declared_in = subagent_meta.get("path")
-            name = subagent_meta["name"]
-            model_policy.require_model_allowed(
-                model_spec,
-                context=(
-                    f"subagent {name!r} ({declared_in})"
-                    if declared_in
-                    else f"subagent {name!r}"
-                ),
-            )
-            resolved_model = (
-                _resolve_retry_owned_model(model_spec, cli_max_retries)
-                if enforce_model_policy and _has_resolvable_model_provider(model_spec)
-                else None
-            )
-            subagent["model"] = (
-                resolved_model if resolved_model is not None else model_spec
-            )
-        # Named `subagent_stack`, not `subagent_middleware` as upstream has it:
-        # that name is the factory's own parameter, and rebinding it here would
-        # shadow it for the rest of the body.
-        subagent_stack = _subagent_cli_middleware(
-            has_explicit_model=has_explicit_model,
-        )
-        if subagent_stack:
-            subagent["middleware"] = subagent_stack
-        if resolved_interrupt_on is not None:
-            # The async-aware stock-compatible middleware above owns approval
-            # routing. A declarative subagent with no `interrupt_on` inherits
-            # the parent's top-level map (`spec.get("interrupt_on", ...)` in
-            # deepagents graph assembly), which would wrap its tools in a second
-            # synchronous stock HITL. An explicit empty (falsy) map opts out.
-            subagent["interrupt_on"] = {}
-        custom_subagents.append(subagent)
+    from lc_factory.upstream import GENERAL_PURPOSE_SUBAGENT, use_environment
 
-    from lc_factory.upstream import (
-        GENERAL_PURPOSE_SUBAGENT,
-        RuntimeSubAgent,
+    definitions = subagent_definitions if subagent_definitions is not None else list_subagents(
+        user_agents_dir=user_agents_dir, project_agents_dir=project_agents_dir,
     )
-
-    if not any(
-        subagent["name"] == GENERAL_PURPOSE_SUBAGENT["name"]
-        for subagent in custom_subagents
-    ):
-        general_purpose_subagent: RuntimeSubAgent = {
-            "name": GENERAL_PURPOSE_SUBAGENT["name"],
-            "description": GENERAL_PURPOSE_SUBAGENT["description"],
-            "system_prompt": GENERAL_PURPOSE_SUBAGENT["system_prompt"],
-            "middleware": _subagent_cli_middleware(has_explicit_model=False),
-        }
-        if is_env_truthy(FORKED_SUBAGENTS, default=True):
-            general_purpose_subagent["mode"] = "fork"
+    general_purpose = {key: GENERAL_PURPOSE_SUBAGENT[key]
+                       for key in ("name", "description", "system_prompt")}
+    if is_env_truthy(FORKED_SUBAGENTS, default=True, environ=environment):
+        general_purpose["mode"] = "fork"
+    custom_subagents = prepare_specs(
+        definitions, supplied_subagents, resolved_subagent_policy,
+        general_purpose=general_purpose, project_root=policy_root,
+    )
+    for subagent in custom_subagents:
+        model_spec = subagent.pop("model", None)
+        has_explicit_model = bool(model_spec)
+        if has_explicit_model:
+            if isinstance(model_spec, str):
+                model_policy.require_model_allowed(model_spec, context=f"subagent {subagent['name']!r}")
+                with use_environment(environment):
+                    resolved_model = (
+                        _resolve_retry_owned_model(model_spec, cli_max_retries)
+                        if enforce_model_policy and _has_resolvable_model_provider(model_spec)
+                        else None
+                    )
+                subagent["model"] = resolved_model if resolved_model is not None else model_spec
+            else:
+                subagent["model"] = model_spec
+        extra = _normalize_subagent_middleware(subagent.pop("middleware", None))
+        _validate_subagent_reserved_names(extra)
+        extra_items = [*extra["first"], *extra["last"]]
+        subagent["_factory_extra_middleware_names"] = {m.name for m in extra_items}
+        subagent["middleware"] = _subagent_cli_middleware(
+            has_explicit_model=has_explicit_model, extra=extra_items,
+        )
+        if has_explicit_model and subagent.get("mode") == "fork":
+            subagent["middleware"].append(FixedSubagentModel())
         if resolved_interrupt_on is not None:
-            general_purpose_subagent["interrupt_on"] = {}
-        custom_subagents.append(general_purpose_subagent)
+            # Factory async approval owns routing; prevent a second SDK gate.
+            subagent["interrupt_on"] = {}
+    all_names = [spec["name"] for spec in [*custom_subagents, *(async_subagents or [])]]
+    if duplicates := [name for name, count in Counter(all_names).items() if count > 1]:
+        raise ValueError(f"Duplicate local/remote subagent names: {sorted(duplicates)}")
 
     # Build middleware stack based on enabled features
     agent_middleware: list[AgentMiddleware[Any, Any]] = [
@@ -2014,6 +2018,14 @@ def create_factory_agent(
     # SEAM (phase "last"): after every factory middleware, including extension
     # middleware and its runtime host, immediately ahead of the SDK's own tail.
     agent_middleware.extend(injected_middleware["last"])
+    finish_specs(
+        custom_subagents, main_middleware=agent_middleware, tools=tools,
+        backend=composite_backend, fs_tools=fs_tools,
+        descriptions=lambda child_model: _get_harness_tool_descriptions(
+            child_model if child_model is not None else model),
+    )
+    for spec in custom_subagents:
+        _validate_subagent_stack(spec["middleware"], _injected_subagent_names)
     _validate_injected_middleware(agent_middleware, injected_middleware)
     # SEAM (fork inheritance): the SDK merges parent and child middleware by
     # name. A child injection must not silently replace inherited behavior.
