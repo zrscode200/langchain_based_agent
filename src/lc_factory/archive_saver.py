@@ -51,7 +51,7 @@ class ConversationSaver(BaseCheckpointSaver[V]):
 
     def __init__(
         self, checkpointer: BaseCheckpointSaver[V], *, archive: SQLiteConversationArchive | None,
-        scope_resolver: Callable[[str], Awaitable[ArchiveScope]], on_commit=None, before_delete=None
+        scope_resolver: Callable[[str], Awaitable[ArchiveScope]], on_commit=None, before_delete=None, after_delete=None
     ) -> None:
         """Wrap the saver without taking ownership of either store."""
         super().__init__(serde=checkpointer.serde)
@@ -60,6 +60,7 @@ class ConversationSaver(BaseCheckpointSaver[V]):
         self.scope_resolver = scope_resolver
         self.on_commit = on_commit
         self.before_delete = before_delete
+        self.after_delete = after_delete
         self._lock = asyncio.Lock()
 
     @property
@@ -85,7 +86,7 @@ class ConversationSaver(BaseCheckpointSaver[V]):
         clone = ConversationSaver(
             self.checkpointer.with_allowlist(extra_allowlist), archive=self.archive,
             scope_resolver=self.scope_resolver, on_commit=self.on_commit,
-            before_delete=self.before_delete
+            before_delete=self.before_delete, after_delete=self.after_delete
         )
         clone._lock = self._lock
         return clone
@@ -246,6 +247,8 @@ class ConversationSaver(BaseCheckpointSaver[V]):
         await self.checkpointer.adelete_thread(session)
         if self.archive is not None:
             await self.archive.delete_session(session)
+        if self.after_delete is not None:
+            self.after_delete(session)
 
 
 def _messages(value: object) -> list[BaseMessage]:

@@ -595,6 +595,11 @@ def factory_checkpoint_committed(session, checkpoint, new_versions):
         owner.checkpoint_committed(session, checkpoint, new_versions)
 
 
+def forget_factory_conversation(session):
+    for owner in _factory_runtime_owners.values():
+        owner.forget_conversation(session)
+
+
 async def cancel_factory_background(session):
     await asyncio.gather(*(owner.cancel_background(session) for owner in _factory_runtime_owners.values()))
 

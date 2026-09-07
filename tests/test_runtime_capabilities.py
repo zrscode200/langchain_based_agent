@@ -392,3 +392,42 @@ async def test_cancelled_waiting_turn_does_not_consume_stream_completion(tmp_pat
             pass
         assert not runtime.background.pending("owner")
         assert runtime._turn_locks == {}
+
+
+@pytest.mark.parametrize("output", [{"output_keys": "messages"}, {"output_keys": ["messages"]}, {"stream_mode": "updates"}])
+@pytest.mark.parametrize("persistent", [True, False])
+async def test_invocation_output_selection_preserves_completion(tmp_path, output, persistent):
+    from lc_factory.background import Job
+    kwargs = args(tmp_path)
+    if not persistent:
+        kwargs["checkpointer"] = None
+    async with await FactoryRuntime.create(agent_kwargs=kwargs, options=RuntimeOptions(background=True), workspace_id="w") as runtime:
+        runtime.background.jobs["job"] = Job("owner", "worker", status="completed", result="evidence")
+        result = await runtime.ainvoke({"messages": [HumanMessage("continue")]}, {"configurable": {"thread_id": "owner"}}, **output)
+        assert result
+        assert not runtime.background.pending("owner")
+        assert "owner" not in runtime._thread_generations
+
+
+async def test_server_deletion_releases_generation_only_after_success(tmp_path, monkeypatch):
+    from lc_factory import server_graph, server_checkpointer
+    monkeypatch.setenv("LC_FACTORY_CAPABILITIES", "reload")
+    monkeypatch.setenv("DEEPAGENTS_CODE_SERVER_DB_PATH", str(tmp_path / "server.sqlite"))
+    async with await FactoryRuntime.create(agent_kwargs=args(tmp_path), options=RuntimeOptions(reload=True), workspace_id="w") as runtime:
+        anchor = await runtime.select("paused")
+        monkeypatch.setattr(server_graph, "_factory_runtime_owners", {id(anchor.agent): runtime})
+        runtime.request_reload()
+        newer = await runtime.select()
+        assert newer is not anchor
+        async with server_checkpointer.create_checkpointer() as saver:
+            original = saver.checkpointer.adelete_thread
+            async def fail(_):
+                raise OSError("deletion failed")
+            monkeypatch.setattr(saver.checkpointer, "adelete_thread", fail)
+            with pytest.raises(OSError, match="deletion failed"):
+                await saver.adelete_thread("paused")
+            assert runtime._thread_generations["paused"] is anchor
+            monkeypatch.setattr(saver.checkpointer, "adelete_thread", original)
+            await saver.adelete_thread("paused")
+            assert "paused" not in runtime._thread_generations
+            assert await runtime.select("paused") is newer

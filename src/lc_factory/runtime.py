@@ -184,7 +184,7 @@ class FactoryRuntime:
                 self.kwargs["checkpointer"] = ConversationSaver(
                     saver, archive=archive if options.history else None,
                     scope_resolver=self.scope, on_commit=self.checkpoint_committed,
-                    before_delete=self.cancel_background)
+                    before_delete=self.cancel_background, after_delete=self.forget_conversation)
         self.environ = dict(self.kwargs.get("environ") if self.kwargs.get("environ") is not None else os.environ)
         self.kwargs["environ"] = self.environ
         self.background = BackgroundTasks(environ=self.environ) if options.background else None
@@ -299,6 +299,10 @@ class FactoryRuntime:
             if entry[1] == 0:
                 self._turn_locks.pop(session, None)
 
+    def forget_conversation(self, session):
+        self._thread_generations.pop(session, None)
+        self._completion_candidates.pop(session, None)
+
     async def cancel_background(self, session):
         if self.background:
             await self.background.discard(session)
@@ -331,10 +335,7 @@ class FactoryRuntime:
         async with self._turn(session):
             current = await self.select(session)
             result = await current.agent.ainvoke(input, config, **kwargs)
-            if not result.get("__interrupt__"):
-                self._thread_generations.pop(session, None)
-                if self.background:
-                    self.background.acknowledge(session, result.get("_factory_delivery_complete", []))
+            self._complete_uncheckpointed_turn(session)
             return result
 
     async def astream(self, input, config, **kwargs):
@@ -346,10 +347,15 @@ class FactoryRuntime:
             async with aclosing(current.agent.astream(input, config, **kwargs)) as stream:
                 async for chunk in stream:
                     yield chunk
-            if self.kwargs.get("checkpointer") is None and session in self._completion_candidates:
-                self._thread_generations.pop(session, None)
-                if self.background:
-                    self.background.acknowledge(session, self._completion_candidates[session])
+            self._complete_uncheckpointed_turn(session)
+
+    def _complete_uncheckpointed_turn(self, session):
+        # Return values may be a list, scalar channel, or selected output dict.
+        # Completion is owned by lifecycle state, never by the presentation shape.
+        if self.kwargs.get("checkpointer") is None and session in self._completion_candidates:
+            self._thread_generations.pop(session, None)
+            if self.background:
+                self.background.acknowledge(session, self._completion_candidates[session])
 
     async def close(self):
         self.closed = True

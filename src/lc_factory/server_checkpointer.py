@@ -30,7 +30,7 @@ async def server_scope(session):
 async def create_checkpointer():
     """Open the execution-time saver and close workers before the stores."""
     from lc_factory.runtime import RuntimeOptions
-    from lc_factory.server_graph import close_factory_runtimes, factory_checkpoint_committed, cancel_factory_background
+    from lc_factory.server_graph import close_factory_runtimes, factory_checkpoint_committed, cancel_factory_background, forget_factory_conversation
 
     global _archive
     path = os.environ.get("DEEPAGENTS_CODE_SERVER_DB_PATH")
@@ -38,11 +38,14 @@ async def create_checkpointer():
         raise ValueError("DEEPAGENTS_CODE_SERVER_DB_PATH is required")
     async with AsyncExitStack() as stack:
         saver = await stack.enter_async_context(AsyncSqliteSaver.from_conn_string(path))
+        # Deletion can precede the first graph checkpoint on a new server.
+        await saver.setup()
         if RuntimeOptions.from_environment().history:
             _archive = await stack.enter_async_context(
                 SQLiteConversationArchive.from_conn_string(path + ".factory-history.sqlite"))
         saver = ConversationSaver(saver, archive=_archive, scope_resolver=server_scope,
-                                  on_commit=factory_checkpoint_committed, before_delete=cancel_factory_background)
+                                  on_commit=factory_checkpoint_committed, before_delete=cancel_factory_background,
+                                  after_delete=forget_factory_conversation)
         try:
             yield saver
         finally:
