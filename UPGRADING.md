@@ -655,3 +655,14 @@ composition parity cannot detect these failures. Background detachment depends
 on the pinned SDK task tool and the innermost factory seam; verify both main and
 child approval tests and fork suppression. Server capabilities require the
 factory execution-time saver, proved by the live optional-capabilities test.
+## Owned verification model seam
+
+`verification_model=` is an OG-only constructor argument. Preserve selection
+across criteria/fallback/grader and the no-option parity path on a pin bump.
+`verification.FixedVerificationAgent` strips only main-model selection fields
+from nested criteria context, retaining approvals, workspace and hook metadata.
+Recheck `GoalCriteriaMiddleware`'s invoke/ainvoke contract and
+`CLIContextSchema`/`ConfigurableModelMiddleware` whenever those upstream modules
+change. Configured selection uses the current user/managed snapshots and
+retry-owned `create_model`; never apply its ModelResult to main runtime state.
+`tests/test_verification.py` owns behavior checks. Usage: [VERIFICATION.md](VERIFICATION.md).

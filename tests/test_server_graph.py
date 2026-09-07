@@ -414,7 +414,7 @@ def test_no_module_writes_the_reference_into_the_environment():
         return (
             node.func.attr == "setdefault"
             and len(node.args) == 2
-            and ((isinstance(node.args[0], ast.Name) and node.args[0].id == "MIDDLEWARE_REF_ENV")
+            and ((isinstance(node.args[0], ast.Name) and node.args[0].id in {"MIDDLEWARE_REF_ENV", "VERIFICATION_MODEL_ENV"})
                  or (isinstance(node.args[0], ast.Constant) and node.args[0].value in {"LC_FACTORY_CAPABILITIES", "LC_FACTORY_HISTORY_OWNER"}))
             and isinstance(node.args[1], ast.Constant)
             and node.args[1].value == ""
@@ -587,6 +587,46 @@ async def test_graph_discovery_keeps_default_runtime(monkeypatch):
     assert await server_graph.make_graph(
         runtime=SimpleNamespace(execution_runtime=None)
     ) is graph
+
+
+async def test_verification_selection_reaches_server_factory_in_workspace(monkeypatch, tmp_path):
+    from deepagents_code._fake_models import _ToolBindingFakeModel
+    from deepagents_code.config import ModelResult, active_environment
+
+    from lc_factory import assembly, server_graph, verification
+    from lc_factory.upstream import ServerConfig
+
+    main, verifier = _ToolBindingFakeModel(), _ToolBindingFakeModel()
+    monkeypatch.setattr(server_graph, "create_model", lambda *a, **k:
+                        ModelResult(model=main, model_name="main", provider="fixture"))
+    marker = "verification-workspace"
+    (tmp_path / ".env").write_text(f"FACTORY_VERIFICATION_PROBE={marker}\n")
+    resolutions, constructions = [], []
+
+    def resolve(environment, *, cli_max_retries):
+        resolutions.append((dict(environment), cli_max_retries))
+        assert active_environment()["FACTORY_VERIFICATION_PROBE"] == marker
+        return verifier
+
+    original = assembly.create_factory_agent
+
+    def construct(**kwargs):
+        constructions.append(kwargs)
+        return original(**kwargs)
+
+    monkeypatch.setattr(verification, "configured_verification_model", resolve)
+    monkeypatch.setattr(assembly, "create_factory_agent", construct)
+    monkeypatch.setattr(server_graph, "get_server_project_context", lambda: None)
+    config = ServerConfig(model="fixture:main", cwd=str(tmp_path), no_mcp=True,
+                          enable_memory=False, enable_skills=False, enable_shell=False,
+                          interactive=False, cli_max_retries=2)
+    runtime = await server_graph._make_graphs(config_override=config)
+    assert runtime.agent is not None
+    assert len(resolutions) == len(constructions) == 1
+    assert resolutions[0][1] == 2
+    assert constructions[0]["verification_model"] is verifier
+    assert constructions[0]["model"] is main
+    assert constructions[0]["model_result"].model is main
 
 
 @pytest.mark.parametrize(

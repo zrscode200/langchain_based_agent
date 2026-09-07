@@ -19,6 +19,8 @@ the name and the guard, because both are needed before that module can be
 imported.
 """
 
+VERIFICATION_MODEL_ENV = "LC_FACTORY_VERIFICATION_MODEL"
+
 
 def reserve_middleware_ref_env() -> None:
     """Claim ``LC_FACTORY_MIDDLEWARE`` so no ``.env`` file can introduce it.
@@ -81,3 +83,4 @@ def reserve_middleware_ref_env() -> None:
     # Runtime behavior and history grouping must also be host-owned.
     os.environ.setdefault("LC_FACTORY_CAPABILITIES", "")
     os.environ.setdefault("LC_FACTORY_HISTORY_OWNER", "")
+    os.environ.setdefault(VERIFICATION_MODEL_ENV, "")

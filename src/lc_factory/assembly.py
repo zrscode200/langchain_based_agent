@@ -699,6 +699,7 @@ def create_factory_agent(
     enable_shell: bool = True,
     enable_interpreter: bool = False,
     interpreter_config: InterpreterConfig | None = None,
+    verification_model: str | BaseChatModel | None = None,
     rubric_model: str | BaseChatModel | None = None,
     rubric_max_iterations: int | None = None,
     auto_classifier_model: str | BaseChatModel | None = None,
@@ -1039,6 +1040,9 @@ def create_factory_agent(
         environ: Environment snapshot frozen into local shell execution.
         credentials_snapshot: Credentials resolved from `environ` for this runtime.
         model_result: Workspace model metadata used in the generated prompt.
+        verification_model: Fixed model for criteria generation and fallback,
+            and the default grader when `rubric_model` is not set. `None`
+            preserves the upstream runtime main-model inheritance behavior.
 
     Returns:
         2-tuple of `(agent_graph, backend)`
@@ -1251,6 +1255,19 @@ def create_factory_agent(
             resolved = _resolve_retry_owned_model(model, cli_max_retries)
             if resolved is not None:
                 model = resolved
+    if isinstance(verification_model, str):
+        if not verification_model.strip():
+            raise ValueError("verification_model must be a non-empty model reference")
+        verification_model = verification_model.strip()
+        model_policy.require_model_allowed(verification_model, context="verification_model")
+        if enforce_model_policy:
+            from lc_factory.upstream import create_model, use_environment
+
+            with use_environment(environment):
+                verification_model = create_model(
+                    verification_model, cli_max_retries=cli_max_retries
+                ).model
+    criteria_model = verification_model if verification_model is not None else model
     if (
         isinstance(auto_classifier_model, str)
         and auto_classifier_model.strip()
@@ -1769,7 +1786,7 @@ def create_factory_agent(
             criteria_backend = None
             criteria_root = "/"
         criteria_agent = _create_goal_criteria_agent(
-            model=model,
+            model=criteria_model,
             repository_backend=criteria_backend,
             repository_root=criteria_root,
             context_tools=goal_criteria_tools,
@@ -1780,11 +1797,16 @@ def create_factory_agent(
             environ=environment,
         )
         criteria_fallback_agent = create_goal_criteria_fallback_agent(
-            model=model,
+            model=criteria_model,
             model_retries=model_retries,
             cli_max_retries=cli_max_retries,
             environ=environment,
         )
+        if verification_model is not None:
+            from lc_factory.verification import FixedVerificationAgent
+
+            criteria_agent = FixedVerificationAgent(criteria_agent)
+            criteria_fallback_agent = FixedVerificationAgent(criteria_fallback_agent)
         agent_middleware.append(
             GoalCriteriaMiddleware(criteria_agent, criteria_fallback_agent)
         )
@@ -1919,7 +1941,7 @@ def create_factory_agent(
             category=Warning,
         )
         rubric_kwargs: dict[str, Any] = {
-            "model": rubric_model if rubric_model is not None else model,
+            "model": rubric_model if rubric_model is not None else criteria_model,
             "system_prompt": _rubric_grader_system_prompt(
                 _rubric_grader_read_file_prefix(composite_backend),
                 grader_repository_root,
@@ -1938,7 +1960,7 @@ def create_factory_agent(
             # unresolved spec so a runtime selection never depends on the
             # startup rubric model resolving.
             "runtime_bootstrap_model": model,
-            "inherit_main_model": rubric_model is None,
+            "inherit_main_model": rubric_model is None and verification_model is None,
         }
         if rubric_max_iterations is not None:
             rubric_kwargs["max_iterations"] = rubric_max_iterations

@@ -397,6 +397,13 @@ async def _make_graphs_in_environment(
     )
     result.apply_to_runtime_state()
 
+    from lc_factory.verification import configured_verification_model
+
+    verification_model = await asyncio.to_thread(
+        configured_verification_model, workspace_env,
+        cli_max_retries=config.cli_max_retries,
+    )
+
     from lc_factory.runtime import RuntimeOptions
     from lc_factory.mcp_reload import build_reloadable_tools, load_async_subagent_snapshot
     build_tools = build_reloadable_tools if RuntimeOptions.from_environment().reload else _build_tools
@@ -490,6 +497,7 @@ async def _make_graphs_in_environment(
             enable_shell=config.enable_shell,
             enable_interpreter=config.enable_interpreter,
             interpreter_config=interpreter_config,
+            verification_model=verification_model,
             rubric_model=config.rubric_model,
             rubric_max_iterations=config.rubric_max_iterations,
             auto_classifier_model=resolve_auto_classifier_model_for_provider(
