@@ -10,6 +10,6 @@ from lc_factory._env import MIDDLEWARE_REF_ENV, reserve_middleware_ref_env
 # `lc_factory._env.reserve_middleware_ref_env` for the full reasoning.
 reserve_middleware_ref_env()
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["MIDDLEWARE_REF_ENV", "__version__", "reserve_middleware_ref_env"]

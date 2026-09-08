@@ -32,7 +32,7 @@ _DISTRIBUTION_NAME = "lc_factory"
 GRAPH_REF = "lc_factory.server_graph:make_graph"
 
 
-def scaffold_workspace(work_dir: Path) -> None:
+def scaffold_workspace(work_dir: Path, *, extra_runtime_dependencies: tuple[str, ...] = ()) -> None:
     """Prepare the server working directory for the FACTORY graph.
 
     Port of upstream ``_scaffold_workspace``; the graph reference points at
@@ -48,7 +48,7 @@ def scaffold_workspace(work_dir: Path) -> None:
         (work_dir / "checkpointer.py").write_text(
             "from lc_factory.server_checkpointer import create_checkpointer\n"
         )
-    _write_pyproject(work_dir)
+    _write_pyproject(work_dir, extra_runtime_dependencies=extra_runtime_dependencies)
 
     # `graph_ref` is a dotted import of the installed `lc_factory` package;
     # `checkpointer_path` stays cwd-relative because checkpointer.py is
@@ -69,19 +69,22 @@ def scaffold_workspace(work_dir: Path) -> None:
     config_path.write_text(json.dumps(config, indent=2))
 
 
-def _write_pyproject(work_dir: Path) -> None:
+def _write_pyproject(work_dir: Path, *, extra_runtime_dependencies: tuple[str, ...] = ()) -> None:
     """Write a minimal pyproject.toml for the server working directory.
 
     Args:
         work_dir: Server working directory.
     """
+    # Host-supplied distribution requirements, not workspace configuration.
+    dependencies = [_runtime_package_dependency(), *extra_runtime_dependencies]
+    if any(not isinstance(item, str) or not item.strip() or any(ord(c) < 32 for c in item)
+           for item in dependencies):
+        raise ValueError("Runtime dependencies must be non-empty requirement strings without control characters")
     content = f"""[project]
 name = "lc-factory-server-runtime"
 version = "0.0.1"
 requires-python = ">=3.12"
-dependencies = [
-    "{_runtime_package_dependency()}",
-]
+dependencies = {json.dumps(dependencies)}
 
 [build-system]
 requires = ["hatchling"]

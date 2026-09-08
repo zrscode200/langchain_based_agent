@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lc-factory-enterprise"
+version = "0.2.0"
+description = "Enterprise gateway and client adaptation over the OG agent factory"
+requires-python = ">=3.12,<4.0"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+dependencies = ["lc_factory==0.2.0", "requests==2.34.2"]
+
+[project.scripts]
+ddt-agent = "lc_factory_enterprise.tui:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lc_factory_enterprise"]

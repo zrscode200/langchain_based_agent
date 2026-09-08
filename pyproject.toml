@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lc_factory"
-version = "0.1.0"
+version = "0.2.0"
 description = "Agent factory layer over the LangChain ecosystem: an owned recomposition of the deepagents-code assembly."
 readme = "README.md"
 license = "MIT"
@@ -52,6 +52,7 @@ no-sources = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["enterprise/src"]
 # Integration tests boot a real `langgraph dev` server; excluded from the
 # default run. Execute with `uv run pytest -m integration`.
 addopts = "-m 'not integration'"

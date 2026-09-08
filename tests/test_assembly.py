@@ -48,6 +48,7 @@ def test_factory_only_parameters_are_keyword_only_and_default_off():
     added = sorted(set(ours) - set(v0))
     assert added == [
         "enable_settled_dispatch",
+        "interpreter_subagents",
         "middleware",
         "rubric_grader_middleware",
         "subagent_definitions",

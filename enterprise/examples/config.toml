@@ -1,0 +1,30 @@
+# Reconstructed example: replace endpoints, aliases, API IDs and context limits.
+[models.providers.merck_gpt]
+class_path = "lc_factory_enterprise.merck_models:MerckChatModel"
+api_key_env = "COMPANY_LLM_API_KEY"
+base_url = "https://gateway.example.invalid/gpt/v2"
+models = ["company-gpt"]
+
+[models.providers.merck_gpt.params.company-gpt]
+api_model = "approved-gpt-api-id"
+
+[models.providers.merck_claude]
+class_path = "lc_factory_enterprise.merck_models:MerckAnthropicChatModel"
+api_key_env = "COMPANY_LLM_API_KEY"
+base_url = "https://gateway.example.invalid/gpt/v2"
+models = ["company-claude"]
+
+[models.providers.merck_claude.params.company-claude]
+api_model = "approved-claude-api-id"
+max_tokens = 8192
+
+[retries.merck_gpt]
+param = "max_retries"
+max_retries = 3
+
+[retries.merck_claude]
+param = "max_retries"
+max_retries = 3
+
+[lc_factory]
+verification_model = "merck_claude:company-claude"

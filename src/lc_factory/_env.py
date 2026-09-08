@@ -85,3 +85,4 @@ def reserve_middleware_ref_env() -> None:
     os.environ.setdefault("LC_FACTORY_HISTORY_OWNER", "")
     os.environ.setdefault(VERIFICATION_MODEL_ENV, "")
     os.environ.setdefault("LC_FACTORY_SETTLED_DISPATCH", "")
+    os.environ.setdefault("LC_FACTORY_INTERPRETER_SUBAGENTS", "")

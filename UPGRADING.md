@@ -4,6 +4,11 @@
 **deliberate, reviewed event** — never an incidental `uv lock --upgrade`.
 This file is the procedure.
 
+The optional [enterprise package](enterprise/README.md) uses the same OG runtime.
+Its gateway/HTTP/SSE, replay panel, nested workspace and wheel launch contracts
+must be checked at this pin too. Keep its exact OG dependency and the two package
+versions in step when publishing a coordinated release; record wheel hashes.
+
 The factory also owns declarative subagent policy composition and JSON-schema
 result validation; see [SUBAGENTS.md](SUBAGENTS.md). On a bump, verify SDK fork
 middleware merge ordering, filesystem permission/tool composition, QuickJS PTC

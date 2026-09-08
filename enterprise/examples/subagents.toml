@@ -1,0 +1,3 @@
+# Merge into the consumer's .deepagents/subagents.toml.
+[subagents.general-purpose]
+mode = "isolated"

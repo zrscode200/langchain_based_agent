@@ -704,6 +704,7 @@ def create_factory_agent(
     enable_shell: bool = True,
     enable_interpreter: bool = False,
     enable_settled_dispatch: bool = False,
+    interpreter_subagents: bool | None = None,
     interpreter_config: InterpreterConfig | None = None,
     verification_model: str | BaseChatModel | None = None,
     rubric_model: str | BaseChatModel | None = None,
@@ -857,6 +858,9 @@ def create_factory_agent(
             Direct callers may omit this to resolve one for the current
             process. The server supplies a snapshot that incorporates its
             invocation-scoped PTC overrides.
+        interpreter_subagents: None retains the upstream True default. False
+            withholds built-in JS task and task/task_settled PTC bindings;
+            native model-issued delegation remains available.
         rubric_model: Default grader model. `None` makes the grader follow
             the active main model. Either way a thread's recorded
             `_rubric_model_spec` selection takes precedence.
@@ -1091,6 +1095,8 @@ def create_factory_agent(
             a prebuilt `BaseChatModel` came from a path that already checked.
     """  # noqa: DOC502 - propagates from `ModelConfig.require_model_allowed`
     tools = list(tools or [])
+    if interpreter_subagents is not None and type(interpreter_subagents) is not bool:
+        raise ValueError("interpreter_subagents must be a boolean or None")
     environment = os.environ if environ is None else environ
     runtime_credentials = (
         credentials if credentials_snapshot is None else credentials_snapshot
@@ -1561,7 +1567,9 @@ def create_factory_agent(
             acknowledge_unsafe=interpreter.ptc_acknowledge_unsafe,
             auto_approve=auto_approve,
         )
-        if enable_settled_dispatch:
+        if interpreter_subagents is False and ptc_names is not None:
+            ptc_names = [name for name in ptc_names if name not in {"task", "task_settled"}]
+        if enable_settled_dispatch and interpreter_subagents is not False:
             ptc_names = [*(ptc_names or []), "task_settled"]
         ptc_option: PTCOption | None = (
             cast("PTCOption", list(ptc_names)) if ptc_names is not None else None
@@ -1578,6 +1586,7 @@ def create_factory_agent(
                     max_ptc_calls=interpreter.max_ptc_calls,
                     max_result_chars=interpreter.max_result_chars,
                     ptc=ptc_option,
+                    subagents=interpreter_subagents is not False,
                 )
             )
             if enable_settled_dispatch:

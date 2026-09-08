@@ -415,7 +415,7 @@ def test_no_module_writes_the_reference_into_the_environment():
             node.func.attr == "setdefault"
             and len(node.args) == 2
             and ((isinstance(node.args[0], ast.Name) and node.args[0].id in {"MIDDLEWARE_REF_ENV", "VERIFICATION_MODEL_ENV"})
-                 or (isinstance(node.args[0], ast.Constant) and node.args[0].value in {"LC_FACTORY_CAPABILITIES", "LC_FACTORY_HISTORY_OWNER", "LC_FACTORY_SETTLED_DISPATCH"}))
+                     or (isinstance(node.args[0], ast.Constant) and node.args[0].value in {"LC_FACTORY_CAPABILITIES", "LC_FACTORY_HISTORY_OWNER", "LC_FACTORY_SETTLED_DISPATCH", "LC_FACTORY_INTERPRETER_SUBAGENTS"}))
             and isinstance(node.args[1], ast.Constant)
             and node.args[1].value == ""
         )
@@ -599,6 +599,7 @@ async def test_verification_selection_reaches_server_factory_in_workspace(monkey
 
     main, verifier = _ToolBindingFakeModel(), _ToolBindingFakeModel()
     monkeypatch.setenv("LC_FACTORY_SETTLED_DISPATCH", "1" if settled_enabled else "")
+    monkeypatch.setenv("LC_FACTORY_INTERPRETER_SUBAGENTS", "0" if settled_enabled else "")
     monkeypatch.setattr(server_graph, "create_model", lambda *a, **k:
                         ModelResult(model=main, model_name="main", provider="fixture"))
     marker = "verification-workspace"
@@ -630,6 +631,7 @@ async def test_verification_selection_reaches_server_factory_in_workspace(monkey
     assert constructions[0]["model"] is main
     assert constructions[0]["model_result"].model is main
     assert constructions[0]["enable_settled_dispatch"] is settled_enabled
+    assert constructions[0]["interpreter_subagents"] is (False if settled_enabled else None)
     assert ("task_settled" in runtime.agent.nodes["tools"].bound.tools_by_name) is settled_enabled
 
 
