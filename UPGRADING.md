@@ -149,7 +149,10 @@ private (underscore) names that carry no semver protection.
    **The parity suite is a documented-divergence suite, not an equality
    suite.** It asserts that the *default constructor* composition matches v0;
    constructor deltas are opt-in and must not perturb it. The bundled clients
-   separately enable background tools by default through `runtime_config.py`.
+   separately enable background/reload tools and settled dispatch by default
+   through `runtime_config.py`. Keep its trusted preferences, optional per-setting
+   overrides, lazy diagnostic-safe resolution and server snapshot in sync.
+   Existing saved capability lists replace defaults; history stays opt-in.
    Native `task` stays foreground; only `start_background_task` detaches. Check
    trusted preference/env precedence and the shared client/server snapshot when
    updating startup plumbing. An expectation or normalization exemption

@@ -32,25 +32,30 @@ and merge named policies to preserve the uploaded isolated general-purpose child
 Invalid policies now fail startup/reload. Programmatic clients keep importing
 `create_factory_agent` from `lc_factory.assembly`.
 
-Carry the enterprise's settled dispatch setting explicitly in the host shell:
+Start normally; structured delegation, reload and background tools are enabled
+by default:
 
 ```sh
-export LC_FACTORY_SETTLED_DISPATCH=1
 ddt-agent --model merck_claude:company-claude
 ```
 
 Background tools are available by default, without a capability export. Native
 `task` waits for its child; `start_background_task` explicitly detaches work so
 the conversation can continue. Save `[lc_factory].capabilities` in the trusted
-profile to add reload/history or use an empty list to disable optional features.
-`LC_FACTORY_CAPABILITIES` remains a complete override (`none` disables all).
+profile to add history or use an empty list to disable runtime capabilities.
+`[lc_factory].settled_dispatch` and `.interpreter_subagents` separately control
+structured and JavaScript delegation; both default to `true`.
+`LC_FACTORY_CAPABILITIES` remains a complete override for the runtime list
+(`none` disables background, reload and history).
 See [runtime configuration](../TALON_ADAPTATIONS.md#use-with-lc-code).
 
 Interpreter activation/PTC uses current upstream CLI/profile settings.
-`interpreter_subagents=False`, or the host-only
-`LC_FACTORY_INTERPRETER_SUBAGENTS=0`, withholds built-in JS task and the
-task/task_settled PTC names. Native delegation remains available. Settled dispatch
-is opt-in in OG. Verification uses `[lc_factory].verification_model` or host
+The trusted `[lc_factory].interpreter_subagents = false` preference (Python
+`interpreter_subagents=False`), or the optional host-only
+`LC_FACTORY_INTERPRETER_SUBAGENTS=0` override, withholds built-in JS task and the
+task/task_settled PTC names. Native delegation remains available. Bare Python
+constructors and direct server hosting retain explicit opt-in for settled dispatch.
+Verification uses `[lc_factory].verification_model` or host
 `LC_FACTORY_VERIFICATION_MODEL`; an explicit rubric model wins for grading.
 See root VERIFICATION, SUBAGENTS, DELEGATION and MCP_RESOURCES guides.
 

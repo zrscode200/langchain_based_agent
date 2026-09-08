@@ -5,7 +5,8 @@ background delegation, and searchable conversation history. They run around
 `create_factory_agent`, so the fully wired Deep Agents Code harness and the
 main/subagent/grader middleware seams remain the foundation. Direct factory
 calls keep their default behavior. The bundled `lc-code` and `ddt-agent` clients
-enable explicit background tools by default; reload and history remain opt-in.
+enable background and reload tools by default, along with foreground structured
+delegation (`task_settled`). Searchable history remains opt-in.
 
 The source reference is Deep Agents commit
 `6c89fe2197a2dfe4f3851cda38565bcadba6066b`, `libs/talon` version 0.0.6.
@@ -17,7 +18,8 @@ OAuth server, cron scheduler, or hosted LangChain service is required.
 
 ## Use with lc-code
 
-Start the client normally to use background work:
+Start either client normally; no exports are needed for background work,
+configuration reload or structured delegation:
 
 ```sh
 lc-code
@@ -34,27 +36,53 @@ Save preferences in the trusted user/managed `config.toml` selected by
 
 ```toml
 [lc_factory]
-capabilities = ["background", "reload", "history"]
+# These are the bundled client defaults; saving them is optional.
+capabilities = ["background", "reload"]
+settled_dispatch = true
+interpreter_subagents = true
 ```
 
-The list replaces the client default `["background"]`. Use `capabilities = []`
-to disable all optional capabilities. Only `background`, `reload` and `history`
-are accepted. Missing preferences use the default; malformed or unreadable
-configuration fails startup. Project configuration files cannot select these
-settings.
+| Preference | Effect |
+| --- | --- |
+| `capabilities` | Complete list of runtime features. Add `"history"` to enable the archive; use `[]` to disable background, reload and history tools. |
+| `settled_dispatch` | Enables foreground `task_settled`, including its JavaScript bridge when the interpreter and its subagents are enabled. Set `false` to disable it. |
+| `interpreter_subagents` | Preserves existing JavaScript subagent support. Set `false` to withhold JS `task()` and task/task_settled PTC bindings while keeping native delegation available. |
 
-A nonempty shell override takes precedence over the complete preference list:
+The settings are independent: `capabilities = []` does not disable native
+`task_settled` or JavaScript delegation. To disable all three optional selections,
+also set both booleans to `false`. Only `background`, `reload` and `history` are
+accepted in the list; the two flags must be TOML booleans. Existing saved lists
+are honored as complete selections and do not gain reload automatically.
+Missing settings use defaults; malformed or unreadable configuration fails agent
+startup, while help/version and diagnostic commands remain accessible. Project
+configuration files cannot select these settings.
+
+Reload remains an explicit tool action, applied on the next turn; there is no
+file watcher. MCP generations stay alive until shutdown, with at most eight
+retained generations by default. Restart after reaching that limit. See
+[reload lifecycle](#reload-behavior) for resource ownership details.
+
+JavaScript delegation retains its existing approval behavior: it bypasses the
+parent's per-tool approval wrapper, while child tool approvals remain active.
+Native `task_settled` uses the native `task` approval predicate. See
+[delegation policy](DELEGATION.md#tool-policy-and-approval).
+
+Shell overrides are optional and replace only the corresponding saved setting:
 
 ```sh
 export LC_FACTORY_CAPABILITIES=reload,background,history
+export LC_FACTORY_SETTLED_DISPATCH=1
+export LC_FACTORY_INTERPRETER_SUBAGENTS=0
 lc-code
 ```
 
 Select any comma-separated subset, or `LC_FACTORY_CAPABILITIES=none` to disable
-all optional capabilities. An absent/empty variable uses saved preferences and
-then the client default. The clients resolve once at startup and forward that
-snapshot to the scaffold and server; restart to change the selection. This also
-applies to their headless entry path. Direct server hosts still select capabilities
+the runtime capability list. The two boolean variables accept `1/0`,
+`true/false`, `yes/no`, or `on/off` (case-insensitive). Invalid values fail
+startup. An absent/empty variable uses its saved preference and then its client
+default. The clients resolve once when first starting an agent server and forward
+that snapshot to the scaffold and server; restart to change the selection. This
+also applies to their headless entry path. Direct server hosts still select capabilities
 explicitly through the environment; Python embeddings pass `RuntimeOptions`.
 
 These settings are reserved before project `.env` loading, just like
@@ -151,9 +179,11 @@ MCP reload tool reports that no provider is configured; subagent reload still wo
 loader. Explicit `subagent_definitions` remains the low-level constructor seam
 for hosts providing their own already-validated snapshot.
 
-The runtime validates every `agents/<name>/AGENTS.md` before compiling, rejects
-malformed or duplicate definitions within a directory, and preserves upstream's
-project-over-user precedence. It refreshes task schemas, MCP tool bindings and
+Initial startup retains upstream's tolerant file discovery and warnings for
+skipped definitions. Explicit reloads validate every `agents/<name>/AGENTS.md`
+before compiling, reject malformed or duplicate definitions and unexpected
+Markdown files in the agents directory, and preserve upstream's project-over-user
+precedence. It refreshes task schemas, MCP tool bindings and
 the read-only tools available to goal criteria and rubric grading together.
 All three caller middleware targets survive rebuild. Model/workspace credential
 snapshots, sandbox and extensions are retained. Extension installation, model

@@ -1,9 +1,15 @@
 # Delegation results and background submission
 
-Set `enable_settled_dispatch=True` on `create_factory_agent` to add the native
-`task_settled` tool. For the bundled server, export the host-owned environment
-variable `LC_FACTORY_SETTLED_DISPATCH=1`. Repository dotenv files cannot enable
-it. This option defaults off and does not change native `task` semantics.
+The bundled `lc-code` and `ddt-agent` clients enable the native `task_settled`
+tool by default. Save `[lc_factory].settled_dispatch = false` in the trusted
+profile to disable it, or use the optional host-owned
+`LC_FACTORY_SETTLED_DISPATCH=0` override. See
+[client preferences](TALON_ADAPTATIONS.md#use-with-lc-code).
+
+Direct Python callers opt in with `enable_settled_dispatch=True` on
+`create_factory_agent`; direct server hosts use `LC_FACTORY_SETTLED_DISPATCH=1`.
+Repository dotenv files cannot select it. Native `task` keeps its existing
+foreground semantics.
 
 ```python
 graph, backend = create_factory_agent(
@@ -64,10 +70,13 @@ time, memory, and output budgets also apply.
 The settled helper is registered as a regular tool and selected for PTC by name.
 It therefore passes through the same capability filtering as other tools.
 Direct native calls use the same approval predicate as native `task`. Enabling
-settled dispatch with the interpreter explicitly exposes its JavaScript bridge;
+settled dispatch with interpreter subagents enabled exposes its JavaScript bridge;
 as with upstream JavaScript `task()`, that route bypasses the parent's per-tool
 approval wrapper. Child tool approvals remain active. This is separate from
 the default safe PTC preset and does not add background submission to that preset.
+The bundled clients retain JavaScript subagent support by default; set trusted
+`[lc_factory].interpreter_subagents = false` (or the optional host override
+`LC_FACTORY_INTERPRETER_SUBAGENTS=0`) to withhold JavaScript delegation.
 For settled/background compositions, children treat live Auto mode as Manual:
 they do not have their own Auto classifier, and JavaScript may bypass the
 parent's classifier. The parent's Auto behavior is unchanged. Live YOLO,

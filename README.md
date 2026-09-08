@@ -221,7 +221,8 @@ retained in the license.
 delegation, and searchable checkpoint history around the existing factory.
 `lc-code` and `ddt-agent` provide `start_background_task` by default, so a child
 can keep working while you continue the conversation. Native `task` remains
-foreground. Trusted `[lc_factory].capabilities` preferences and an optional
-environment override control availability; reload/history remain opt-in.
+foreground. Reload tools and structured `task_settled` delegation are also
+available by default. Trusted `[lc_factory]` preferences control these features;
+environment overrides are optional. Searchable history remains opt-in.
 Use explicit `FactoryRuntime` options when embedding; the bare constructor
 remains compatible with the pinned harness.

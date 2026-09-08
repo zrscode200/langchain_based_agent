@@ -258,7 +258,12 @@ class FactoryRuntime:
             candidate = dict(self.kwargs)
             with use_environment(self.environ):
                 if self.options.reload:
-                    candidate["subagent_definitions"] = await asyncio.to_thread(load_subagent_snapshot, candidate)
+                    # Making reload available must not tighten normal startup
+                    # discovery. The constructor retains upstream's tolerant
+                    # file loading initially; explicit reloads validate a full
+                    # candidate before replacing the working generation.
+                    if not initial:
+                        candidate["subagent_definitions"] = await asyncio.to_thread(load_subagent_snapshot, candidate)
                     if self._policy_from_workspace:
                         context = candidate.get("project_context")
                         snapshot = candidate.get("credentials_snapshot")
