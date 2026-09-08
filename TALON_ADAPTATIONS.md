@@ -52,9 +52,11 @@ still returns an actual compiled LangGraph graph to the server.
 
 ## Direct embedding
 
-The asynchronous `FactoryRuntime` owns graph selection and workers. The host
-owns the supplied model, saver, archive, sandbox, and MCP provider. Keep those
-resources open until the runtime exits:
+The asynchronous `FactoryRuntime` owns graph selection, workers, and MCP
+resources transferred through `MCPToolBundle`. The host owns the supplied model,
+saver, archive, sandbox, and any MCP resources returned through ordinary tuple
+loaders. Keep host-owned resources open until the runtime exits. See
+[MCP resources](MCP_RESOURCES.md) for the ownership and shutdown contract.
 
 ```python
 from lc_factory.runtime import FactoryRuntime, RuntimeOptions
@@ -104,10 +106,13 @@ for the next eligible turn; currently they refresh MCP and local/remote agent
 configuration together. The host can also call `runtime.request_reload()`.
 `generation` and `last_reload_error` expose reload outcome to an embedding.
 
-A direct embedding's async `reload_tools()` returns
-`(all_tools, mcp_server_info, mcp_tools)`; it must return a new, internally
-consistent snapshot and raise on failure. Without this callback, the MCP reload
-tool reports that no provider is configured; subagent reload still works.
+A direct embedding's async `reload_tools()` returns an `MCPToolBundle` or an
+ordinary `(all_tools, mcp_server_info, mcp_tools)` tuple. Both support three-value
+unpacking; bundles transfer resource ownership to the runtime, while tuple
+loaders leave resource ownership with the host. Pass an initial bundle through
+`initial_resources` when creating the runtime. Each reload must return a new,
+internally consistent snapshot and raise on failure. Without this callback, the
+MCP reload tool reports that no provider is configured; subagent reload still works.
 `reload_async_subagents` optionally supplies a synchronous remote-definition
 loader. Explicit `subagent_definitions` remains the low-level constructor seam
 for hosts providing their own already-validated snapshot.
@@ -127,12 +132,17 @@ turn completes; another thread can use the newer version meanwhile. These graph
 references live in the current process. After a server restart, the host must
 keep configuration compatible with any checkpoint it intends to resume.
 
-For `lc-code` with reload enabled, MCP tools use fresh sessions per call, with
-connection settings captured in each version. This avoids rebinding an old
-graph to a new endpoint or mutating the upstream global connection cache.
-It trades connection reuse and session-local MCP state for reload isolation.
-A custom embedding provider must preserve the same old-tool isolation and own
-any retained client resources until no old invocation can use them.
+For `lc-code` with reload enabled, each MCP configuration generation owns
+persistent sessions with captured connection settings. Repeated calls reuse
+the connector process and its session state; old graphs keep their original
+bindings. Failed candidates close their resources. Successful MCP bundles stay
+open until runtime shutdown, with a default limit of eight retained MCP
+generations; reaching the limit rejects further reloads before discovery.
+Runtime shutdown stops active work and workers before closing the sessions.
+An intentional reload or reconnection can reset connector-local caches and
+budget counters. See [MCP resources](MCP_RESOURCES.md) for limits and lifecycle
+details. Custom tuple loaders must preserve old-tool isolation and keep their
+host-owned resources open until no old invocation can use them.
 
 ## Background work and history
 
