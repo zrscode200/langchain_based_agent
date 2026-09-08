@@ -15,6 +15,7 @@ the graph factory pluggable would remove the rebind entirely.
 from __future__ import annotations
 
 from lc_factory import launch
+from lc_factory.runtime_config import client_runtime_environment
 from lc_factory.upstream import server_manager_module
 from lc_factory.upstream_cli import cli_main
 
@@ -29,4 +30,5 @@ def main() -> None:
     need upstream's original behavior back must restore it themselves.
     """
     server_manager_module._scaffold_workspace = launch.scaffold_workspace  # noqa: SLF001
-    cli_main()
+    with client_runtime_environment():
+        cli_main()

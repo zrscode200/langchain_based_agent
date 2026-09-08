@@ -36,10 +36,13 @@ class RuntimeOptions:
     history: bool = False
 
     @classmethod
-    def from_environment(cls):
-        values = {v.strip() for v in os.environ.get("LC_FACTORY_CAPABILITIES", "").split(",") if v.strip()}
+    def from_environment(cls, environ=None):
+        environment = os.environ if environ is None else environ
+        values = {v.strip() for v in environment.get("LC_FACTORY_CAPABILITIES", "").split(",") if v.strip()}
+        if values == {"none"}:
+            return cls()
         if values - {"reload", "background", "history"}:
-            raise ValueError("LC_FACTORY_CAPABILITIES accepts reload,background,history")
+            raise ValueError("LC_FACTORY_CAPABILITIES accepts reload,background,history or none alone")
         return cls(**{v: True for v in values})
 
     @property

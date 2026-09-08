@@ -213,7 +213,7 @@ async def test_detached_worker_keeps_old_connector_after_reload(tmp_path):
     ]))
     kwargs = args(tmp_path, old)
     kwargs.update(model=_ToolBindingFakeModel(messages=iter([
-        call("task", {"description": "Read", "subagent_type": "child"}, "delegate"), AIMessage("parent done"),
+        call("start_background_task", {"description": "Read", "subagent_type": "child"}, "delegate"), AIMessage("parent done"),
     ])), checkpointer=InMemorySaver(), subagents=[dict(name="child", description="Child", model=child)])
     async def load():
         return new

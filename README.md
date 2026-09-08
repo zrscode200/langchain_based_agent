@@ -217,7 +217,11 @@ with a real model.
 from LangChain's MIT-licensed `deepagents` project; its copyright notice is
 retained in the license.
 
-Optional [runtime capabilities](TALON_ADAPTATIONS.md) add MCP/subagent reload,
-background delegation, and searchable checkpoint history around the existing
-factory. Enable them explicitly for `lc-code` or use `FactoryRuntime` when
-embedding; the default constructor remains compatible with the pinned harness.
+[Runtime capabilities](TALON_ADAPTATIONS.md) add MCP/subagent reload, background
+delegation, and searchable checkpoint history around the existing factory.
+`lc-code` and `ddt-agent` provide `start_background_task` by default, so a child
+can keep working while you continue the conversation. Native `task` remains
+foreground. Trusted `[lc_factory].capabilities` preferences and an optional
+environment override control availability; reload/history remain opt-in.
+Use explicit `FactoryRuntime` options when embedding; the bare constructor
+remains compatible with the pinned harness.

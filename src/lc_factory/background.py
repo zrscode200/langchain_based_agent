@@ -1,7 +1,7 @@
 """Bounded, in-memory background delegation adapted from Talon's task workers.
 
 Copyright (c) LangChain, Inc. MIT License. See TALON_ADAPTATIONS.md.
-Detachment is installed at the factory's innermost caller middleware seam.
+Only explicit start_background_task calls detach; native task stays foreground.
 """
 from __future__ import annotations
 
@@ -14,8 +14,8 @@ from uuid import uuid4
 from typing import Any
 
 from lc_factory.upstream import (
-    AgentMiddleware, Command, GraphInterrupt, HumanMessage, SystemMessage,
-    ToolMessage, ToolRuntime, tool, Runtime, use_environment,
+    AgentMiddleware, Command, GraphInterrupt, SystemMessage,
+    ToolRuntime, tool, Runtime, use_environment,
 )
 
 _IN_WORKER = contextvars.ContextVar("lc_factory_background_worker", default=False)
@@ -115,22 +115,13 @@ class BackgroundTasks(AgentMiddleware):
         # by the runtime's before-agent middleware using the graph config.
         blocks = request.system_message.content_blocks if request.system_message else []
         system = SystemMessage(content_blocks=[*blocks, {"type": "text", "text":
-            "The task and start_background_task tools start local background work and immediately return an ID. "
-            "task_settled and JavaScript task() wait for foreground completion. "
+            "Use start_background_task to start local background work and immediately receive an ID. "
+            "The task and task_settled tools and JavaScript task() wait for foreground completion. "
             "Continue the conversation while it runs. Use list_background_tasks or "
             "cancel_background_task when needed; do not repeatedly poll. Results are "
             "delivered on the next conversation turn. Remote async tools keep their "
             "ordinary start/check/cancel behavior."}])
         return await handler(request.override(system_message=system))
-
-    async def awrap_tool_call(self, request, handler):
-        if request.tool_call["name"] != "task" or is_child(request.runtime.state):
-            return await handler(request)
-        result = self._submit(getattr(request, "tool", None), request.tool_call, request.runtime)
-        content = (f"Started background task: {result['task_id']}" if result.get("ok")
-                   else result["error"]["message"])
-        return ToolMessage(content, tool_call_id=request.tool_call["id"],
-                           status="success" if result.get("ok") else "error")
 
     def _submit(self, task_tool, call, parent_runtime):
         def failure(message):

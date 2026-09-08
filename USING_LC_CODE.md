@@ -10,6 +10,13 @@ It is the user-facing entry point for:
   original `create_cli_agent`; and
 - optionally exercising the Group 2 middleware-injection seam.
 
+Background tools are available on a normal launch. Ask the agent to use
+`start_background_task` for work that should continue while you keep chatting;
+ordinary `task` delegation still waits for the child. Completed background
+results are delivered on the next conversation turn. No environment export is
+required. For saved preferences, optional reload/history and disabling background
+tools, see [runtime configuration](TALON_ADAPTATIONS.md#use-with-lc-code).
+
 ## First time using Deep Agents? Start here
 
 You do **not** need to install, launch, or learn `dcode` first. `uv sync`

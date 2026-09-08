@@ -435,6 +435,11 @@ def test_no_module_writes_the_reference_into_the_environment():
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Subscript) and _is_environ(target.value):
+                        # The client startup bridge writes only its reviewed
+                        # capability key from trusted user/managed preferences.
+                        if (path.name == "runtime_config.py" and isinstance(target.slice, ast.Name)
+                                and target.slice.id == "CAPABILITIES_ENV"):
+                            continue
                         offenders.append(f"{path.name}:{node.lineno} (assign)")
             # `os.environ.setdefault(...)` / `.update(...)` / ..., and
             # `os.putenv(...)` — every mutating route, not just subscripting.
@@ -442,6 +447,10 @@ def test_no_module_writes_the_reference_into_the_environment():
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if _is_environ(node.func.value) and node.func.attr in _MUTATORS:
                     if _is_the_reservation(node):
+                        continue
+                    if (path.name == "runtime_config.py" and node.func.attr == "pop"
+                            and node.args and isinstance(node.args[0], ast.Name)
+                            and node.args[0].id == "CAPABILITIES_ENV"):
                         continue
                     offenders.append(
                         f"{path.name}:{node.lineno} (environ.{node.func.attr})"

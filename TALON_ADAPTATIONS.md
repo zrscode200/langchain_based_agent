@@ -3,8 +3,9 @@
 The factory adapts three capabilities from Talon: configuration reload,
 background delegation, and searchable conversation history. They run around
 `create_factory_agent`, so the fully wired Deep Agents Code harness and the
-main/subagent/grader middleware seams remain the foundation. Existing factory
-calls and `lc-code` launches keep their default behavior.
+main/subagent/grader middleware seams remain the foundation. Direct factory
+calls keep their default behavior. The bundled `lc-code` and `ddt-agent` clients
+enable explicit background tools by default; reload and history remain opt-in.
 
 The source reference is Deep Agents commit
 `6c89fe2197a2dfe4f3851cda38565bcadba6066b`, `libs/talon` version 0.0.6.
@@ -16,17 +17,50 @@ OAuth server, cron scheduler, or hosted LangChain service is required.
 
 ## Use with lc-code
 
-Set capabilities in the process environment before starting the CLI:
+Start the client normally to use background work:
+
+```sh
+lc-code
+```
+
+Ask the main agent to use `start_background_task` to delegate while continuing
+the conversation. Native `task`, `task_settled` and JavaScript `task()` remain
+foreground operations. Background availability does not make every delegation
+asynchronous. Completed results arrive on the next conversation turn; there is
+no automatic idle wakeup or separate completion notification.
+
+Save preferences in the trusted user/managed `config.toml` selected by
+`DEEPAGENTS_HOME`, alongside any other `[lc_factory]` settings:
+
+```toml
+[lc_factory]
+capabilities = ["background", "reload", "history"]
+```
+
+The list replaces the client default `["background"]`. Use `capabilities = []`
+to disable all optional capabilities. Only `background`, `reload` and `history`
+are accepted. Missing preferences use the default; malformed or unreadable
+configuration fails startup. Project configuration files cannot select these
+settings.
+
+A nonempty shell override takes precedence over the complete preference list:
 
 ```sh
 export LC_FACTORY_CAPABILITIES=reload,background,history
 lc-code
 ```
 
-Select any comma-separated subset. These settings are deliberately reserved
-before project `.env` loading, just like `LC_FACTORY_MIDDLEWARE`; a repository
-cannot enable them through its `.env`. The existing model configuration,
-including your company's model endpoint, remains applicable.
+Select any comma-separated subset, or `LC_FACTORY_CAPABILITIES=none` to disable
+all optional capabilities. An absent/empty variable uses saved preferences and
+then the client default. The clients resolve once at startup and forward that
+snapshot to the scaffold and server; restart to change the selection. This also
+applies to their headless entry path. Direct server hosts still select capabilities
+explicitly through the environment; Python embeddings pass `RuntimeOptions`.
+
+These settings are reserved before project `.env` loading, just like
+`LC_FACTORY_MIDDLEWARE`; a repository cannot enable them through its `.env`.
+The existing model configuration, including your company's endpoint, remains
+applicable. Client exit restores the previous environment override.
 
 History defaults to the current thread within its persisted workspace. For a
 local, single-user server that should search across `/new` conversations, also
@@ -146,7 +180,8 @@ host-owned resources open until no old invocation can use them.
 
 ## Background work and history
 
-With background enabled, local `task` calls return an ID immediately.
+With background enabled, `start_background_task` returns an ID immediately.
+Native `task`, `task_settled` and JavaScript `task()` wait for the child result.
 `list_background_tasks` and `cancel_background_task` only address the current
 conversation's work. Existing remote async tools retain the SDK's behavior.
 Forks cannot recursively detach work or access the main agent's runtime controls.
@@ -157,8 +192,9 @@ Restart that task through an interactive foreground flow when approval is needed
 
 Defaults are four running local jobs, 128 retained jobs, a one-hour job timeout,
 and 64,000 characters per result. Jobs are in memory and are cancelled at runtime
-shutdown. They do not survive a process restart. Hook observers around the main
-`task` see the immediate dispatch result; job status tracks actual completion.
+shutdown. They do not survive a process restart. Hook observers around
+`start_background_task` see the immediate dispatch result; job status tracks
+actual completion. Hooks around native `task` see its foreground result.
 
 Results arrive on the next main-agent turn. A failed/cancelled delivery keeps
 results pending; committed completion acknowledges them. For an embedding:

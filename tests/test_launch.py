@@ -272,7 +272,7 @@ async def test_upstream_launcher_serves_the_factory_graph(monkeypatch, tmp_path)
     assert workspace_fingerprint
 
 
-def test_tui_main_rebinds_scaffold_seam(monkeypatch):
+def test_tui_main_rebinds_scaffold_seam(monkeypatch, tmp_path):
     """The TUI entry rebinds the launch seam before upstream cli_main runs.
 
     This is the port's single point of upstream coupling: `tui.main` must
@@ -290,12 +290,15 @@ def test_tui_main_rebinds_scaffold_seam(monkeypatch):
         server_manager_module._scaffold_workspace,
     )
 
-    seen = {}
-
     def fake_cli_main():
-        seen["scaffold"] = server_manager_module._scaffold_workspace
+        # Runtime preferences wrap this seam; verify its actual output rather
+        # than requiring the installed function to have the original identity.
+        server_manager_module._scaffold_workspace(tmp_path)
 
     monkeypatch.setattr(tui, "cli_main", fake_cli_main)
     tui.main()
 
-    assert seen["scaffold"] is launch.scaffold_workspace
+    config = json.loads((tmp_path / "langgraph.json").read_text())
+    assert config["graphs"] == {"agent": "lc_factory.server_graph:make_graph"}
+    assert "lc_factory.server_checkpointer" in (tmp_path / "checkpointer.py").read_text()
+    assert server_manager_module._scaffold_workspace is launch.scaffold_workspace

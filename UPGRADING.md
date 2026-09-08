@@ -147,8 +147,12 @@ private (underscore) names that carry no semver protection.
    see `test_composition_parity_server_realistic`.
 
    **The parity suite is a documented-divergence suite, not an equality
-   suite.** It asserts that the *default* composition matches v0; deltas are
-   opt-in and must not perturb it. An expectation or normalization exemption
+   suite.** It asserts that the *default constructor* composition matches v0;
+   constructor deltas are opt-in and must not perturb it. The bundled clients
+   separately enable background tools by default through `runtime_config.py`.
+   Native `task` stays foreground; only `start_background_task` detaches. Check
+   trusted preference/env precedence and the shared client/server snapshot when
+   updating startup plumbing. An expectation or normalization exemption
    added for the factory is evidence that a delta stopped being opt-in — fix
    the delta, not the test. Raising `_MAX_DEPTH` only to keep newly nested
    upstream state observable is tripwire maintenance, not an exemption; it

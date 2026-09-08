@@ -36,10 +36,15 @@ Carry the enterprise's settled dispatch setting explicitly in the host shell:
 
 ```sh
 export LC_FACTORY_SETTLED_DISPATCH=1
-# Optional, with the lifecycle limits below:
-export LC_FACTORY_CAPABILITIES=reload,background,history
 ddt-agent --model merck_claude:company-claude
 ```
+
+Background tools are available by default, without a capability export. Native
+`task` waits for its child; `start_background_task` explicitly detaches work so
+the conversation can continue. Save `[lc_factory].capabilities` in the trusted
+profile to add reload/history or use an empty list to disable optional features.
+`LC_FACTORY_CAPABILITIES` remains a complete override (`none` disables all).
+See [runtime configuration](../TALON_ADAPTATIONS.md#use-with-lc-code).
 
 Interpreter activation/PTC uses current upstream CLI/profile settings.
 `interpreter_subagents=False`, or the host-only

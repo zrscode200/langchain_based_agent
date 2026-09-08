@@ -35,5 +35,6 @@ def main():
         print(f"DDT-agent {__version__} (OG enterprise integration)")
         return
     from .upstream_cli import cli_main
-    with client_adaptations():
+    from lc_factory.runtime_config import client_runtime_environment
+    with client_adaptations(), client_runtime_environment():
         cli_main()

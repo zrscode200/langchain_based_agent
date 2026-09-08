@@ -99,7 +99,7 @@ async def test_background_real_fork_result_delivery_and_ownership(tmp_path):
             elif any(isinstance(m, ToolMessage) for m in messages):
                 response = AIMessage("parent free")
             else:
-                response = call("task", {"description": "child request", "subagent_type": "general-purpose"}, "delegate")
+                response = call("start_background_task", {"description": "child request", "subagent_type": "general-purpose"}, "delegate")
             from langchain_core.outputs import ChatResult, ChatGeneration
             return ChatResult(generations=[ChatGeneration(message=response)])
 
@@ -129,7 +129,7 @@ async def test_background_child_approval_blocks_write_and_shutdown_cancels(tmp_p
             elif any(isinstance(m, ToolMessage) for m in messages):
                 response = AIMessage("parent done")
             else:
-                response = call("task", {"description": "Write the file", "subagent_type": "general-purpose"}, "delegate")
+                response = call("start_background_task", {"description": "Write the file", "subagent_type": "general-purpose"}, "delegate")
             return ChatResult(generations=[ChatGeneration(message=response)])
 
     kwargs = args(tmp_path, Model(messages=iter([])))
@@ -289,13 +289,17 @@ async def test_background_capacity_rejects_before_dispatch():
     background = BackgroundTasks(max_running=1)
     worker = asyncio.create_task(asyncio.Event().wait())
     background.jobs["existing"] = Job("owner", "worker", worker=worker)
-    request = SimpleNamespace(tool_call={"name": "task", "id": "new", "args": {}},
-                              runtime=SimpleNamespace(state={}, config={"configurable": {"thread_id": "owner"}}))
-    async def execute(_):
+    async def execute(*args, **kwargs):
         pytest.fail("Capacity must prevent dispatch")
-    result = await background.awrap_tool_call(request, execute)
-    assert "capacity" in result.content
-    await background.close()
+    runtime = SimpleNamespace(state={}, config={"configurable": {"thread_id": "owner"}},
+                              tools=[SimpleNamespace(name="task", ainvoke=execute)], tool_call_id="new")
+    submit = next(t for t in background.tools if t.name == "start_background_task")
+    try:
+        result = await submit.coroutine(description="Work", subagent_type="worker", runtime=runtime)
+        assert not result["ok"] and "capacity" in result["error"]["message"]
+        assert list(background.jobs) == ["existing"]
+    finally:
+        await background.close()
     assert worker.done()
     assert background.jobs["existing"].status == "cancelled"
 

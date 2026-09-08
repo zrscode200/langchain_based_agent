@@ -81,8 +81,13 @@ middleware implementations remain trusted host code.
 
 ## Background work
 
-With `RuntimeOptions(background=True)` (or `LC_FACTORY_CAPABILITIES=background`),
-the runtime exposes `start_background_task(description, subagent_type)`. It
+The bundled `lc-code` and `ddt-agent` clients enable background tools by default.
+Start either client normally and ask for a background task. Save or override
+capability preferences as described in [runtime configuration](TALON_ADAPTATIONS.md#use-with-lc-code).
+Python embeddings enable them with `RuntimeOptions(background=True)`; direct
+server hosts can use `LC_FACTORY_CAPABILITIES=background`.
+
+The runtime exposes `start_background_task(description, subagent_type)`. It
 returns `{ok: true, task_id, status: "running"}` after successful submission, or
 an error envelope if submission is unavailable. Unknown local names fail before
 a worker starts. Parent delegation approval precedes submission, and protected
@@ -90,11 +95,15 @@ child actions still require their own approval.
 
 | Surface | Behavior with background capability enabled |
 | --- | --- |
-| Native `task` | Existing behavior: submit background work, return an ID in text. |
+| Native `task` | Wait for foreground completion and return the child result. |
 | `start_background_task` | Explicit submission with a structured running handle. |
 | Native/JavaScript `task_settled` | Wait for foreground completion, return an outcome. |
 | Bare JavaScript `task()` | Existing foreground behavior. |
 | Remote async tools | Upstream start/check/cancel behavior. |
+
+Migration: earlier background-enabled runtimes intercepted native `task` and
+detached it. Call `start_background_task` explicitly wherever detachment is
+intended; native `task` now always preserves foreground delegation semantics.
 
 All background submission uses one quota, snapshot, scheduling, and shutdown
 path. Jobs retain their original compiled dispatcher across configuration
