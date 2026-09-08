@@ -1,0 +1,44 @@
+{
+	"folders": [
+		{
+			"path": "../../../personal_agent_space/peronsal_assistants/gas_town/piper_station_main"
+		},
+		{
+			"path": "../piper_station_unified_bootstrap"
+		},
+		{
+			"path": "../../../personal_agent_space/peronsal_assistants/study_partner"
+		},
+		{
+			"path": "../raygent"
+		},
+		{
+			"path": "../raygent_TUI"
+		},
+		{
+			"path": "../voice_agent_platform/voice_human_like_agent"
+		},
+		{
+			"path": "../agent_bootstrap_repo/office-work-assistant-agent"
+		},
+		{
+			"path": "../piper_station_raygent"
+		},
+		{
+			"path": "../../../personal_agent_space/peronsal_assistants/gas_town/piper_station_new_main"
+		},
+		{
+			"path": "../../external_repo/deepagents"
+		},
+		{
+			"path": "../project-mason"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../../../personal_agent_space/peronsal_assistants/gas_town/piper_station_studio"
+		}
+	],
+	"settings": {}
+}
