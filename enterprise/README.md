@@ -59,6 +59,37 @@ Verification uses `[lc_factory].verification_model` or host
 `LC_FACTORY_VERIFICATION_MODEL`; an explicit rubric model wins for grading.
 See root VERIFICATION, SUBAGENTS, DELEGATION and MCP_RESOURCES guides.
 
+## Automatic network activity
+
+`ddt-agent` disables these four automatic activities for every enterprise launch:
+
+- LangGraph CLI usage analytics sent to Supabase.
+- TUI and LangGraph API version checks against PyPI.
+- Automatic upstream package upgrades, including cached updates at startup.
+- Background pricing-catalog downloads from GitHub. Cost estimation continues
+  using bundled pricing or locally configured overrides.
+
+No shell exports are needed. The launcher applies `LANGGRAPH_CLI_NO_ANALYTICS=1`,
+`LANGGRAPH_NO_VERSION_CHECK=1`, `DEEPAGENTS_CODE_NO_UPDATE_CHECK=1`,
+`DEEPAGENTS_CODE_AUTO_UPDATE=0` and `DEEPAGENTS_CODE_PRICES_AUTO_UPDATE=0` before
+loading the upstream CLI and pins them in each server startup/restart environment.
+Enterprise also disables the update gates and pricing-refresh starter, so saved
+user/managed settings and runtime environment overrides cannot re-enable these
+automatic paths. Upstream configuration commands may still display saved values;
+the enterprise launch policy takes precedence. No profile files are rewritten.
+Client adaptations restore on exit; `lc-code` keeps its existing behavior.
+
+The enterprise graph/offload entry points also suppress pricing refresh. A
+separately hosted server must set the two `LANGGRAPH_*` flags in its own launch
+environment, since CLI analytics/version checks run before graph import.
+
+This policy does not make the application offline. Model endpoints, MCP, network
+tools, shell commands, hooks and extensions can still send data. LangSmith and
+Datadog retain their own configuration, and explicit update/install commands or
+optional tool provisioning retain their existing behavior. Validation covers
+the installed upstream maintenance paths and child environment; it is not a
+packet-level audit of every dependency or your company deployment.
+
 ## Preserved and changed behavior
 
 - Credentials are captured from the active workspace at construction. Explicit

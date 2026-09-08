@@ -9,6 +9,14 @@ Its gateway/HTTP/SSE, replay panel, nested workspace and wheel launch contracts
 must be checked at this pin too. Keep its exact OG dependency and the two package
 versions in step when publishing a coordinated release; record wheel hashes.
 
+Enterprise's `maintenance.py` also depends on upstream update-check/auto-upgrade
+gates, the cost-tracking refresh starter, and the final server environment builder.
+On every bump, verify all automatic callers still use those gates and each server
+start/restart uses the patched environment builder. Recheck the LangGraph CLI
+analytics and API version-check opt-out flags against the locked versions. Run
+`tests/test_enterprise_maintenance.py`, including managed settings that enable
+updates, and inspect any new automatic network activity before accepting the pin.
+
 The factory also owns declarative subagent policy composition and JSON-schema
 result validation; see [SUBAGENTS.md](SUBAGENTS.md). On a bump, verify SDK fork
 middleware merge ordering, filesystem permission/tool composition, QuickJS PTC
