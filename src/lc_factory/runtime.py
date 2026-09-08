@@ -14,6 +14,7 @@ from lc_factory.assembly import create_factory_agent, _normalize_injected_middle
 from lc_factory.background import BackgroundTasks, is_child, thread_id
 from lc_factory.archive import ArchiveScope, conversation_tools
 from lc_factory.workspace_subagents import load_subagent_policy
+from lc_factory.mcp_resources import MCPToolBundle
 from lc_factory.upstream import (
     AgentMiddleware, AgentState, OmitFromSchema, HumanMessage, RunnableConfig, ToolRuntime, tool,
     Credentials, get_user_agents_dir, get_project_agents_dir, _parse_subagent_file,
@@ -21,6 +22,10 @@ from lc_factory.upstream import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class ResourceCapacityError(RuntimeError):
+    """Retained MCP generations require a host restart before another reload."""
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,8 @@ class RuntimeMiddleware(AgentMiddleware):
                     return "Reload is available to the main agent only."
                 if owner.reload_tools is None:
                     return "This embedding has no MCP reload provider."
+                if owner.resource_limit_reached():
+                    return "MCP generation capacity reached. Restart the runtime before reloading again."
                 owner.request_reload()
                 return "Reload requested for the next turn; current tasks keep their configuration."
 
@@ -72,6 +79,8 @@ class RuntimeMiddleware(AgentMiddleware):
                 """Request agent and MCP configuration reload for the next turn."""
                 if is_child(runtime.state):
                     return "Reload is available to the main agent only."
+                if owner.resource_limit_reached():
+                    return "MCP generation capacity reached. Restart the runtime before reloading again."
                 owner.request_reload()
                 return "Reload requested for the next turn; invalid definitions retain the previous graph."
 
@@ -162,12 +171,18 @@ class FactoryRuntime:
     """Own graph generations and background lifecycle for one trusted workspace.
 
     Use ``await FactoryRuntime.create(...)`` and ``async with`` for embedding.
-    The caller owns supplied stores, models, MCP provider and sandbox. ``close``
-    waits for background workers before those resources may be released.
+    The caller owns supplied stores, models and sandbox. MCPToolBundle resources
+    are owned here; tuple-returning loaders keep external ownership. ``close``
+    waits for background workers before releasing owned MCP generations.
     """
     def __init__(self, *, agent_kwargs, options, workspace_id, owner_id=None,
                  reload_tools=None, reload_async_subagents=None, archive=None, scope_resolver=None,
-                 server_managed_checkpointer=False):
+                 server_managed_checkpointer=False, initial_resources=None, max_retained_generations=8):
+        if not isinstance(max_retained_generations, int) or isinstance(max_retained_generations, bool) or max_retained_generations < 1:
+            raise ValueError("max_retained_generations must be a positive integer")
+        self.max_retained_generations = max_retained_generations
+        self._initial_resources = initial_resources
+        self._resource_bundles = []
         self.kwargs = dict(agent_kwargs)
         self._policy_from_workspace = agent_kwargs.get("subagent_policy") is None
         self.options, self.workspace_id, self.owner_id = options, workspace_id, owner_id
@@ -193,6 +208,7 @@ class FactoryRuntime:
         self.revision = self.applied_revision = 0
         self.generation = 0
         self.last_reload_error = None
+        self.last_reload_message = None
         self.current = None
         self.closed = False
         self._lock = asyncio.Lock()
@@ -202,7 +218,12 @@ class FactoryRuntime:
 
     @classmethod
     async def create(cls, **kwargs):
-        self = cls(**kwargs)
+        try:
+            self = cls(**kwargs)
+        except BaseException:
+            if kwargs.get("initial_resources") is not None:
+                await kwargs["initial_resources"].close()
+            raise
         try:
             await self._build(initial=True)
         except BaseException:
@@ -220,44 +241,68 @@ class FactoryRuntime:
             raise RuntimeError("Configuration reload is not enabled")
         self.revision += 1
 
+    def resource_limit_reached(self):
+        return self.reload_tools is not None and len(self._resource_bundles) >= self.max_retained_generations
+
     async def _build(self, *, initial=False):
-        if initial and self.kwargs.get("credentials_snapshot") is None:
-            cwd = self.kwargs.get("cwd")
-            self.kwargs["credentials_snapshot"] = await asyncio.to_thread(
-                Credentials.snapshot_from_environment, environ=self.environ,
-                start_path=Path(cwd) if cwd is not None else None)
-        candidate = dict(self.kwargs)
-        with use_environment(self.environ):
-            if self.options.reload:
-                candidate["subagent_definitions"] = await asyncio.to_thread(load_subagent_snapshot, candidate)
-                if self._policy_from_workspace:
-                    context = candidate.get("project_context")
-                    snapshot = candidate.get("credentials_snapshot")
-                    root = ((context.project_root or context.user_cwd) if context is not None
-                            else (candidate.get("cwd") or getattr(snapshot, "project_root", None) or Path.cwd()))
-                    candidate["subagent_policy"] = await asyncio.to_thread(load_subagent_policy, root)
-            if not initial and self.reload_tools is not None:
-                tools, info, mcp = await self.reload_tools()
-                if any((x.get("status") if isinstance(x, dict) else getattr(x, "status", None)) in {"error", "unauthenticated"} for x in (info or [])):
-                    raise ValueError("MCP reload reported a configuration or connection error")
-                candidate.update(tools=list(tools), mcp_server_info=info, mcp_tools=list(mcp))
-                read_only = _criteria_context_tools(tools, mcp)
-                if candidate.get("goal_criteria_tools") is not None:
-                    candidate["goal_criteria_tools"] = read_only
-                if candidate.get("rubric_grader_tools") is not None:
-                    candidate["rubric_grader_tools"] = read_only
-            if self.reload_async_subagents is not None:
-                candidate["async_subagents"] = await asyncio.to_thread(self.reload_async_subagents)
-            phases = _normalize_injected_middleware(candidate.get("middleware"))
-            phases = {key: list(value) for key, value in phases.items()}
-            phases["first"].insert(0, RuntimeLifecycleMiddleware(self, self.generation + 1))
-            phases["last"].append(RuntimeMiddleware(self, self.generation + 1))
-            if self.background is not None:
-                phases["last"].append(self.background)
-            build = {**candidate, "middleware": phases}
-            agent, backend = await asyncio.to_thread(create_factory_agent, **build)
-        replacement = ServerRuntime(agent, backend, offload_operation_from(backend))
-        # Commit one complete generation only after every candidate step succeeds.
+        candidate_resources = self._initial_resources if initial else None
+        try:
+            if initial and self.kwargs.get("credentials_snapshot") is None:
+                cwd = self.kwargs.get("cwd")
+                self.kwargs["credentials_snapshot"] = await asyncio.to_thread(
+                    Credentials.snapshot_from_environment, environ=self.environ,
+                    start_path=Path(cwd) if cwd is not None else None)
+            candidate = dict(self.kwargs)
+            with use_environment(self.environ):
+                if self.options.reload:
+                    candidate["subagent_definitions"] = await asyncio.to_thread(load_subagent_snapshot, candidate)
+                    if self._policy_from_workspace:
+                        context = candidate.get("project_context")
+                        snapshot = candidate.get("credentials_snapshot")
+                        root = ((context.project_root or context.user_cwd) if context is not None
+                                else (candidate.get("cwd") or getattr(snapshot, "project_root", None) or Path.cwd()))
+                        candidate["subagent_policy"] = await asyncio.to_thread(load_subagent_policy, root)
+                if not initial and self.reload_tools is not None:
+                    if self.resource_limit_reached():
+                        raise ResourceCapacityError("MCP generation capacity reached; restart the runtime before another reload")
+                    loaded = await self.reload_tools()
+                    if isinstance(loaded, MCPToolBundle):
+                        candidate_resources = loaded
+                    tools, info, mcp = loaded
+                    if any((x.get("status") if isinstance(x, dict) else getattr(x, "status", None)) in {"error", "unauthenticated"} for x in (info or [])):
+                        raise ValueError("MCP reload reported a configuration or connection error")
+                    candidate.update(tools=list(tools), mcp_server_info=info, mcp_tools=list(mcp))
+                    read_only = _criteria_context_tools(tools, mcp)
+                    if candidate.get("goal_criteria_tools") is not None:
+                        candidate["goal_criteria_tools"] = read_only
+                    if candidate.get("rubric_grader_tools") is not None:
+                        candidate["rubric_grader_tools"] = read_only
+                if self.reload_async_subagents is not None:
+                    candidate["async_subagents"] = await asyncio.to_thread(self.reload_async_subagents)
+                phases = _normalize_injected_middleware(candidate.get("middleware"))
+                phases = {key: list(value) for key, value in phases.items()}
+                phases["first"].insert(0, RuntimeLifecycleMiddleware(self, self.generation + 1))
+                phases["last"].append(RuntimeMiddleware(self, self.generation + 1))
+                if self.background is not None:
+                    phases["last"].append(self.background)
+                build = {**candidate, "middleware": phases}
+                agent, backend = await asyncio.to_thread(create_factory_agent, **build)
+            replacement = ServerRuntime(agent, backend, offload_operation_from(backend))
+        except BaseException:
+            if candidate_resources is not None:
+                await candidate_resources.close()
+            if initial:
+                self._initial_resources = None
+            raise
+        # Commit graph and resources together, retaining successful MCP bundles
+        # until shutdown because raw server graph runs have no reliable leases.
+        if candidate_resources is not None:
+            if candidate_resources.manager is not None:
+                self._resource_bundles.append(candidate_resources)
+            else:
+                await candidate_resources.close()
+        if initial:
+            self._initial_resources = None
         self.kwargs, self.current = candidate, replacement
         self.generation += 1
         return replacement
@@ -281,10 +326,12 @@ class FactoryRuntime:
                     await self._build()
                 except Exception as exc:
                     self.last_reload_error = type(exc).__name__
+                    self.last_reload_message = str(exc) if isinstance(exc, ResourceCapacityError) else None
                     logger.warning("Factory configuration reload failed; previous graph retained (%s)", type(exc).__name__)
                 else:
                     self.applied_revision = revision
                     self.last_reload_error = None
+                    self.last_reload_message = None
             if session is not None:
                 self._thread_generations[session] = self.current
             return self.current
@@ -375,6 +422,13 @@ class FactoryRuntime:
         async with self._lock:
             if self.background:
                 await self.background.close()
+            bundles = [*self._resource_bundles]
+            if self._initial_resources is not None:
+                bundles.append(self._initial_resources)
+            for bundle in bundles:
+                await bundle.close()
+            self._resource_bundles.clear()
+            self._initial_resources = None
 
     async def __aenter__(self):
         return self

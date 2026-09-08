@@ -16,6 +16,10 @@ background submission. Verify the private QuickJS dispatch/schema helper tuple,
 ToolRuntime injection, ExecutionInfo replay identity, exception propagation
 through JavaScript, and event completion timing when changing the pins.
 
+[MCP_RESOURCES.md](MCP_RESOURCES.md) describes reload-generation resource
+ownership. Verify the pinned MCPSessionManager initialization/invalidation
+contract, connection signatures, AnyIO task ownership and discovery return shape.
+
 ## The dual pin
 
 `pyproject.toml` pins Code and the SDK as one reviewed unit, plus an explicit

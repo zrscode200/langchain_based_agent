@@ -1,9 +1,11 @@
-"""MCP discovery with immutable, stateless transports for reload generations.
+"""MCP discovery with immutable, owned transports for reload generations.
 
 Adapted from deepagents_code.server_graph at the pinned revision. MIT licensed.
 The regular server's global session cache cannot be reconfigured safely.
 """
 import asyncio
+
+from lc_factory.mcp_resources import MCPToolBundle, OwnedMCPSessionManager
 
 from lc_factory.upstream import (
     create_web_search_tool, fetch_url, get_current_thread_id,
@@ -16,18 +18,24 @@ async def build_reloadable_tools(config, project_context, *, has_tavily=False, t
     if has_tavily:
         tools.append(create_web_search_tool(tavily_api_key or ""))
     if config.no_mcp:
-        return tools, None, []
+        return MCPToolBundle(tools, None, [])
     project_dir = (project_context.project_root or project_context.user_cwd
                    if project_context is not None else None)
     plugins = await asyncio.to_thread(discover_plugin_mcp_configs, project_dir=project_dir)
-    mcp_tools, _, info = await resolve_and_load_mcp_tools(
-        explicit_config_path=config.mcp_config_path, no_mcp=False,
-        trust_project_mcp=config.trust_project_mcp, project_context=project_context,
-        additional_configs=plugins, stateless=True, session_manager=None,
-    )
-    # Each returned tool owns its captured connection config and opens/closes a
-    # fresh session per call. Old graphs never observe a candidate's endpoints.
-    return [*tools, *mcp_tools], info, mcp_tools
+    manager = OwnedMCPSessionManager()
+    try:
+        mcp_tools, _, info = await resolve_and_load_mcp_tools(
+            explicit_config_path=config.mcp_config_path, no_mcp=False,
+            trust_project_mcp=config.trust_project_mcp, project_context=project_context,
+            additional_configs=plugins, stateless=False, session_manager=manager,
+        )
+        if not mcp_tools:
+            await manager.cleanup()
+            return MCPToolBundle(tools, info, [])
+        return MCPToolBundle([*tools, *mcp_tools], info, mcp_tools, manager)
+    except BaseException:
+        await manager.cleanup()
+        raise
 
 
 def load_async_subagent_snapshot():

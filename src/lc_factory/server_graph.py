@@ -351,16 +351,25 @@ async def _make_graphs(
     )
 
     with use_environment(workspace_env):
-        return await _make_graphs_in_environment(
-            config=config,
-            project_context_override=project_context_override,
-            workspace_env=workspace_env,
-            workspace_credentials=workspace_credentials,
-        )
+        resources = []
+        try:
+            return await _make_graphs_in_environment(
+                config=config,
+                project_context_override=project_context_override,
+                workspace_env=workspace_env,
+                workspace_credentials=workspace_credentials,
+                resources=resources,
+            )
+        finally:
+            # Covers sandbox/extension/config failures as well as compilation.
+            # Successful FactoryRuntime creation removes its claimed bundle.
+            for bundle in resources:
+                await bundle.close()
 
 
 async def _make_graphs_in_environment(
     *,
+    resources,
     config: ServerConfig,
     project_context_override: ProjectContext | None,
     workspace_env: Mapping[str, str],
@@ -407,12 +416,17 @@ async def _make_graphs_in_environment(
     from lc_factory.runtime import RuntimeOptions
     from lc_factory.mcp_reload import build_reloadable_tools, load_async_subagent_snapshot
     build_tools = build_reloadable_tools if RuntimeOptions.from_environment().reload else _build_tools
-    tools, mcp_server_info, mcp_tools = await build_tools(
+    loaded_tools = await build_tools(
         config,
         project_context,
         has_tavily=workspace_credentials.has_tavily,
         tavily_api_key=workspace_credentials.tavily_api_key,
     )
+    from lc_factory.mcp_resources import MCPToolBundle
+    initial_resources = loaded_tools if isinstance(loaded_tools, MCPToolBundle) else None
+    if initial_resources is not None:
+        resources.append(initial_resources)
+    tools, mcp_server_info, mcp_tools = loaded_tools
     read_only_context_tools = _criteria_context_tools(tools, mcp_tools)
 
     global _sandbox_cm, _sandbox_backend  # noqa: PLW0603
@@ -574,7 +588,9 @@ async def _make_graphs_in_environment(
                 archive=get_archive() if options.history else None,
                 scope_resolver=server_scope if options.history else None,
                 server_managed_checkpointer=True,
+                initial_resources=initial_resources,
             )
+            resources.clear()
             _factory_runtime_owners[id(owner.current.agent)] = owner
             return owner.current
         agent, composite_backend = await asyncio.to_thread(create_factory_agent, **kwargs)

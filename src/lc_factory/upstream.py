@@ -49,7 +49,7 @@ from deepagents_code.subagents import _parse_subagent_file
 
 from deepagents_code.tools import create_web_search_tool, fetch_url, get_current_thread_id
 from deepagents_code.plugins.adapters.mcp import discover_plugin_mcp_configs
-from deepagents_code.mcp_tools import resolve_and_load_mcp_tools
+from deepagents_code.mcp_tools import resolve_and_load_mcp_tools, MCPSessionManager, _connections_signature
 from deepagents_code.configuration.service import get_config_sources
 
 # NOTE: `cli_main` deliberately lives in `lc_factory.upstream_cli`, not here.
@@ -347,6 +347,8 @@ __all__ = [
     "SUBAGENT_RESPONSE_FORMAT_CONFIG_KEY",
     "StructuredTool",
     "import_subagent_dispatch",
+    "MCPSessionManager",
+    "_connections_signature",
     "GENERAL_PURPOSE_SUBAGENT",
     "GoalCriteriaMiddleware",
     "GoalToolsMiddleware",
