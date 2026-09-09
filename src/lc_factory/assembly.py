@@ -1731,7 +1731,7 @@ def create_factory_agent(
         environ=environment,
     )
     if auto_mode_config is not None and resolved_interrupt_on is not None:
-        from lc_factory.upstream import AutoModeHITLMiddleware
+        from lc_factory.auto_classifier import AutoModeHITLMiddleware
         from lc_factory.upstream import resolve_auto_classifier_model
         from lc_factory.upstream import resolve_auto_classifier_timeout
 

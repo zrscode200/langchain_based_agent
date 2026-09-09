@@ -60,6 +60,7 @@ tags before touching anything:
 | Upstream file | Ported into |
 |---|---|
 | `deepagents_code/agent.py` (`create_cli_agent` body) | `src/lc_factory/assembly.py` |
+| `deepagents_code/auto_mode.py` (`_classifier_model`, `_review_batch`), `model_retry.py`, optional `langchain_deepseek/chat_models.py` | `src/lc_factory/auto_classifier.py` — classifier-only invocation view for native DeepSeek (`_llm_type == "chat-deepseek"`). Recheck schema/parser validation, configured/inherited model resolution, retry metadata and SDK `extra_body` precedence. Run `tests/test_auto_classifier.py` with the optional DeepSeek adapter installed; skipped provider cases are not compatibility evidence. |
 | `deepagents_code/server_graph.py` (`_make_graphs`, `ServerRuntime`, workspace binding and runtime caches) | `src/lc_factory/server_graph.py` — thread/workspace validation, resource-policy cache keys, and the graph/backend/offload runtime must remain one contract. |
 | `deepagents_code/offload_api.py` (HTTP app and workspace-aware runtime lookup) | `src/lc_factory/offload_api.py`, plus the generated `http` block in `src/lc_factory/launch.py` — the adapter must resolve the same workspace runtime as graph execution. |
 | `deepagents_code/client/launch/server_manager.py` (`_scaffold_workspace`, `_write_pyproject`) | `src/lc_factory/launch.py` — **the live surface; re-apply changes here** |

@@ -51,6 +51,12 @@ discovery, and shell execution use the supported upstream snapshot paths.
 For direct embedding, supply an immutable environment and matching credential
 snapshot; run model/tool setup inside upstream's `use_environment` scope.
 
+Auto approval supports native DeepSeek models with thinking enabled. The
+classifier uses automatic tool selection with the existing validated decision
+schema; missing or invalid verdicts still block execution. This applies whether
+the classifier inherits the main model or is configured separately, without
+changing the main model's settings.
+
 The launch workspace and request paths share one runtime cache. With a configured
 process-wide sandbox, a second workspace is refused with HTTP 409, including
 after a failed first build. Without that sandbox, distinct workspaces can have
