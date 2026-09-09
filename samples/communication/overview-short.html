@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ICS Product Companion — short overview</title>
+<style>
+  :root {
+    /* Merck brand palette — templates.pptx, theme "Custom 34".
+       This is the template's BLUE layout family: tx1 navy ground, accent2 mint as the
+       accent (accent1 teal is too dark on navy for text), accent1 teal as a solid fill. */
+    --bg:      #0C2340;   /* tx1 / dk1 — brand navy */
+    --slide:   #0C2340;
+    --panel:   #12304F;   /* navy, lifted — code and box fills */
+    --panel2:  #17395C;   /* navy, lifted further */
+    --ink:     #FFFFFF;   /* bg1 */
+    --dim:     #AFC3D6;
+    --faint:   #7590AC;
+    --line:    #1F4570;
+    --key:     #6ECEB2;   /* accent2 mint — the accent on a dark ground */
+    --key-dk:  #00857C;   /* accent1 teal — solid fills with white text on them */
+    --warn:    #69B8F7;   /* accent4 — asides and constraints */
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: Invention, "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font: 18px/1.55 var(--sans);
+         -webkit-font-smoothing: antialiased; }
+
+  .deck { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center;
+          padding: 10vh 4vw 9vh; }
+  .slide { display: none; width: 100%; max-width: 1160px; }
+  .deck .slide.on { display: block; animation: in .18s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  body.page .deck { height: auto; display: block; padding: 0; }
+  body.page .slide { display: block; max-width: 1160px; margin: 0 auto; padding: 6vh 4vw;
+                     border-bottom: 1px solid var(--line); }
+
+  h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1.12; margin: 0 0 .5em;
+       letter-spacing: -.02em; font-weight: 650; }
+  h2 { font-size: clamp(22px, 3vw, 34px); line-height: 1.2; margin: 0 0 .9em;
+       letter-spacing: -.01em; font-weight: 620; }
+  h2 .n { color: var(--key); font: 500 .58em/1 var(--mono); margin-right: .8em;
+          vertical-align: .2em; }
+  p { margin: 0 0 .85em; max-width: 80ch; }
+  p.lead { font-size: clamp(19px, 2.1vw, 24px); color: var(--dim); max-width: 68ch; }
+  strong { color: #FFFFFF; font-weight: 640; }
+  em { color: var(--key); font-style: normal; }
+  code { font: .9em var(--mono); color: var(--key); }
+  td code, li code, .chips code { background: var(--panel); padding: .12em .34em; border-radius: 3px; }
+
+  pre { font: 14px/1.6 var(--mono); color: var(--dim); background: var(--panel);
+        border: 1px solid var(--line); border-left: 2px solid var(--key);
+        border-radius: 4px; padding: 16px 20px; overflow-x: auto; margin: 0 0 1.1em; }
+  pre b { color: var(--key); font-weight: 500; }
+  pre i { color: var(--warn); font-style: normal; }
+
+  table { border-collapse: collapse; width: 100%; margin: 0 0 1.1em; font-size: 16px; }
+  th, td { text-align: left; padding: 9px 16px 9px 0; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--faint); font-weight: 600; font-size: 12px; letter-spacing: .07em;
+       text-transform: uppercase; }
+  td:last-child { color: var(--dim); }
+  ul { margin: 0 0 1em; padding-left: 1.15em; max-width: 80ch; }
+  li { margin-bottom: .42em; }
+  li::marker { color: var(--key); }
+
+  .part { font: 600 11.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+          color: var(--key-dk); margin: 0 0 1.4em; }
+  .kicker { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+            color: var(--key); margin: 0 0 1.6em; padding-bottom: 12px;
+            border-bottom: 3px solid var(--key-dk); display: inline-block; }
+  .note { border-left: 2px solid var(--warn); padding: 3px 0 3px 16px; color: var(--dim);
+          margin: 0 0 1em; max-width: 78ch; font-size: 16px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 42px; }
+  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+
+  .mm { margin: 0 0 1.1em; }
+  .mm svg { width: 100%; height: auto; display: block; }
+  .dgm { margin: 0 0 1.1em; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+         padding: 12px 15px; }
+  .box .t { font: 600 14.5px/1.35 var(--mono); color: var(--key); margin: 0 0 5px;
+            word-break: break-word; }
+  .box .d { font-size: 14px; line-height: 1.45; color: var(--dim); }
+  .four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 820px) { .four, .three, .two { grid-template-columns: 1fr 1fr; } }
+  .brace { text-align: center; font: 600 11px/1 var(--mono); letter-spacing: .12em;
+           text-transform: uppercase; color: var(--key); padding-bottom: 11px; }
+  .join { display: grid; justify-items: center; gap: 8px; padding: 16px 0 14px; }
+  .join .v { width: 1px; height: 32px; background: var(--key); position: relative; }
+  .join .v::after { content: ""; position: absolute; bottom: -1px; left: -3.5px;
+                    border: 4px solid transparent; border-top-color: var(--key);
+                    border-bottom: 0; }
+  .join .lbl { font-size: 13.5px; color: var(--faint); text-align: center; max-width: 48ch; }
+  .wide { border-color: var(--key); border-left-width: 2px; }
+  .tag { display: inline-block; font: 600 10px/1 var(--mono); letter-spacing: .1em;
+         text-transform: uppercase; color: #FFFFFF; background: var(--key-dk);
+         padding: 4px 7px; border-radius: 3px; vertical-align: 2px; }
+  .tag.warn { background: var(--warn); color: #FFFFFF; }
+
+  .layers { display: grid; gap: 8px; }
+  .layer { display: grid; grid-template-columns: 200px 122px 1fr; gap: 14px; align-items: start;
+           background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+           padding: 11px 15px; }
+  .layer.detached { border-style: dashed; border-color: var(--warn); margin-top: 14px; }
+  .layer .nm { font: 600 14.5px/1.4 var(--mono); color: var(--key); }
+  .layer.detached .nm { color: var(--warn); }
+  .layer .dc { font-size: 14px; line-height: 1.45; color: var(--dim); }
+  .down { display: flex; align-items: center; gap: 9px; padding-left: 62px;
+          font-size: 12px; color: var(--faint); font-family: var(--mono); }
+  .down::before { content: ""; width: 1px; height: 15px; background: var(--line); }
+  @media (max-width: 820px) { .layer { grid-template-columns: 1fr; gap: 5px; } }
+
+  .fork { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px 16px; align-items: center; }
+  .fork .cond { background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+                padding: 12px 15px; font-size: 14.5px; color: var(--dim); }
+  .fork .cond b { color: var(--ink); }
+  .fork .to { color: var(--faint); font-family: var(--mono); font-size: 15px; }
+  .fork .out { border-left: 2px solid var(--key); padding: 4px 0 4px 13px; }
+  .fork .out .t { font: 600 15px/1.3 var(--mono); color: var(--key); }
+  .fork .out .d { font-size: 14px; color: var(--dim); margin-top: 3px; }
+  @media (max-width: 820px) { .fork { grid-template-columns: 1fr; } .fork .to { display: none; } }
+
+  .stack { display: grid; gap: 7px; justify-items: center; }
+  .stack .s { background: var(--panel); border: 1px solid var(--line); border-radius: 5px;
+              padding: 11px 20px; text-align: center; min-width: 340px; }
+  .stack .s.core { border-color: var(--key); border-left-width: 2px; }
+  .stack .s .t { font: 600 15px/1.3 var(--mono); color: var(--key); }
+  .stack .s .d { font-size: 13.5px; color: var(--dim); margin-top: 3px; }
+  .stack .bi { color: var(--faint); font-size: 15px; line-height: 1; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 1em; }
+  .chips span { font: 13px/1 var(--mono); color: var(--dim); background: var(--panel);
+                border: 1px solid var(--line); border-radius: 3px; padding: 7px 10px; }
+  .guard { border: 1px solid var(--warn); border-left-width: 2px; border-radius: 5px;
+           padding: 13px 16px; font-size: 15px; color: var(--dim); background: var(--panel); }
+  .guard b { color: var(--warn); }
+
+  .anat { display: grid; margin: 0 0 1.1em; }
+  .anat div { display: grid; grid-template-columns: 215px 1fr; gap: 20px;
+              padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .anat .k { font: 600 14px/1.5 var(--mono); color: var(--key); }
+  .anat .v { font-size: 15px; color: var(--dim); line-height: 1.5; }
+  @media (max-width: 800px) { .anat div { grid-template-columns: 1fr; gap: 3px; } }
+
+
+
+  .nav { position: fixed; bottom: 0; left: 0; right: 0; height: 46px; display: flex;
+         align-items: center; gap: 16px; padding: 0 4vw; font: 12px/1 var(--mono);
+         color: var(--faint); background: linear-gradient(to top, var(--bg) 55%, transparent); }
+  .nav .sp { flex: 1; }
+  .nav b { color: var(--dim); font-weight: 500; }
+  .nav kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px;
+             padding: 2px 5px; color: var(--dim); }
+  .bar { position: fixed; bottom: 0; left: 0; height: 3px; background: var(--key-dk);
+         transition: width .18s ease; z-index: 2; }
+  @media print {
+    body { background: #FFFFFF; color: #0C2340; }
+    body .deck { height: auto; display: block; padding: 0; }
+    body .slide { display: block !important; page-break-after: always; padding: 0 0 34px; }
+    .nav, .bar { display: none; }
+    strong, h1, h2 { color: #0C2340; }
+    code, em, h2 .n, .kicker, .part { color: #00857C; }
+    pre, .box, .layer, .fork .cond, .stack .s, .chips span, .guard, .sk
+      { background: #F7F7F7; border-color: #CAC9C8; color: #0C2340; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" id="bar"></div>
+<div class="deck" id="deck">
+
+<section class="slide">
+  <p class="kicker">ICS · Integrated Control Strategy</p>
+  <h1>The ICS Product Companion</h1>
+  <p class="lead">A scientific colleague for one pharmaceutical programme — not a document
+  generator, a search front-end, or a workflow engine.</p>
+  <p class="note">A short tour — twelve slides. The full version, with the skills, the contributors and the tools broken out in detail, is <code>overview.html</code> in this folder.</p>
+</section>
+
+<section class="slide">
+  <h2><span class="n">01</span>One composed system</h2>
+  <p>The ICS Product Companion is a single composed system: <code>ddt-agent</code>'s agent
+  runtime together with a scientific operating contract held in every session, five complete
+  outcome definitions, seven epistemic contracts, four bounded contributor roles, and two
+  connectors built against measured API behaviour.</p>
+  <p>Composition is assembled at load time today, through discovery. A constructor purpose-built
+  for this system is the direction of travel — which <strong>tightens</strong> that composition
+  rather than loosening it.</p>
+  <div class="dgm stack">
+    <div class="s"><div class="t">Scientist</div></div>
+    <div class="bi">⇅</div>
+    <div class="s core"><div class="t">ddt-agent</div>
+      <div class="d"><code>lc_factory.create_factory_agent</code> — the host runtime</div></div>
+    <div class="bi">+</div>
+    <div class="s core"><div class="t">this prepared workspace</div>
+      <div class="d">AGENTS.md · skills · subagents · references · connectors</div></div>
+    <div class="bi">⇅</div>
+    <div class="s"><div class="t">Programme sources, external science, specialists, people</div></div>
+  </div>
+  <p>One consequence worth knowing before you go further: <strong>every part of the companion is
+  a file you can open and read</strong> — the operating contract, each scientific outcome, each
+  contributor's entire instructions, and the guardrails on every connector.</p>
+</section>
+
+<section class="slide">
+  <h2><span class="n">02</span>What you can ask it</h2>
+  <table>
+    <tr><th>If you ask</th><th>This skill owns the outcome</th></tr>
+    <tr><td>How is this controlled? How does the control strategy work? Why does this control
+      exist?</td><td><code>establish-control-strategy-understanding</code></td></tr>
+    <tr><td>Are the controls sufficient? Where are the gaps? What could go wrong that isn't
+      covered?</td><td><code>assess-control-strategy-assurance</code></td></tr>
+    <tr><td>This result is out of trend. What could explain it? How do I tell two explanations
+      apart?</td><td><code>investigate-quality-concern</code></td></tr>
+    <tr><td>We're changing site, scale, process, material, supplier, method or specification —
+      what does it affect? Does prior validation still apply?</td>
+      <td><code>assess-change-impact</code></td></tr>
+    <tr><td>What evidence would distinguish these? Can existing data already answer it?</td>
+      <td><code>design-decision-changing-evidence</code></td></tr>
+  </table>
+  <p>Each owns a <strong>complete scientific outcome</strong>, not a step in a pipeline. The
+  companion may also reason directly without invoking any of them.</p>
+</section>
+
+<!-- ================= THE SKILLS ================= -->
+
+<section class="slide">
+  <h2><span class="n">03</span>Four outcomes, and one that runs across them</h2>
+  <div class="dgm">
+    <div class="brace">four complete scientist-facing outcomes</div>
+    <div class="four">
+      <div class="box"><div class="t">establish-<br>control-strategy-<br>understanding</div>
+        <div class="d">how it works</div></div>
+      <div class="box"><div class="t">assess-<br>control-strategy-<br>assurance</div>
+        <div class="d">is it sufficient, where are the gaps</div></div>
+      <div class="box"><div class="t">investigate-<br>quality-<br>concern</div>
+        <div class="d">what explains this observation</div></div>
+      <div class="box"><div class="t">assess-<br>change-<br>impact</div>
+        <div class="d">what a state difference means</div></div>
+    </div>
+    <div class="join"><span class="v"></span>
+      <span class="lbl">invoked when an empirical uncertainty limits the answer</span></div>
+    <div class="box wide">
+      <div class="t">design-decision-changing-evidence <span class="tag">horizontal</span></div>
+      <div class="d">Bounded either way — invoked by an outcome, or asked directly. Never becomes
+        a programme conclusion on its own.</div>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2><span class="n">04</span>Inside the five skills</h2>
+  <p>Each owns a complete outcome. What makes it a skill rather than a router is the reasoning at
+  its core — which it may never hand off.</p>
+  <table>
+    <tr><th>Skill</th><th>Its native kernel — never delegated</th><th>What it reaches for</th></tr>
+    <tr><td><code>establish-<br>control-strategy-<br>understanding</code></td>
+        <td>builds the assurance relationship end to end — quality intent through to collective
+            dependency</td>
+        <td>the recovery index, then a controlling document's own words</td></tr>
+    <tr><td><code>assess-<br>control-strategy-<br>assurance</code></td>
+        <td>the two-sided reconstruction: what must be assured, against what is supplied</td>
+        <td>both literature indexes, searched independently; the challenger</td></tr>
+    <tr><td><code>investigate-<br>quality-concern</code></td>
+        <td>the observation before any explanation — and explanations held un-flattened</td>
+        <td>the observation record's own account of conditions and method</td></tr>
+    <tr><td><code>assess-<br>change-impact</code></td>
+        <td>comparison across more than two states, co-changes included</td>
+        <td>one population per state, never merged</td></tr>
+    <tr><td><code>design-decision-<br>changing-evidence</code></td>
+        <td>the bottleneck named before any work is proposed</td>
+        <td>existing data first — finding none is needed is a result</td></tr>
+  </table>
+  <p class="note">Shared by all five, so it is stated once: the seven contracts in
+  <code>references/</code> apply <strong>continuously</strong> rather than being invoked, all four
+  contributor roles are available to each, and "conversation only" is a legitimate result for any
+  of them.</p>
+  </section>
+
+<section class="slide">
+  <h2><span class="n">05</span>Four layers, loaded four ways</h2>
+  <div class="dgm layers">
+    <div class="layer"><span class="nm">AGENTS.md</span><span><span class="tag">always on</span></span>
+      <span class="dc">In the system prompt every session — the contract that must never need
+        looking up. Identity, responsibilities, evidence discipline, tool discipline, correction,
+        authority boundary.</span></div>
+    <div class="down">points to</div>
+    <div class="layer"><span class="nm">references/</span><span><span class="tag">on demand</span></span>
+      <span class="dc">Opened by what you are holding, not preemptively. Seven contracts: evidence,
+        programme state, materialization, correction, assurance, and the two search guides.</span></div>
+    <div class="down">cite the same references, never restate them</div>
+    <div class="layer"><span class="nm">.deepagents/skills/</span><span><span class="tag">progressive</span></span>
+      <span class="dc">One skill per scientific outcome, read when invoked.</span></div>
+    <div class="layer detached"><span class="nm">.deepagents/agents/</span>
+      <span><span class="tag warn">standalone</span></span>
+      <span class="dc">No AGENTS.md, nothing inherited — next slide.</span></div>
+  </div>
+  <p>The split exists so the five skills do not each re-specify evidence, state, correction,
+  assurance and authority discipline.</p>
+</section>
+
+<section class="slide">
+  <h2><span class="n">06</span>The programme workspace</h2>
+  <p>Not an archive written to at the end. It is the state the companion reasons <em>from</em>, and
+  only the recovery index is always available — everything else is opened by choice.</p>
+  <div class="dgm">
+    <div class="box wide" style="margin-bottom:10px">
+      <div class="t">PROGRAM.md <span class="tag">always available</span></div>
+      <div class="d">The recovery index — one line per durable entry: what it is, its scope, and
+        what should reopen it. Enough to decide what to open <em>without opening anything</em>.</div>
+    </div>
+    <div class="three">
+      <div class="box"><div class="t">ground/</div>
+        <div class="d">continuity of scientific understanding</div></div>
+      <div class="box"><div class="t">work/</div>
+        <div class="d">continuity of activity</div></div>
+      <div class="box"><div class="t">artifacts/</div>
+        <div class="d">identity of a work product</div></div>
+    </div>
+  </div>
+  <p>Three purposes, <strong>not maturity levels</strong>. There is no
+  <code>conversation → work → artifact → ground</code> pipeline, and substantial reasoning may stay
+  entirely conversational — that is a success, not an omission.</p>
+  <p class="note">Only the companion writes here. A contributor's return is a proposal;
+  materializing any part of it is the companion's own act, and a hook enforces that rather than
+  asking for it.</p>
+</section>
+
+<!-- ================= THE CONTRIBUTORS ================= -->
+
+<section class="slide">
+  <h2><span class="n">07</span>Four bounded roles</h2>
+  <div class="anat">
+    <div><span class="k">scientific-<br>contributor</span>
+      <span class="v">Owns one defined contribution to a larger outcome — a substantial evidence
+        lane, one portion of control logic, one materially distinct explanation, one programme-state
+        difference, or a defined analysis. Returns a qualified bounded contribution, never an
+        integrated conclusion.</span></div>
+    <div><span class="k">independent-<br>challenger</span>
+      <span class="v">Supplies cognitive independence against an interpretation — testing anchoring,
+        omitted alternatives, unsupported evidence transfer, causal gaps, shared dependencies, false
+        reassurance, premature closure. Supplies independence, never new empirical evidence or
+        qualified human review.</span></div>
+    <div><span class="k">specialist-<br>contributor</span>
+      <span class="v">Parameterized by its brief, not by its file — quantitative, analytical method,
+        process, formulation, material, device, manufacturing, regulatory. One role instantiated
+        many ways, never a permanent department.</span></div>
+    <div><span class="k">retrieval-<br>contributor</span>
+      <span class="v">Bounded evidence retrieval with <strong>context isolation</strong>. Runs the
+        search traffic, judges from each record's extent which few are worth reading, and returns
+        what the documents establish — not their text. A population it never reads is a legitimate
+        return.</span></div>
+  </div>
+</section>
+
+<section class="slide">
+  <h2><span class="n">08</span>When to delegate — and when not to</h2>
+  <!-- diagram: diagrams/delegation-navy.mmd — edit there, or paste it into
+       https://mermaid.live. Regenerated with mermaid-cli; nothing depends on it. -->
+  <div class="mm"><svg id="my-svg" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" viewBox="0.5 0 1593.6875 307.3359375" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#my-svg{font-family:Invention,Segoe UI,system-ui,sans-serif;font-size:13px;fill:#FFFFFF;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#my-svg .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#my-svg .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#my-svg .error-icon{fill:#0C2340;}#my-svg .error-text{fill:#f3dcbf;stroke:#f3dcbf;}#my-svg .edge-thickness-normal{stroke-width:1px;}#my-svg .edge-thickness-thick{stroke-width:3.5px;}#my-svg .edge-pattern-solid{stroke-dasharray:0;}#my-svg .edge-thickness-invisible{stroke-width:0;fill:none;}#my-svg .edge-pattern-dashed{stroke-dasharray:3;}#my-svg .edge-pattern-dotted{stroke-dasharray:2;}#my-svg .marker{fill:#7590AC;stroke:#7590AC;}#my-svg .marker.cross{stroke:#7590AC;}#my-svg svg{font-family:Invention,Segoe UI,system-ui,sans-serif;font-size:13px;}#my-svg p{margin:0;}#my-svg .label{font-family:Invention,Segoe UI,system-ui,sans-serif;color:#FFFFFF;}#my-svg .cluster-label text{fill:#6ECEB2;}#my-svg .cluster-label span{color:#6ECEB2;}#my-svg .cluster-label span p{background-color:transparent;}#my-svg .label text,#my-svg span{fill:#FFFFFF;color:#FFFFFF;}#my-svg .node rect,#my-svg .node circle,#my-svg .node ellipse,#my-svg .node polygon,#my-svg .node path{fill:#12304F;stroke:#1F4570;stroke-width:1px;}#my-svg .rough-node .label text,#my-svg .node .label text,#my-svg .image-shape .label,#my-svg .icon-shape .label{text-anchor:middle;}#my-svg .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#my-svg .rough-node .label,#my-svg .node .label,#my-svg .image-shape .label,#my-svg .icon-shape .label{text-align:center;}#my-svg .node.clickable{cursor:pointer;}#my-svg .root .anchor path{fill:#7590AC!important;stroke-width:0;stroke:#7590AC;}#my-svg .arrowheadPath{fill:#f3dcbf;}#my-svg .edgePaths .path{stroke:#7590AC;stroke-width:1px;}#my-svg .flowchart-link{stroke:#7590AC;fill:none;}#my-svg .edgeLabel{background-color:#0C2340;text-align:center;}#my-svg .edgeLabel p{background-color:#0C2340;}#my-svg .edgeLabel rect{opacity:0.5;background-color:#0C2340;fill:#0C2340;}#my-svg .labelBkg{background-color:rgba(12, 35, 64, 0.5);}#my-svg .cluster rect{fill:#12304F;stroke:#1F4570;stroke-width:1px;}#my-svg .cluster text{fill:#6ECEB2;}#my-svg .cluster span{color:#6ECEB2;}#my-svg .node .collapsed-indicator{fill:#1F4570;stroke:none;opacity:0.6;}#my-svg .node .collapsed-separator{stroke:#1F4570;stroke-width:0.75px;}#my-svg div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:Invention,Segoe UI,system-ui,sans-serif;font-size:12px;background:#0C2340;border:1px solid hsl(213.4615384615, 28.4210526316%, 4.9019607843%);border-radius:2px;pointer-events:none;z-index:100;}#my-svg .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#FFFFFF;}#my-svg rect.text{fill:none;stroke-width:0;}#my-svg .icon-shape,#my-svg .image-shape{background-color:#0C2340;text-align:center;}#my-svg .icon-shape p,#my-svg .image-shape p{background-color:#0C2340;padding:2px;}#my-svg .icon-shape .label rect,#my-svg .image-shape .label rect{opacity:0.5;background-color:#0C2340;fill:#0C2340;}#my-svg .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#my-svg .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#my-svg .node .neo-node{stroke:#1F4570;}#my-svg [data-look="neo"].node rect,#my-svg [data-look="neo"].cluster rect,#my-svg [data-look="neo"].node polygon{stroke:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].swimlane.cluster rect{filter:none;}#my-svg [data-look="neo"].node path{stroke:url(#my-svg-gradient);stroke-width:1px;}#my-svg [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].node .neo-line path{stroke:#1F4570;filter:none;}#my-svg [data-look="neo"].node circle{stroke:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].node circle .state-start{fill:#000000;}#my-svg [data-look="neo"].icon-shape .icon{fill:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].icon-shape .icon-neo path{stroke:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}#my-svg .gate&gt;*{fill:rgb(18, 48, 79)!important;stroke:rgb(110, 206, 178)!important;color:rgb(255, 255, 255)!important;}#my-svg .gate span{fill:rgb(18, 48, 79)!important;stroke:rgb(110, 206, 178)!important;color:rgb(255, 255, 255)!important;}#my-svg .gate tspan{fill:rgb(255, 255, 255)!important;}#my-svg .node&gt;*{fill:rgb(18, 48, 79)!important;stroke:rgb(31, 69, 112)!important;color:rgb(175, 195, 214)!important;}#my-svg .node span{fill:rgb(18, 48, 79)!important;stroke:rgb(31, 69, 112)!important;color:rgb(175, 195, 214)!important;}#my-svg .node tspan{fill:rgb(175, 195, 214)!important;}#my-svg .acc&gt;*{fill:rgb(18, 48, 79)!important;stroke:rgb(110, 206, 178)!important;color:rgb(110, 206, 178)!important;}#my-svg .acc span{fill:rgb(18, 48, 79)!important;stroke:rgb(110, 206, 178)!important;color:rgb(110, 206, 178)!important;}#my-svg .acc tspan{fill:rgb(110, 206, 178)!important;}#my-svg .warn&gt;*{fill:rgb(18, 48, 79)!important;stroke:rgb(105, 184, 247)!important;color:rgb(105, 184, 247)!important;}#my-svg .warn span{fill:rgb(18, 48, 79)!important;stroke:rgb(105, 184, 247)!important;color:rgb(105, 184, 247)!important;}#my-svg .warn tspan{fill:rgb(105, 184, 247)!important;}</style><g><marker id="my-svg_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"/></marker><marker id="my-svg_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"/></marker><g class="root"><g class="clusters"/><g class="edgePaths"><path d="M224.684,103.098L249.599,96.159C274.513,89.219,324.343,75.34,371.26,68.4C418.177,61.461,462.182,61.461,484.185,61.461L506.188,61.461" id="my-svg-L_Q_INLINE_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_Q_INLINE_0" data-points="W3sieCI6MjI0LjY4NDAxOTkyNzE3NDE1LCJ5IjoxMDMuMDk4MDgyNDI3MTc0MTZ9LHsieCI6Mzc0LjE3MTg3NSwieSI6NjEuNDYwOTM3NX0seyJ4Ijo1MTAuMTg3NSwieSI6NjEuNDYwOTM3NX1d" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M224.684,156.074L249.599,163.013C274.513,169.953,324.343,183.832,369.091,190.771C413.839,197.711,453.505,197.711,473.339,197.711L493.172,197.711" id="my-svg-L_Q_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_Q_C_0" data-points="W3sieCI6MjI0LjY4NDAxOTkyNzE3NDE1LCJ5IjoxNTYuMDczNzkyNTcyODI1ODV9LHsieCI6Mzc0LjE3MTg3NSwieSI6MTk3LjcxMDkzNzV9LHsieCI6NDk3LjE3MTg3NSwieSI6MTk3LjcxMDkzNzV9XQ==" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M737.007,154.461L743.527,151.94C750.046,149.419,763.086,144.378,776.31,141.857C789.534,139.336,802.943,139.336,809.647,139.336L816.352,139.336" id="my-svg-L_C_R_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_R_0" data-points="W3sieCI6NzM3LjAwNjg3NTY2OTE2NDksInkiOjE1NC40NjA5Mzc1fSx7IngiOjc3Ni4xMjUsInkiOjEzOS4zMzU5Mzc1fSx7IngiOjgyMC4zNTE1NjI1LCJ5IjoxMzkuMzM1OTM3NX1d" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M1033.898,139.336L1041.27,139.336C1048.641,139.336,1063.383,139.336,1073.921,139.336C1084.458,139.336,1090.792,139.336,1093.958,139.336L1097.125,139.336" id="my-svg-L_R_J_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_R_J_0" data-points="W3sieCI6MTAzMy44OTg0Mzc1LCJ5IjoxMzkuMzM1OTM3NX0seyJ4IjoxMDc4LjEyNSwieSI6MTM5LjMzNTkzNzV9LHsieCI6MTEwMS4xMjUsInkiOjEzOS4zMzU5Mzc1fV0=" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M1357.125,139.336L1360.958,139.336C1364.792,139.336,1372.458,139.336,1379.458,139.336C1386.458,139.336,1392.792,139.336,1395.958,139.336L1399.125,139.336" id="my-svg-L_J_X_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_J_X_0" data-points="W3sieCI6MTM1Ny4xMjUsInkiOjEzOS4zMzU5Mzc1fSx7IngiOjEzODAuMTI1LCJ5IjoxMzkuMzM1OTM3NX0seyJ4IjoxNDAzLjEyNSwieSI6MTM5LjMzNTkzNzV9XQ==" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M737.007,240.961L743.527,243.482C750.046,246.003,763.086,251.044,772.772,253.565C782.458,256.086,788.792,256.086,791.958,256.086L795.125,256.086" id="my-svg-L_C_G_0" class="edge-thickness-normal edge-pattern-dotted edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_G_0" data-points="W3sieCI6NzM3LjAwNjg3NTY2OTE2NDksInkiOjI0MC45NjA5Mzc1fSx7IngiOjc3Ni4xMjUsInkiOjI1Ni4wODU5Mzc1fSx7IngiOjc5OS4xMjUsInkiOjI1Ni4wODU5Mzc1fV0=" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/></g><g class="edgeLabels"><g class="edgeLabel" transform="translate(374.171875, 61.4609375)"><g class="label" data-id="L_Q_INLINE_0" transform="translate(-7.5625, -9.75)"><foreignObject width="15.125" height="19.5"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>no</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(374.171875, 197.7109375)"><g class="label" data-id="L_Q_C_0" transform="translate(-100, -48.75)"><foreignObject width="200" height="97.5"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="edgeLabel"><p>yes<br /><small>bounded ownership · separate context ·<br />parallelism · specialist depth · independence</small></p></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_R_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_R_J_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_J_X_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default gate" id="my-svg-flowchart-Q-0" data-look="classic" transform="translate(129.5859375, 129.5859375)"><polygon points="121.5859375,0 243.171875,-121.5859375 121.5859375,-243.171875 0,-121.5859375" class="label-container" transform="translate(-121.0859375, 121.5859375)" style="fill:#12304F !important;stroke:#6ECEB2 !important"/><g class="label" style="color:#FFFFFF !important" transform="translate(-78.3359375, -29.25)"><rect/><foreignObject width="156.671875" height="58.5"><div style="color: rgb(255, 255, 255) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#FFFFFF !important" class="nodeLabel"><p>Does this need a property<br />only separate execution<br />can give?</p></span></div></foreignObject></g></g><g class="node default node" id="my-svg-flowchart-INLINE-2" data-look="classic" transform="translate(625.1484375, 61.4609375)"><rect class="basic label-container" style="fill:#12304F !important;stroke:#1F4570 !important" x="-114.9609375" y="-53" width="229.921875" height="106"/><g class="label" style="color:#AFC3D6 !important" transform="translate(-86.9609375, -39)"><rect/><foreignObject width="173.921875" height="78"><div style="color: rgb(175, 195, 214) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#AFC3D6 !important" class="nodeLabel"><p>Reason directly<br /><small>a method existing is not a reason.<br />nor a department, a source,<br />a report section, or a tool call</small></p></span></div></foreignObject></g></g><g class="node default node" id="my-svg-flowchart-C-4" data-look="classic" transform="translate(625.1484375, 197.7109375)"><rect class="basic label-container" style="fill:#12304F !important;stroke:#1F4570 !important" x="-127.9765625" y="-43.25" width="255.953125" height="86.5"/><g class="label" style="color:#AFC3D6 !important" transform="translate(-99.9765625, -29.25)"><rect/><foreignObject width="199.953125" height="58.5"><div style="color: rgb(175, 195, 214) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#AFC3D6 !important" class="nodeLabel"><p>Contributor<br /><small>bounded brief in · separate context ·<br />its own file as its whole system prompt</small></p></span></div></foreignObject></g></g><g class="node default acc" id="my-svg-flowchart-R-7" data-look="classic" transform="translate(927.125, 139.3359375)"><rect class="basic label-container" style="fill:#12304F !important;stroke:#6ECEB2 !important" x="-106.7734375" y="-33.5" width="213.546875" height="67"/><g class="label" style="color:#6ECEB2 !important" transform="translate(-78.7734375, -19.5)"><rect/><foreignObject width="157.546875" height="39"><div style="color: rgb(110, 206, 178) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#6ECEB2 !important" class="nodeLabel"><p>Return<br /><small>a PROPOSAL, never an update</small></p></span></div></foreignObject></g></g><g class="node default node" id="my-svg-flowchart-J-9" data-look="classic" transform="translate(1229.125, 139.3359375)"><rect class="basic label-container" style="fill:#12304F !important;stroke:#1F4570 !important" x="-128" y="-82.25" width="256" height="164.5"/><g class="label" style="color:#AFC3D6 !important" transform="translate(-100, -68.25)"><rect/><foreignObject width="200" height="136.5"><div style="color: rgb(175, 195, 214) !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#AFC3D6 !important" class="nodeLabel"><p>Companion reintegrates<br /><small>adopt · adopt narrower · use as correction ·<br />revise dependents · retain as alternative ·<br />preserve as dissent · hold · decline · out of scope</small></p></span></div></foreignObject></g></g><g class="node default warn" id="my-svg-flowchart-X-11" data-look="classic" transform="translate(1494.65625, 139.3359375)"><rect class="basic label-container" style="fill:#12304F !important;stroke:#69B8F7 !important" x="-91.53125" y="-43.25" width="183.0625" height="86.5"/><g class="label" style="color:#69B8F7 !important" transform="translate(-63.53125, -29.25)"><rect/><foreignObject width="127.0625" height="58.5"><div style="color: rgb(105, 184, 247) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#69B8F7 !important" class="nodeLabel"><p>never concatenation,<br />voting, averaging,<br />or a completion flag</p></span></div></foreignObject></g></g><g class="node default warn" id="my-svg-flowchart-G-12" data-look="classic" transform="translate(927.125, 256.0859375)"><rect class="basic label-container" style="fill:#12304F !important;stroke:#69B8F7 !important" x="-128" y="-43.25" width="256" height="86.5"/><g class="label" style="color:#69B8F7 !important" transform="translate(-100, -29.25)"><rect/><foreignObject width="200" height="58.5"><div style="color: rgb(105, 184, 247) !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#69B8F7 !important" class="nodeLabel"><p>cannot write ground, work or artifacts<br /><small>hooks/durable_content_guard.py</small></p></span></div></foreignObject></g></g></g></g></g><defs><filter id="my-svg-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><defs><filter id="my-svg-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#000000"/></filter></defs><linearGradient id="my-svg-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#1F4570" stop-opacity="1"/><stop offset="100%" stop-color="hsl(210.4918032787, 22.8865979381%, 9.0196078431%)" stop-opacity="1"/></linearGradient></svg></div>
+</section>
+
+<section class="slide">
+  <h2><span class="n">09</span>Two connectors</h2>
+  <p>Both are self-contained PEP 723 scripts run through <code>uv run --script</code>. No install
+  step. Each surfaces exactly <strong>two</strong> tools — the surface is deliberately small.</p>
+  <div class="dgm two">
+    <div class="box wide"><div class="t">ics-muse</div>
+      <div class="d">Programme-scoped internal retrieval over eight sources.
+      <code>muse_population</code> and <code>muse_read</code>. Four MUSE endpoints sit behind them
+      — basic query, conditional query, facets, full-document retrieval — and which one runs is the
+      connector's decision, not the model's.</div></div>
+    <div class="box"><div class="t">ics-public-science</div>
+      <div class="d">PubMed and Europe PMC. <code>literature_search</code> against one explicitly
+      chosen index; <code>literature_get</code> for one exact record and its represented abstract.
+      No full text, no trials, no preprints, no DOI resolution, no relationship crawling.</div></div>
+  </div>
+  <p class="note"><strong>Every external call is a disclosure.</strong> Each query and identifier
+  passes a preflight before the first request, and a blocked call is never silently reformulated —
+  it reports which safe categories were hit, and reformulation must be in public scientific
+  concepts only. Never by obfuscating, encoding, or incrementally mutating the same terms.</p>
+</section>
+
+<section class="slide">
+  <h2><span class="n">10</span>Field roles, not field names</h2>
+  <p>The model constrains on stable <em>roles</em>. Which field each source uses for a concept is
+  the connector's business, not the model's.</p>
+  <div class="chips">
+    <span>anywhere</span><span>title</span><span>body</span><span>status</span>
+    <span>+ ten taxonomy roles</span>
+  </div>
+  <p>A role a source cannot fill is <strong>reported as unfillable, never substituted</strong> —
+  substituting the nearest-looking field would confer a state the source does not represent. And
+  the same role can mean different things: <code>status</code> on the notebook source resolves to
+  an <em>experiment's</em> lifecycle, not a document's. The role resolves; the meaning does not
+  carry across.</p>
+  <p class="note">Why this matters, measured: <strong>19 of the 27 field names our own scope
+  configuration once advertised did not exist</strong> in the real index mappings — and a condition
+  on a nonexistent field returns 0 records at HTTP 200, indistinguishable from absence. Twenty wire
+  parameters also stay internal, because a wrong value in any of them produces a silently wrong
+  answer rather than an error.</p>
+</section>
+
+<section class="slide">
+  <h2><span class="n">11</span>Finding your way around</h2>
+  <table>
+    <tr><th>To understand</th><th>Read</th></tr>
+    <tr><td>what must always be active — the operating contract itself</td><td><code>AGENTS.md</code></td></tr>
+    <tr><td>the seven contracts the skills and contributors cite</td><td><code>references/</code></td></tr>
+    <tr><td>how one scientific outcome reasons</td><td><code>.deepagents/skills/&lt;name&gt;/SKILL.md</code></td></tr>
+    <tr><td>what a contributor is told, in full</td><td><code>.deepagents/agents/&lt;role&gt;/AGENTS.md</code></td></tr>
+    <tr><td>how a source is programme-scoped</td><td><code>config/program-scope/MK-6070.yaml</code></td></tr>
+    <tr><td>what a result may and may not claim</td><td><code>tools/ics_muse/server.py</code></td></tr>
+    <tr><td>what the programme workspace currently holds</td><td><code>workspace/programs/MK-6070/PROGRAM.md</code></td></tr>
+  </table>
+  <p>Verification is one command and needs no network: <code>./tools/contract_map_check.py</code>.
+  It runs eight offline harnesses and asserts each reported <strong>exactly</strong> its pinned
+  assertion total, so a harness that stops running fails the suite rather than shrinking it
+  quietly.</p>
+  <p class="lead">Setup, launch and troubleshooting: <code>RUNNING.md</code>.</p>
+</section>
+
+</div>
+
+<div class="nav">
+  <span id="pos">1 / 12</span>
+  <span class="sp"></span>
+  <span><kbd>←</kbd> <kbd>→</kbd> <b>move</b></span>
+  <span><kbd>a</kbd> <b>all on one page</b></span>
+  <span><kbd>p</kbd> <b>print</b></span>
+</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var pos = document.getElementById('pos');
+  var bar = document.getElementById('bar');
+  var i = 0;
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    pos.textContent = (i + 1) + ' / ' + slides.length;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    if (location.hash !== '#' + (i + 1)) history.replaceState(null, '', '#' + (i + 1));
+    window.scrollTo(0, 0);
+  }
+  function paged() { return document.body.classList.contains('page'); }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'a' || k === 'A') {
+      document.body.classList.toggle('page');
+      if (!paged()) show(i); else bar.style.width = '100%';
+      return;
+    }
+    if (k === 'p' || k === 'P') { window.print(); return; }
+    if (paged()) return;
+    if (k === 'ArrowRight' || k === ' ' || k === 'PageDown' || k === 'j') { e.preventDefault(); show(i + 1); }
+    else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'k') { e.preventDefault(); show(i - 1); }
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+  });
+
+  document.addEventListener('click', function (e) {
+    if (paged() || e.target.closest('a, pre, table, svg')) return;
+    show(i + (e.clientX > window.innerWidth / 2 ? 1 : -1));
+  });
+
+  var start = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(start) ? 0 : start - 1);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,96 @@
+{
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      },
+      {
+        "matcher": "delete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      },
+      {
+        "matcher": "delete",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 hooks/durable_content_guard.py",
+            "timeout": 10,
+            "statusMessage": "Checking frozen-boundary policy"
+          }
+        ]
+      }
+    ]
+  }
+}

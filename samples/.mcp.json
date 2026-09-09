@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "Every path here is absolute, and the working directory is set with an",
+    "explicit `cd` inside the command. Do not use a top-level \"cwd\" key: this",
+    "host silently ignores it (deepagents_code/mcp_tools.py validates only",
+    "command/args/env for stdio), so the server subprocess inherits the cwd of",
+    "whichever process launches it. The TUI client's cwd is the workspace, but",
+    "the langgraph server that actually builds the agent graph runs in a",
+    "throwaway scaffold directory. Relative paths therefore work during the",
+    "client's discovery pass -- which is what /tools and the approval prompt",
+    "report -- and fail in the server, leaving the tools visible but not",
+    "callable."
+  ],
+  "mcpServers": {
+    "ics-public-science": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "cd '/Users/suray2/Ray_workspace/repos/MRL_DSCS/DDT/agents/provision/product-companion' && exec /opt/homebrew/bin/uv run --script tools/ics_public_science/server.py 2>>logs/ics-public-science.stderr.log"
+      ]
+    },
+    "ics-muse": {
+      "command": "/bin/sh",
+      "args": [
+        "-c",
+        "cd '/Users/suray2/Ray_workspace/repos/MRL_DSCS/DDT/agents/provision/product-companion' && exec /opt/homebrew/bin/uv run --script tools/ics_muse/server.py 2>>logs/ics-muse.stderr.log"
+      ],
+      "env": {
+        "ICS_MUSE_BASE_URL": "https://qa.muse.merck.com",
+        "ICS_PROGRAM": "MK-6070",
+        "ICS_MUSE_CALL_BUDGET": "500",
+        "ICS_MUSE_DEADLINE_S": "900"
+      }
+    }
+  }
+}

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE eLinkResult PUBLIC "-//NLM//DTD elink 20101123//EN" "https://eutils.ncbi.nlm.nih.gov/eutils/dtd/20101123/elink.dtd">
+<eLinkResult>
+
+  <LinkSet>
+    <DbFrom>pubmed</DbFrom>
+    <IdList>
+      <Id>23193287</Id>
+    </IdList>
+    <LinkSetDb>
+      <DbTo>pubmed</DbTo>
+      <LinkName>pubmed_pubmed_refs</LinkName>
+      
+        <Link>
+				<Id>23193264</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>22144687</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>22139929</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>22139910</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>22009675</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>21062814</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>20972220</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>18440982</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>11217851</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>9705509</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>9254694</Id>
+				<Score>0</Score>
+			</Link>
+        <Link>
+				<Id>8401577</Id>
+				<Score>0</Score>
+			</Link>
+      
+    </LinkSetDb>
+  </LinkSet>
+</eLinkResult>

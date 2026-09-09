@@ -1,0 +1,21 @@
+flowchart LR
+  Q{"Does this need a property<br/>only separate execution<br/>can give?"}
+  Q -- "no" --> INLINE["Reason directly<br/><small>a method existing is not a reason.<br/>nor a department, a source,<br/>a report section, or a tool call</small>"]
+  Q -- "yes<br/><small>bounded ownership · separate context ·<br/>parallelism · specialist depth · independence</small>" --> C
+
+  C["Contributor<br/><small>bounded brief in · separate context ·<br/>its own file as its whole system prompt</small>"]
+  C --> R["Return<br/><small>a PROPOSAL, never an update</small>"]
+  R --> J["Companion reintegrates<br/><small>adopt · adopt narrower · use as correction ·<br/>revise dependents · retain as alternative ·<br/>preserve as dissent · hold · decline · out of scope</small>"]
+  J --> X["never concatenation,<br/>voting, averaging,<br/>or a completion flag"]
+
+  G["cannot write ground, work or artifacts<br/><small>hooks/durable_content_guard.py</small>"]
+  C -.-> G
+
+  classDef gate fill:#12304F,stroke:#6ECEB2,color:#FFFFFF
+  classDef node fill:#12304F,stroke:#1F4570,color:#AFC3D6
+  classDef acc  fill:#12304F,stroke:#6ECEB2,color:#6ECEB2
+  classDef warn fill:#12304F,stroke:#69B8F7,color:#69B8F7
+  class Q gate
+  class C,INLINE,J node
+  class R acc
+  class G,X warn

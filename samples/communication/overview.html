@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ICS Product Companion — overview</title>
+<style>
+  :root {
+    --bg:      #10161d;
+    --slide:   #161e27;
+    --ink:     #e6ecf2;
+    --dim:     #8fa3b5;
+    --faint:   #4a5c6e;
+    --line:    #26323f;
+    --key:     #6fd3c7;
+    --key-dk:  #2b7a72;
+    --warn:    #e0a458;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font: 18px/1.55 var(--sans);
+         -webkit-font-smoothing: antialiased; }
+
+  .deck { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center;
+          padding: 10vh 4vw 9vh; }
+  .slide { display: none; width: 100%; max-width: 1160px; }
+  .deck .slide.on { display: block; animation: in .18s ease-out; }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  body.page .deck { height: auto; display: block; padding: 0; }
+  body.page .slide { display: block; max-width: 1160px; margin: 0 auto; padding: 6vh 4vw;
+                     border-bottom: 1px solid var(--line); }
+
+  h1 { font-size: clamp(32px, 5vw, 54px); line-height: 1.12; margin: 0 0 .5em;
+       letter-spacing: -.02em; font-weight: 650; }
+  h2 { font-size: clamp(22px, 3vw, 34px); line-height: 1.2; margin: 0 0 .9em;
+       letter-spacing: -.01em; font-weight: 620; }
+  h2 .n { color: var(--key-dk); font: 500 .58em/1 var(--mono); margin-right: .8em;
+          vertical-align: .2em; }
+  p { margin: 0 0 .85em; max-width: 80ch; }
+  p.lead { font-size: clamp(19px, 2.1vw, 24px); color: var(--dim); max-width: 68ch; }
+  strong { color: #fff; font-weight: 640; }
+  em { color: var(--key); font-style: normal; }
+  code { font: .9em var(--mono); color: var(--key); }
+  td code, li code, .chips code { background: #0d1319; padding: .12em .34em; border-radius: 3px; }
+
+  pre { font: 14px/1.6 var(--mono); color: var(--dim); background: #0d1319;
+        border: 1px solid var(--line); border-left: 2px solid var(--key-dk);
+        border-radius: 4px; padding: 16px 20px; overflow-x: auto; margin: 0 0 1.1em; }
+  pre b { color: var(--key); font-weight: 500; }
+  pre i { color: var(--warn); font-style: normal; }
+
+  table { border-collapse: collapse; width: 100%; margin: 0 0 1.1em; font-size: 16px; }
+  th, td { text-align: left; padding: 9px 16px 9px 0; border-bottom: 1px solid var(--line);
+           vertical-align: top; }
+  th { color: var(--faint); font-weight: 600; font-size: 12px; letter-spacing: .07em;
+       text-transform: uppercase; }
+  td:last-child { color: var(--dim); }
+  ul { margin: 0 0 1em; padding-left: 1.15em; max-width: 80ch; }
+  li { margin-bottom: .42em; }
+  li::marker { color: var(--key-dk); }
+
+  .part { font: 600 11.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase;
+          color: var(--key-dk); margin: 0 0 1.4em; }
+  .kicker { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase;
+            color: var(--key-dk); margin: 0 0 1.6em; }
+  .note { border-left: 2px solid var(--warn); padding: 3px 0 3px 16px; color: var(--dim);
+          margin: 0 0 1em; max-width: 78ch; font-size: 16px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 0 42px; }
+  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+
+  .mm { margin: 0 0 1.1em; }
+  .mm svg { width: 100%; height: auto; display: block; }
+  .dgm { margin: 0 0 1.1em; }
+  .box { background: #0d1319; border: 1px solid var(--line); border-radius: 5px;
+         padding: 12px 15px; }
+  .box .t { font: 600 14.5px/1.35 var(--mono); color: var(--key); margin: 0 0 5px;
+            word-break: break-word; }
+  .box .d { font-size: 14px; line-height: 1.45; color: var(--dim); }
+  .four { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 820px) { .four, .three, .two { grid-template-columns: 1fr 1fr; } }
+  .brace { text-align: center; font: 600 11px/1 var(--mono); letter-spacing: .12em;
+           text-transform: uppercase; color: var(--key-dk); padding-bottom: 11px; }
+  .join { display: grid; justify-items: center; gap: 8px; padding: 16px 0 14px; }
+  .join .v { width: 1px; height: 32px; background: var(--key-dk); position: relative; }
+  .join .v::after { content: ""; position: absolute; bottom: -1px; left: -3.5px;
+                    border: 4px solid transparent; border-top-color: var(--key-dk);
+                    border-bottom: 0; }
+  .join .lbl { font-size: 13.5px; color: var(--faint); text-align: center; max-width: 48ch; }
+  .wide { border-color: var(--key-dk); border-left-width: 2px; }
+  .tag { display: inline-block; font: 600 10px/1 var(--mono); letter-spacing: .1em;
+         text-transform: uppercase; color: var(--bg); background: var(--key-dk);
+         padding: 4px 7px; border-radius: 3px; vertical-align: 2px; }
+  .tag.warn { background: var(--warn); }
+
+  .layers { display: grid; gap: 8px; }
+  .layer { display: grid; grid-template-columns: 200px 122px 1fr; gap: 14px; align-items: start;
+           background: #0d1319; border: 1px solid var(--line); border-radius: 5px;
+           padding: 11px 15px; }
+  .layer.detached { border-style: dashed; border-color: var(--warn); margin-top: 14px; }
+  .layer .nm { font: 600 14.5px/1.4 var(--mono); color: var(--key); }
+  .layer.detached .nm { color: var(--warn); }
+  .layer .dc { font-size: 14px; line-height: 1.45; color: var(--dim); }
+  .down { display: flex; align-items: center; gap: 9px; padding-left: 62px;
+          font-size: 12px; color: var(--faint); font-family: var(--mono); }
+  .down::before { content: ""; width: 1px; height: 15px; background: var(--line); }
+  @media (max-width: 820px) { .layer { grid-template-columns: 1fr; gap: 5px; } }
+
+  .fork { display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px 16px; align-items: center; }
+  .fork .cond { background: #0d1319; border: 1px solid var(--line); border-radius: 5px;
+                padding: 12px 15px; font-size: 14.5px; color: var(--dim); }
+  .fork .cond b { color: var(--ink); }
+  .fork .to { color: var(--faint); font-family: var(--mono); font-size: 15px; }
+  .fork .out { border-left: 2px solid var(--key-dk); padding: 4px 0 4px 13px; }
+  .fork .out .t { font: 600 15px/1.3 var(--mono); color: var(--key); }
+  .fork .out .d { font-size: 14px; color: var(--dim); margin-top: 3px; }
+  @media (max-width: 820px) { .fork { grid-template-columns: 1fr; } .fork .to { display: none; } }
+
+  .stack { display: grid; gap: 7px; justify-items: center; }
+  .stack .s { background: #0d1319; border: 1px solid var(--line); border-radius: 5px;
+              padding: 11px 20px; text-align: center; min-width: 340px; }
+  .stack .s.core { border-color: var(--key-dk); border-left-width: 2px; }
+  .stack .s .t { font: 600 15px/1.3 var(--mono); color: var(--key); }
+  .stack .s .d { font-size: 13.5px; color: var(--dim); margin-top: 3px; }
+  .stack .bi { color: var(--faint); font-size: 15px; line-height: 1; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 1em; }
+  .chips span { font: 13px/1 var(--mono); color: var(--dim); background: #0d1319;
+                border: 1px solid var(--line); border-radius: 3px; padding: 7px 10px; }
+  .guard { border: 1px solid var(--warn); border-left-width: 2px; border-radius: 5px;
+           padding: 13px 16px; font-size: 15px; color: var(--dim); background: #0d1319; }
+  .guard b { color: var(--warn); }
+
+  .anat { display: grid; margin: 0 0 1.1em; }
+  .anat div { display: grid; grid-template-columns: 215px 1fr; gap: 20px;
+              padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .anat .k { font: 600 14px/1.5 var(--mono); color: var(--key); }
+  .anat .v { font-size: 15px; color: var(--dim); line-height: 1.5; }
+  @media (max-width: 800px) { .anat div { grid-template-columns: 1fr; gap: 3px; } }
+
+  .nav { position: fixed; bottom: 0; left: 0; right: 0; height: 46px; display: flex;
+         align-items: center; gap: 16px; padding: 0 4vw; font: 12px/1 var(--mono);
+         color: var(--faint); background: linear-gradient(to top, var(--bg), transparent); }
+  .nav .sp { flex: 1; }
+  .nav b { color: var(--dim); font-weight: 500; }
+  .nav kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px;
+             padding: 2px 5px; color: var(--dim); }
+  .bar { position: fixed; bottom: 0; left: 0; height: 2px; background: var(--key-dk);
+         transition: width .18s ease; z-index: 2; }
+  @media print {
+    body { background: #fff; color: #000; }
+    body .deck { height: auto; display: block; }
+    body .slide { display: block !important; page-break-after: always; padding: 0 0 40px; }
+    .nav, .bar { display: none; }
+    pre, code, .box, .layer, .fork .cond, .stack .s, .chips span, .guard
+      { background: #fff; border-color: #999; color: #000; }
+    .box .t, .layer .nm, .fork .out .t, .stack .s .t { color: #000; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" id="bar"></div>
+<div class="deck" id="deck">
+
+<!-- ================= ORIENTATION ================= -->
+
+<section class="slide">
+  <p class="kicker">ICS · Integrated Control Strategy</p>
+  <h1>The ICS Product Companion</h1>
+  <p class="lead">A scientific colleague for one pharmaceutical programme — not a document
+  generator, a search front-end, or a workflow engine.</p>
+  <p class="note">Written to be read at your own pace rather than presented. Twenty-five slides in
+  five parts: orientation, the skills, the instruction architecture, the contributors, and the
+  tools. Project vocabulary is introduced as it comes up, and nothing is used before it is
+  explained.</p>
+</section>
+
+<section class="slide">
+  <p class="part">Orientation · 1 of 4</p>
+  <h2><span class="n">01</span>What an integrated control strategy is</h2>
+  <p class="lead">A living, scoped scientific assurance argument for why a defined product and
+  process configuration, under stated conditions and uncertainty, should achieve and maintain its
+  intended quality through a justified collection of controls.</p>
+  <p>Reconstructing one is expensive because the evidence is scattered across controlled document
+  systems, laboratory notebooks, method repositories, slide decks, regulatory records and qualified
+  human judgment — and those records routinely disagree with each other.</p>
+  <p>And because six things that sound alike are not:</p>
+  <div class="dgm three">
+    <div class="box"><div class="t">documented intent</div>
+      <div class="d">what is represented and intended</div></div>
+    <div class="box"><div class="t">applicability</div>
+      <div class="d">does it apply to <em>this</em> configuration and time</div></div>
+    <div class="box"><div class="t">implementation</div>
+      <div class="d">is it actually configured and performed</div></div>
+    <div class="box"><div class="t">operational performance</div>
+      <div class="d">does it perform its operational function</div></div>
+    <div class="box"><div class="t">scientific contribution</div>
+      <div class="d">does that performance address the relevant pathway</div></div>
+    <div class="box"><div class="t">collective relationship</div>
+      <div class="d">what the controls support <em>together</em></div></div>
+  </div>
+  <p class="note">Silently promoting a documented control to a demonstrated contribution is the
+  characteristic failure of this domain — and the thing the companion is built to refuse.</p>
+</section>
+
+<section class="slide">
+  <p class="part">Orientation · 2 of 4</p>
+  <h2><span class="n">02</span>One composed system</h2>
+  <p>The ICS Product Companion is a single composed system: <code>ddt-agent</code>'s agent
+  runtime together with a scientific operating contract held in every session, five complete
+  outcome definitions, seven epistemic contracts, four bounded contributor roles, and two
+  connectors built against measured API behaviour.</p>
+  <p>Composition is assembled at load time today, through discovery. A constructor purpose-built
+  for this system is the direction of travel — which <strong>tightens</strong> that composition
+  rather than loosening it.</p>
+  <div class="dgm stack">
+    <div class="s"><div class="t">Scientist</div></div>
+    <div class="bi">⇅</div>
+    <div class="s core"><div class="t">ddt-agent</div>
+      <div class="d"><code>lc_factory.create_factory_agent</code> — the host runtime</div></div>
+    <div class="bi">+</div>
+    <div class="s core"><div class="t">this prepared workspace</div>
+      <div class="d">AGENTS.md · skills · subagents · references · connectors</div></div>
+    <div class="bi">⇅</div>
+    <div class="s"><div class="t">Programme sources, external science, specialists, people</div></div>
+  </div>
+  <p>One consequence worth knowing before you go further: <strong>every part of the companion is
+  a file you can open and read</strong> — the operating contract, each scientific outcome, each
+  contributor's entire instructions, and the guardrails on every connector.</p>
+</section>
+
+<section class="slide">
+  <p class="part">Orientation · 3 of 4</p>
+  <h2><span class="n">03</span>One workspace, one programme</h2>
+  <p>The enduring unit is the pharmaceutical programme — not the session, the thread, the task, or
+  the report.</p>
+<pre>
+runtime thread        <i>!=</i>  pharmaceutical programme
+checkpoint            <i>!=</i>  continuing programme understanding
+conversation memory   <i>!=</i>  qualified programme ground
+successful tool call  <i>!=</i>  scientific conclusion
+runtime approval      <i>!=</i>  qualified review or organizational authority
+subagent result       <i>!=</i>  integrated scientific meaning
+</pre>
+  <p>No runtime mechanism silently acquires scientific meaning. This workspace is bound to
+  <strong>MK-6070</strong>, a DLL3-targeted T-cell engager. A second programme means a second
+  workspace — enforced by construction: one programme key, one scope configuration, and nothing
+  anywhere that enumerates programmes.</p>
+</section>
+
+<section class="slide">
+  <p class="part">Orientation · 4 of 4</p>
+  <h2><span class="n">04</span>What you can ask it</h2>
+  <table>
+    <tr><th>If you ask</th><th>This skill owns the outcome</th></tr>
+    <tr><td>How is this controlled? How does the control strategy work? Why does this control
+      exist?</td><td><code>establish-control-strategy-understanding</code></td></tr>
+    <tr><td>Are the controls sufficient? Where are the gaps? What could go wrong that isn't
+      covered?</td><td><code>assess-control-strategy-assurance</code></td></tr>
+    <tr><td>This result is out of trend. What could explain it? How do I tell two explanations
+      apart?</td><td><code>investigate-quality-concern</code></td></tr>
+    <tr><td>We're changing site, scale, process, material, supplier, method or specification —
+      what does it affect? Does prior validation still apply?</td>
+      <td><code>assess-change-impact</code></td></tr>
+    <tr><td>What evidence would distinguish these? Can existing data already answer it?</td>
+      <td><code>design-decision-changing-evidence</code></td></tr>
+  </table>
+  <p>Each owns a <strong>complete scientific outcome</strong>, not a step in a pipeline. The
+  companion may also reason directly without invoking any of them.</p>
+</section>
+
+<!-- ================= THE SKILLS ================= -->
+
+<section class="slide">
+  <p class="part">The skills · 1 of 4</p>
+  <h2><span class="n">05</span>Four outcomes, and one that runs across them</h2>
+  <div class="dgm">
+    <div class="brace">four complete scientist-facing outcomes</div>
+    <div class="four">
+      <div class="box"><div class="t">establish-<br>control-strategy-<br>understanding</div>
+        <div class="d">how it works</div></div>
+      <div class="box"><div class="t">assess-<br>control-strategy-<br>assurance</div>
+        <div class="d">is it sufficient, where are the gaps</div></div>
+      <div class="box"><div class="t">investigate-<br>quality-<br>concern</div>
+        <div class="d">what explains this observation</div></div>
+      <div class="box"><div class="t">assess-<br>change-<br>impact</div>
+        <div class="d">what a state difference means</div></div>
+    </div>
+    <div class="join"><span class="v"></span>
+      <span class="lbl">invoked when an empirical uncertainty limits the answer</span></div>
+    <div class="box wide">
+      <div class="t">design-decision-changing-evidence <span class="tag">horizontal</span></div>
+      <div class="d">Bounded either way — invoked by an outcome, or asked directly. Never becomes
+        a programme conclusion on its own.</div>
+    </div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="part">The skills · 2 of 4</p>
+  <h2><span class="n">06</span>What a skill actually is</h2>
+  <p>A single markdown file, read only when invoked — <em>progressive disclosure</em>, so none of
+  the five is in context until it is needed. Its frontmatter does the routing:</p>
+  <div class="anat">
+    <div><span class="k">name</span><span class="v">the identifier, at most 64 characters</span></div>
+    <div><span class="k">description</span><span class="v">at most 1024 characters, and this is the
+      routing surface — it states what the skill determines, <strong>when to use it</strong>, and
+      explicitly when <em>not</em> to and which sibling to use instead</span></div>
+  </div>
+  <p>Then the body, in this order:</p>
+  <div class="anat">
+    <div><span class="k">Owned outcome</span><span class="v">the one thing this skill is
+      responsible for, written as a claim it must be able to defend</span></div>
+    <div><span class="k">Native kernel</span><span class="v">the reasoning it must <em>not</em>
+      delegate — next slide</span></div>
+    <div><span class="k">Adaptive process</span><span class="v">how to deepen according to the
+      limiting uncertainty; explicitly not a checklist to work through</span></div>
+    <div><span class="k">Composition</span><span class="v">which references apply continuously,
+      which sibling skills to compose, which tools, and the retrieval shape</span></div>
+    <div><span class="k">Materialization</span><span class="v">whether anything should persist —
+      and "conversation only" is a legitimate result</span></div>
+    <div><span class="k">Completion</span><span class="v">what must be visible in the answer, and
+      what counts as done</span></div>
+    <div><span class="k">Characteristic failures</span><span class="v">the specific ways this skill
+      goes wrong, named so they can be recognised in your own output</span></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="part">The skills · 3 of 4</p>
+  <h2><span class="n">07</span>The native kernel — what a skill may not delegate</h2>
+  <p>Every skill has a core of reasoning it owns. Delegating it away is failure, not efficiency:
+  <em>a skill that merely routes has failed.</em> The clearest example is the assurance skill,
+  which owns a <strong>two-sided reconstruction</strong>:</p>
+  <div class="dgm two">
+    <div class="box wide"><div class="t">what must be assured <span class="tag">top-down</span></div>
+      <div class="d">the quality intent and the assurance proposition being tested · materially
+      viable variability, exposure and failure pathways · what must be prevented, reduced,
+      detected, intercepted, released against or monitored · what must be analytically
+      observable</div></div>
+    <div class="box wide"><div class="t">what the strategy supplies <span class="tag">bottom-up</span></div>
+      <div class="d">documented control intent · current applicability · implementation and
+      execution · demonstrated operational performance · demonstrated <em>scientific</em>
+      contribution · analytical and sampling capability · collective coverage and shared
+      vulnerabilities</div></div>
+  </div>
+  <p class="note">Why both sides are mandatory: the top-down side stops the existing control
+  inventory from defining its own adequacy test. The bottom-up side stops documented controls and
+  passing results from being treated as demonstrated assurance. Dropping either one is this
+  skill's characteristic failure.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The skills · 4 of 4</p>
+  <h2><span class="n">08</span>Composition, not routing</h2>
+  <p>The four outcomes compose with <em>each other</em>, not only with the horizontal one — but
+  only when a sibling's full scientific responsibility becomes material, never because a keyword
+  appeared.</p>
+  <div class="anat">
+    <div><span class="k">sufficiency becomes<br>the primary question</span>
+      <span class="v">understanding or concern → <code>assess-control-strategy-assurance</code></span></div>
+    <div><span class="k">the qualified account<br>must be recovered</span>
+      <span class="v">assurance or change → <code>establish-control-strategy-understanding</code></span></div>
+    <div><span class="k">a defined state<br>difference becomes central</span>
+      <span class="v">any of them → <code>assess-change-impact</code></span></div>
+    <div><span class="k">existing evidence cannot<br>settle a commitment</span>
+      <span class="v">any of them → <code>design-decision-changing-evidence</code></span></div>
+  </div>
+  <p>Three rules hold it together. One outcome owns the complete conclusion when the engagement has
+  a dominant question. The contracts in <code>AGENTS.md</code> apply <em>continuously</em> rather
+  than being invoked. And skills are not a workflow and not a router — the companion begins from
+  the result the scientist wants, not from a router.</p>
+</section>
+
+<!-- ================= INSTRUCTION ARCHITECTURE ================= -->
+
+<section class="slide">
+  <p class="part">Instruction architecture · 1 of 3</p>
+  <h2><span class="n">09</span>Four layers, loaded four ways</h2>
+  <div class="dgm layers">
+    <div class="layer"><span class="nm">AGENTS.md</span><span><span class="tag">always on</span></span>
+      <span class="dc">In the system prompt every session — the contract that must never need
+        looking up. Identity, responsibilities, evidence discipline, tool discipline, correction,
+        authority boundary.</span></div>
+    <div class="down">points to</div>
+    <div class="layer"><span class="nm">references/</span><span><span class="tag">on demand</span></span>
+      <span class="dc">Opened by what you are holding, not preemptively. Seven contracts: evidence,
+        programme state, materialization, correction, assurance, and the two search guides.</span></div>
+    <div class="down">cite the same references, never restate them</div>
+    <div class="layer"><span class="nm">.deepagents/skills/</span><span><span class="tag">progressive</span></span>
+      <span class="dc">One skill per scientific outcome, read when invoked.</span></div>
+    <div class="layer detached"><span class="nm">.deepagents/agents/</span>
+      <span><span class="tag warn">standalone</span></span>
+      <span class="dc">No AGENTS.md, nothing inherited — next slide.</span></div>
+  </div>
+  <p>The split exists so the five skills do not each re-specify evidence, state, correction,
+  assurance and authority discipline.</p>
+</section>
+
+<section class="slide">
+  <p class="part">Instruction architecture · 2 of 3</p>
+  <h2><span class="n">10</span>A subagent file is its whole system prompt</h2>
+  <p>The host sets a subagent's system prompt to <strong>its own file body and nothing else</strong>.
+  No <code>AGENTS.md</code>, no references, no skills.</p>
+  <div class="dgm two">
+    <div class="box"><div class="t">the companion holds</div>
+      <div class="d">AGENTS.md always on · the recovery index · references and skills reachable by
+      choice · the full tool set</div></div>
+    <div class="box wide"><div class="t">a contributor holds</div>
+      <div class="d">its own file · the brief it was given · the tool set, inherited — and nothing
+      else</div></div>
+  </div>
+  <p>Two consequences worth internalising before editing one of these files:</p>
+  <ul>
+    <li>A contributor file cannot be written as a <em>supplement</em> to <code>AGENTS.md</code>.
+      Anything it must know has to be in its own file, or reachable from a pointer that file
+      gives it.</li>
+    <li>So the same <em>rule</em> is deliberately stated in several files. What must not be
+      duplicated is a measured <em>fact</em> — those live once, in a reference, and everything
+      else points at them.</li>
+  </ul>
+</section>
+
+<section class="slide">
+  <p class="part">Instruction architecture · 3 of 3</p>
+  <h2><span class="n">11</span>The programme workspace</h2>
+  <p>Not an archive written to at the end. It is the state the companion reasons <em>from</em>, and
+  only the recovery index is always available — everything else is opened by choice.</p>
+  <div class="dgm">
+    <div class="box wide" style="margin-bottom:10px">
+      <div class="t">PROGRAM.md <span class="tag">always available</span></div>
+      <div class="d">The recovery index — one line per durable entry: what it is, its scope, and
+        what should reopen it. Enough to decide what to open <em>without opening anything</em>.</div>
+    </div>
+    <div class="three">
+      <div class="box"><div class="t">ground/</div>
+        <div class="d">continuity of scientific understanding</div></div>
+      <div class="box"><div class="t">work/</div>
+        <div class="d">continuity of activity</div></div>
+      <div class="box"><div class="t">artifacts/</div>
+        <div class="d">identity of a work product</div></div>
+    </div>
+  </div>
+  <p>Three purposes, <strong>not maturity levels</strong>. There is no
+  <code>conversation → work → artifact → ground</code> pipeline, and substantial reasoning may stay
+  entirely conversational — that is a success, not an omission.</p>
+  <p class="note">Only the companion writes here. A contributor's return is a proposal;
+  materializing any part of it is the companion's own act, and a hook enforces that rather than
+  asking for it.</p>
+</section>
+
+<!-- ================= THE CONTRIBUTORS ================= -->
+
+<section class="slide">
+  <p class="part">The contributors · 1 of 5</p>
+  <h2><span class="n">12</span>Four bounded roles</h2>
+  <div class="anat">
+    <div><span class="k">scientific-<br>contributor</span>
+      <span class="v">Owns one defined contribution to a larger outcome — a substantial evidence
+        lane, one portion of control logic, one materially distinct explanation, one programme-state
+        difference, or a defined analysis. Returns a qualified bounded contribution, never an
+        integrated conclusion.</span></div>
+    <div><span class="k">independent-<br>challenger</span>
+      <span class="v">Supplies cognitive independence against an interpretation — testing anchoring,
+        omitted alternatives, unsupported evidence transfer, causal gaps, shared dependencies, false
+        reassurance, premature closure. Supplies independence, never new empirical evidence or
+        qualified human review.</span></div>
+    <div><span class="k">specialist-<br>contributor</span>
+      <span class="v">Parameterized by its brief, not by its file — quantitative, analytical method,
+        process, formulation, material, device, manufacturing, regulatory. One role instantiated
+        many ways, never a permanent department.</span></div>
+    <div><span class="k">retrieval-<br>contributor</span>
+      <span class="v">Bounded evidence retrieval with <strong>context isolation</strong>. Runs the
+        search traffic, judges from each record's extent which few are worth reading, and returns
+        what the documents establish — not their text. A population it never reads is a legitimate
+        return.</span></div>
+  </div>
+</section>
+
+<section class="slide">
+  <p class="part">The contributors · 2 of 5</p>
+  <h2><span class="n">13</span>When to delegate — and when not to</h2>
+  <!-- diagram: diagrams/delegation.mmd — edit there, or paste it into
+       https://mermaid.live. Regenerated with mermaid-cli; nothing depends on it. -->
+  <div class="mm"><svg id="my-svg" width="100%" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" viewBox="0.5 0 1662.21875 365.375" role="graphics-document document" aria-roledescription="flowchart-v2"><style>#my-svg{font-family:ui-monospace,SF Mono,Menlo,monospace;font-size:13px;fill:#ccc;}@keyframes edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes dash{to{stroke-dashoffset:0;}}#my-svg .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 50s linear infinite;stroke-linecap:round;}#my-svg .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash 20s linear infinite;stroke-linecap:round;}#my-svg .error-icon{fill:#a44141;}#my-svg .error-text{fill:#ddd;stroke:#ddd;}#my-svg .edge-thickness-normal{stroke-width:1px;}#my-svg .edge-thickness-thick{stroke-width:3.5px;}#my-svg .edge-pattern-solid{stroke-dasharray:0;}#my-svg .edge-thickness-invisible{stroke-width:0;fill:none;}#my-svg .edge-pattern-dashed{stroke-dasharray:3;}#my-svg .edge-pattern-dotted{stroke-dasharray:2;}#my-svg .marker{fill:#4a5c6e;stroke:#4a5c6e;}#my-svg .marker.cross{stroke:#4a5c6e;}#my-svg svg{font-family:ui-monospace,SF Mono,Menlo,monospace;font-size:13px;}#my-svg p{margin:0;}#my-svg .label{font-family:ui-monospace,SF Mono,Menlo,monospace;color:#ccc;}#my-svg .cluster-label text{fill:#6fd3c7;}#my-svg .cluster-label span{color:#6fd3c7;}#my-svg .cluster-label span p{background-color:transparent;}#my-svg .label text,#my-svg span{fill:#ccc;color:#ccc;}#my-svg .node rect,#my-svg .node circle,#my-svg .node ellipse,#my-svg .node polygon,#my-svg .node path{fill:#1f2020;stroke:#ccc;stroke-width:1px;}#my-svg .rough-node .label text,#my-svg .node .label text,#my-svg .image-shape .label,#my-svg .icon-shape .label{text-anchor:middle;}#my-svg .node .katex path{fill:#000;stroke:#000;stroke-width:1px;}#my-svg .rough-node .label,#my-svg .node .label,#my-svg .image-shape .label,#my-svg .icon-shape .label{text-align:center;}#my-svg .node.clickable{cursor:pointer;}#my-svg .root .anchor path{fill:#4a5c6e!important;stroke-width:0;stroke:#4a5c6e;}#my-svg .arrowheadPath{fill:lightgrey;}#my-svg .edgePaths .path{stroke:#4a5c6e;stroke-width:1px;}#my-svg .flowchart-link{stroke:#4a5c6e;fill:none;}#my-svg .edgeLabel{background-color:#161e27;text-align:center;}#my-svg .edgeLabel p{background-color:#161e27;}#my-svg .edgeLabel rect{opacity:0.5;background-color:#161e27;fill:#161e27;}#my-svg .labelBkg{background-color:rgba(22, 30, 39, 0.5);}#my-svg .cluster rect{fill:#131b24;stroke:#26323f;stroke-width:1px;}#my-svg .cluster text{fill:#6fd3c7;}#my-svg .cluster span{color:#6fd3c7;}#my-svg .node .collapsed-indicator{fill:#26323f;stroke:none;opacity:0.6;}#my-svg .node .collapsed-separator{stroke:#26323f;stroke-width:0.75px;}#my-svg div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:ui-monospace,SF Mono,Menlo,monospace;font-size:12px;background:#0d1319;border:1px solid rgba(255, 255, 255, 0.25);border-radius:2px;pointer-events:none;z-index:100;}#my-svg .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#ccc;}#my-svg rect.text{fill:none;stroke-width:0;}#my-svg .icon-shape,#my-svg .image-shape{background-color:#161e27;text-align:center;}#my-svg .icon-shape p,#my-svg .image-shape p{background-color:#161e27;padding:2px;}#my-svg .icon-shape .label rect,#my-svg .image-shape .label rect{opacity:0.5;background-color:#161e27;fill:#161e27;}#my-svg .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#my-svg .node .label-icon path{fill:currentColor;stroke:revert;stroke-width:revert;}#my-svg .node .neo-node{stroke:#ccc;}#my-svg [data-look="neo"].node rect,#my-svg [data-look="neo"].cluster rect,#my-svg [data-look="neo"].node polygon{stroke:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].swimlane.cluster rect{filter:none;}#my-svg [data-look="neo"].node path{stroke:url(#my-svg-gradient);stroke-width:1px;}#my-svg [data-look="neo"].node .outer-path{filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].node .neo-line path{stroke:#ccc;filter:none;}#my-svg [data-look="neo"].node circle{stroke:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].node circle .state-start{fill:#000000;}#my-svg [data-look="neo"].icon-shape .icon{fill:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg [data-look="neo"].icon-shape .icon-neo path{stroke:url(#my-svg-gradient);filter:drop-shadow( 1px 2px 2px rgba(185,185,185,1));}#my-svg :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}#my-svg .gate&gt;*{fill:rgb(13, 19, 25)!important;stroke:rgb(224, 164, 88)!important;color:rgb(224, 164, 88)!important;}#my-svg .gate span{fill:rgb(13, 19, 25)!important;stroke:rgb(224, 164, 88)!important;color:rgb(224, 164, 88)!important;}#my-svg .gate tspan{fill:rgb(224, 164, 88)!important;}#my-svg .node&gt;*{fill:rgb(13, 19, 25)!important;stroke:rgb(38, 50, 63)!important;color:rgb(143, 163, 181)!important;}#my-svg .node span{fill:rgb(13, 19, 25)!important;stroke:rgb(38, 50, 63)!important;color:rgb(143, 163, 181)!important;}#my-svg .node tspan{fill:rgb(143, 163, 181)!important;}#my-svg .acc&gt;*{fill:rgb(13, 19, 25)!important;stroke:rgb(43, 122, 114)!important;color:rgb(111, 211, 199)!important;}#my-svg .acc span{fill:rgb(13, 19, 25)!important;stroke:rgb(43, 122, 114)!important;color:rgb(111, 211, 199)!important;}#my-svg .acc tspan{fill:rgb(111, 211, 199)!important;}#my-svg .warn&gt;*{fill:rgb(13, 19, 25)!important;stroke:rgb(224, 164, 88)!important;color:rgb(224, 164, 88)!important;}#my-svg .warn span{fill:rgb(13, 19, 25)!important;stroke:rgb(224, 164, 88)!important;color:rgb(224, 164, 88)!important;}#my-svg .warn tspan{fill:rgb(224, 164, 88)!important;}</style><g><marker id="my-svg_flowchart-v2-pointEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-pointStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto"><path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-pointEnd-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="11.5" refY="7" markerUnits="userSpaceOnUse" markerWidth="10.5" markerHeight="14" orient="auto"><path d="M 0 0 L 11.5 7 L 0 14 z" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-pointStart-margin" class="marker flowchart-v2" viewBox="0 0 11.5 14" refX="1" refY="7" markerUnits="userSpaceOnUse" markerWidth="11.5" markerHeight="14" orient="auto"><polygon points="0,7 11.5,14 11.5,0" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleEnd" class="marker flowchart-v2" viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleStart" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 1; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleEnd-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refY="5" refX="12.25" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-circleStart-margin" class="marker flowchart-v2" viewBox="0 0 10 10" refX="-2" refY="5" markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"><circle cx="5" cy="5" r="5" class="arrowMarkerPath" style="stroke-width: 0; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-crossEnd" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-crossStart" class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath" style="stroke-width: 2; stroke-dasharray: 1, 0;"/></marker><marker id="my-svg_flowchart-v2-crossEnd-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="17.7" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5;"/></marker><marker id="my-svg_flowchart-v2-crossStart-margin" class="marker cross flowchart-v2" viewBox="0 0 15 15" refX="-3.5" refY="7.5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto"><path d="M 1,1 L 14,14 M 1,14 L 14,1" class="arrowMarkerPath" style="stroke-width: 2.5; stroke-dasharray: 1, 0;"/></marker><g class="root"><g class="clusters"/><g class="edgePaths"><path d="M255.022,132.975L281.38,124.229C307.739,115.483,360.455,97.992,406.647,89.246C452.839,80.5,492.505,80.5,512.339,80.5L532.172,80.5" id="my-svg-L_Q_INLINE_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_Q_INLINE_0" data-points="W3sieCI6MjU1LjAyMTgzMDAxODk5MTk4LCJ5IjoxMzIuOTc0OTU1MDE4OTkxOTh9LHsieCI6NDEzLjE3MTg3NSwieSI6ODAuNX0seyJ4Ijo1MzYuMTcxODc1LCJ5Ijo4MC41fV0=" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M255.022,203.275L281.38,212.021C307.739,220.767,360.455,238.258,406.647,247.004C452.839,255.75,492.505,255.75,512.339,255.75L532.172,255.75" id="my-svg-L_Q_C_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_Q_C_0" data-points="W3sieCI6MjU1LjAyMTgzMDAxODk5MTk4LCJ5IjoyMDMuMjc1MDQ0OTgxMDA4MDJ9LHsieCI6NDEzLjE3MTg3NSwieSI6MjU1Ljc1fSx7IngiOjUzNi4xNzE4NzUsInkiOjI1NS43NX1d" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M792.172,206.267L796.005,204.785C799.839,203.303,807.505,200.339,816.501,198.857C825.497,197.375,835.823,197.375,840.986,197.375L846.148,197.375" id="my-svg-L_C_R_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_R_0" data-points="W3sieCI6NzkyLjE3MTg3NSwieSI6MjA2LjI2NjU1NjI5MTM5MDd9LHsieCI6ODE1LjE3MTg3NSwieSI6MTk3LjM3NX0seyJ4Ijo4NTAuMTQ4NDM3NSwieSI6MTk3LjM3NX1d" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M1082.195,197.375L1088.025,197.375C1093.854,197.375,1105.513,197.375,1114.509,197.375C1123.505,197.375,1129.839,197.375,1133.005,197.375L1136.172,197.375" id="my-svg-L_R_J_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_R_J_0" data-points="W3sieCI6MTA4Mi4xOTUzMTI1LCJ5IjoxOTcuMzc1fSx7IngiOjExMTcuMTcxODc1LCJ5IjoxOTcuMzc1fSx7IngiOjExNDAuMTcxODc1LCJ5IjoxOTcuMzc1fV0=" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M1396.172,197.375L1400.005,197.375C1403.839,197.375,1411.505,197.375,1418.505,197.375C1425.505,197.375,1431.839,197.375,1435.005,197.375L1438.172,197.375" id="my-svg-L_J_X_0" class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_J_X_0" data-points="W3sieCI6MTM5Ni4xNzE4NzUsInkiOjE5Ny4zNzV9LHsieCI6MTQxOS4xNzE4NzUsInkiOjE5Ny4zNzV9LHsieCI6MTQ0Mi4xNzE4NzUsInkiOjE5Ny4zNzV9XQ==" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/><path d="M792.172,305.233L796.005,306.715C799.839,308.197,807.505,311.161,814.505,312.643C821.505,314.125,827.839,314.125,831.005,314.125L834.172,314.125" id="my-svg-L_C_G_0" class="edge-thickness-normal edge-pattern-dotted edge-thickness-normal edge-pattern-solid flowchart-link" style=";" data-edge="true" data-et="edge" data-id="L_C_G_0" data-points="W3sieCI6NzkyLjE3MTg3NSwieSI6MzA1LjIzMzQ0MzcwODYwOTN9LHsieCI6ODE1LjE3MTg3NSwieSI6MzE0LjEyNX0seyJ4Ijo4MzguMTcxODc1LCJ5IjozMTQuMTI1fV0=" data-look="classic" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/></g><g class="edgeLabels"><g class="edgeLabel" transform="translate(413.171875, 80.5)"><g class="label" data-id="L_Q_INLINE_0" transform="translate(-7.828125, -9.75)"><foreignObject width="15.65625" height="19.5"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"><p>no</p></span></div></foreignObject></g></g><g class="edgeLabel" transform="translate(413.171875, 255.75)"><g class="label" data-id="L_Q_C_0" transform="translate(-100, -48.75)"><foreignObject width="200" height="97.5"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;"><span class="edgeLabel"><p>yes<br /><small>bounded ownership · separate context ·<br />parallelism · specialist depth · independence</small></p></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_R_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_R_J_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_J_X_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g><g class="edgeLabel"><g class="label" data-id="L_C_G_0" transform="translate(0, 0)"><foreignObject width="0" height="0"><div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg" style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;"><span class="edgeLabel"></span></div></foreignObject></g></g></g><g class="nodes"><g class="node default gate" id="my-svg-flowchart-Q-0" data-look="classic" transform="translate(149.0859375, 168.125)"><polygon points="141.0859375,0 282.171875,-141.0859375 141.0859375,-282.171875 0,-141.0859375" class="label-container" transform="translate(-140.5859375, 141.0859375)" style="fill:#0d1319 !important;stroke:#e0a458 !important"/><g class="label" style="color:#e0a458 !important" transform="translate(-97.8359375, -29.25)"><rect/><foreignObject width="195.671875" height="58.5"><div style="color: rgb(224, 164, 88) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#e0a458 !important" class="nodeLabel"><p>Does this need a property<br />only separate execution<br />can give?</p></span></div></foreignObject></g></g><g class="node default node" id="my-svg-flowchart-INLINE-2" data-look="classic" transform="translate(664.171875, 80.5)"><rect class="basic label-container" style="fill:#0d1319 !important;stroke:#26323f !important" x="-128" y="-72.5" width="256" height="145"/><g class="label" style="color:#8fa3b5 !important" transform="translate(-100, -58.5)"><rect/><foreignObject width="200" height="117"><div style="color: rgb(143, 163, 181) !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#8fa3b5 !important" class="nodeLabel"><p>Reason directly<br /><small>a method existing is not a reason.<br />nor a department, a source,<br />a report section, or a tool call</small></p></span></div></foreignObject></g></g><g class="node default node" id="my-svg-flowchart-C-4" data-look="classic" transform="translate(664.171875, 255.75)"><rect class="basic label-container" style="fill:#0d1319 !important;stroke:#26323f !important" x="-128" y="-62.75" width="256" height="125.5"/><g class="label" style="color:#8fa3b5 !important" transform="translate(-100, -48.75)"><rect/><foreignObject width="200" height="97.5"><div style="color: rgb(143, 163, 181) !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#8fa3b5 !important" class="nodeLabel"><p>Contributor<br /><small>bounded brief in · separate context ·<br />its own file as its whole system prompt</small></p></span></div></foreignObject></g></g><g class="node default acc" id="my-svg-flowchart-R-7" data-look="classic" transform="translate(966.171875, 197.375)"><rect class="basic label-container" style="fill:#0d1319 !important;stroke:#2b7a72 !important" x="-116.0234375" y="-33.5" width="232.046875" height="67"/><g class="label" style="color:#6fd3c7 !important" transform="translate(-88.0234375, -19.5)"><rect/><foreignObject width="176.046875" height="39"><div style="color: rgb(111, 211, 199) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#6fd3c7 !important" class="nodeLabel"><p>Return<br /><small>a PROPOSAL, never an update</small></p></span></div></foreignObject></g></g><g class="node default node" id="my-svg-flowchart-J-9" data-look="classic" transform="translate(1268.171875, 197.375)"><rect class="basic label-container" style="fill:#0d1319 !important;stroke:#26323f !important" x="-128" y="-82.25" width="256" height="164.5"/><g class="label" style="color:#8fa3b5 !important" transform="translate(-100, -68.25)"><rect/><foreignObject width="200" height="136.5"><div style="color: rgb(143, 163, 181) !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#8fa3b5 !important" class="nodeLabel"><p>Companion reintegrates<br /><small>adopt · adopt narrower · use as correction ·<br />revise dependents · retain as alternative ·<br />preserve as dissent · hold · decline · out of scope</small></p></span></div></foreignObject></g></g><g class="node default warn" id="my-svg-flowchart-X-11" data-look="classic" transform="translate(1548.4453125, 197.375)"><rect class="basic label-container" style="fill:#0d1319 !important;stroke:#e0a458 !important" x="-106.2734375" y="-43.25" width="212.546875" height="86.5"/><g class="label" style="color:#e0a458 !important" transform="translate(-78.2734375, -29.25)"><rect/><foreignObject width="156.546875" height="58.5"><div style="color: rgb(224, 164, 88) !important; display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#e0a458 !important" class="nodeLabel"><p>never concatenation,<br />voting, averaging,<br />or a completion flag</p></span></div></foreignObject></g></g><g class="node default warn" id="my-svg-flowchart-G-12" data-look="classic" transform="translate(966.171875, 314.125)"><rect class="basic label-container" style="fill:#0d1319 !important;stroke:#e0a458 !important" x="-128" y="-43.25" width="256" height="86.5"/><g class="label" style="color:#e0a458 !important" transform="translate(-100, -29.25)"><rect/><foreignObject width="200" height="58.5"><div style="color: rgb(224, 164, 88) !important; display: table; white-space: break-spaces; line-height: 1.5; max-width: 200px; text-align: center; width: 200px;" xmlns="http://www.w3.org/1999/xhtml"><span style="color:#e0a458 !important" class="nodeLabel"><p>cannot write ground, work or artifacts<br /><small>hooks/durable_content_guard.py</small></p></span></div></foreignObject></g></g></g></g></g><defs><filter id="my-svg-drop-shadow" height="130%" width="130%"><feDropShadow dx="4" dy="4" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"/></filter></defs><defs><filter id="my-svg-drop-shadow-small" height="150%" width="150%"><feDropShadow dx="2" dy="2" stdDeviation="0" flood-opacity="0.06" flood-color="#FFFFFF"/></filter></defs><linearGradient id="my-svg-gradient" gradientUnits="objectBoundingBox" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#cccccc" stop-opacity="1"/><stop offset="100%" stop-color="hsl(180, 0%, 18.3529411765%)" stop-opacity="1"/></linearGradient></svg></div>
+</section>
+
+<section class="slide">
+  <p class="part">The contributors · 3 of 5</p>
+  <h2><span class="n">14</span>The brief is the whole interface</h2>
+  <p>A contributor gets no context except what its brief carries. Eleven things belong in one:</p>
+  <div class="chips">
+    <span>parent purpose</span><span>the precise contribution requested</span>
+    <span>programme scope and time</span><span>intended use and depth</span>
+    <span>qualified starting basis</span><span>material alternatives and uncertainty</span>
+    <span>available skills and tools</span><span>constraints</span>
+    <span>required independence profile</span><span>completion boundary</span>
+    <span>what lies outside its authority</span>
+  </div>
+  <p>Context is <strong>role-sensitive</strong>. An informed critic gets your proposed
+  interpretation. An independent reconstructor must <em>not</em> receive your preferred conclusion.
+  A specialist gets the technical conditions relevant to its scoped judgment.</p>
+  <p class="note">Mechanically the brief is a <strong>single free-text field</strong> on the host's
+  <code>task</code> tool. Nothing validates it, nothing rejects an incomplete one, and the
+  contributor cannot ask for more. Which is why the brief — not the role — is where delegation
+  succeeds or fails.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The contributors · 4 of 5</p>
+  <h2><span class="n">15</span>A return is a proposal</h2>
+  <p>Nothing a contributor returns updates anything. Reintegration is the companion's scientific
+  judgment, with nine possible outcomes:</p>
+  <div class="chips">
+    <span>adopt</span><span>adopt with narrower applicability</span><span>use as a correction</span>
+    <span>use to revise dependent reasoning</span><span>retain as a viable alternative</span>
+    <span>preserve as material dissent</span><span>hold pending resolution</span>
+    <span>decline</span><span>out of scope</span>
+  </div>
+  <p>Three levels stay distinct: the bounded work determines what <em>it</em> establishes; the
+  invoking skill determines what that changes in its complete result; the companion determines
+  whether the selected meaning affects broader programme understanding.</p>
+  <div class="guard"><b>Never</b> prose concatenation, voting, averaging, or a completion flag.
+  Contributor agreement is not evidence and disagreement is not resolved by majority. And nothing
+  — no contributor, tool, renderer or runtime completion — may directly revise programme ground,
+  change a parent conclusion, confer review, create reliance, or perform an authoritative
+  transition.</div>
+</section>
+
+<section class="slide">
+  <p class="part">The contributors · 5 of 5</p>
+  <h2><span class="n">16</span>Independence has to be built, not asserted</h2>
+  <p><code>independent-challenger</code> is one role with two modes, and the <strong>brief's
+  contents</strong> decide which — not a label.</p>
+  <div class="dgm fork">
+    <div class="cond">brief <b>CONTAINS</b> the current interpretation</div>
+    <div class="to">→</div>
+    <div class="out"><div class="t">informed critic</div>
+      <div class="d">attacks it on the merits</div></div>
+    <div class="cond">brief does <b>NOT</b> contain it</div>
+    <div class="to">→</div>
+    <div class="out"><div class="t">independent reconstructor</div>
+      <div class="d">develops its own from the evidence forward</div></div>
+  </div>
+  <p>Why the second mode exists: <strong>a critic handed an anchored conclusion is anchored by
+  it.</strong> Only an agent that never saw the conclusion can tell you it came from the first
+  document read rather than from the evidence. Anchoring is the one failure a critic cannot
+  detect.</p>
+  <p class="note">Nothing mechanical protects that independence. The programme workspace is readable
+  with the inherited tool set, and its artifacts hold the companion's own conclusions — so a
+  reconstructor is told not to open them, and told to say so if it already has.</p>
+</section>
+
+<!-- ================= THE TOOLS ================= -->
+
+<section class="slide">
+  <p class="part">The tools · 1 of 6</p>
+  <h2><span class="n">17</span>Two connectors</h2>
+  <p>Both are self-contained PEP 723 scripts run through <code>uv run --script</code>. No install
+  step. Each surfaces exactly <strong>two</strong> tools — the surface is deliberately small.</p>
+  <div class="dgm two">
+    <div class="box wide"><div class="t">ics-muse</div>
+      <div class="d">Programme-scoped internal retrieval over eight sources.
+      <code>muse_population</code> and <code>muse_read</code>. Four MUSE endpoints sit behind them
+      — basic query, conditional query, facets, full-document retrieval — and which one runs is the
+      connector's decision, not the model's.</div></div>
+    <div class="box"><div class="t">ics-public-science</div>
+      <div class="d">PubMed and Europe PMC. <code>literature_search</code> against one explicitly
+      chosen index; <code>literature_get</code> for one exact record and its represented abstract.
+      No full text, no trials, no preprints, no DOI resolution, no relationship crawling.</div></div>
+  </div>
+  <p class="note"><strong>Every external call is a disclosure.</strong> Each query and identifier
+  passes a preflight before the first request, and a blocked call is never silently reformulated —
+  it reports which safe categories were hit, and reformulation must be in public scientific
+  concepts only. Never by obfuscating, encoding, or incrementally mutating the same terms.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The tools · 2 of 6</p>
+  <h2><span class="n">18</span>Finding is not reading</h2>
+  <div class="dgm two">
+    <div class="box wide"><div class="t">muse_population</div>
+      <div class="d">Define or narrow a programme-scoped <em>population</em>, and see its records,
+      its count, and the distribution of values across it.</div></div>
+    <div class="box wide"><div class="t">muse_read</div>
+      <div class="d">Read documents a population identified, or a reference recorded in earlier
+      programme work. <code>purpose</code> is required, and states what the read is meant to
+      establish.</div></div>
+  </div>
+  <p><strong>They are not layered.</strong> One tool's output is the next one's input; neither
+  calls the other. Deciding to read is a separate act from deciding what exists — and the split is
+  there because most questions do not need the words.</p>
+  <p>Existence, extent, currency, locating a known document, and judging what is worth reading are
+  all answered from the population alone. Every record carries its extent, so the read decision is
+  informed before anything is fetched.</p>
+  <p class="note">When the words <em>are</em> needed, one caveat travels with them: extracted text
+  is not structurally faithful. Table cells arrive as separate lines with row and column
+  associations lost, so a real limit can attach to the wrong lot. For a specification limit or
+  acceptance criterion, <strong>the locator is the answer, not an extraction</strong>.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The tools · 3 of 6</p>
+  <h2><span class="n">19</span>Populations, and why they have handles</h2>
+  <p>A <em>population</em> is a set of records identified by a <strong>handle</strong> rather than
+  by the question you asked to get it. Pass the handle back to narrow it; do not restate the
+  question.</p>
+<pre>
+muse_population(sources=["med_comms"], about="MK-6070")
+  → count 19 · distribution { subtype: Protocols 8 · Study Reports 7 }
+
+muse_population(population="&lt;handle&gt;", where=[{"in": ["subtype"],
+                "any_of": ["Protocols"], "match": "exact"}])
+  → count 8      <b>exact, because the value came from the distribution</b>
+</pre>
+  <p>The distribution is how you narrow without reading anything — it says what is <em>in</em>
+  those records. And <code>match: "exact"</code> needs the literal stored value, which the
+  distribution hands you. Guess it instead and you get zero records at HTTP 200.</p>
+  <p class="note">Why handles exist at all: on the largest source, <strong>four restatements of one
+  intent returned four different counts</strong> — the largest around forty thousand times the
+  smallest, every one HTTP 200, every one plausible, and nothing in any response saying which
+  population it described. A large count is a population, not an answer. Narrow it; do not
+  paginate through it.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The tools · 4 of 6</p>
+  <h2><span class="n">20</span>Field roles, not field names</h2>
+  <p>The model constrains on stable <em>roles</em>. Which field each source uses for a concept is
+  the connector's business, not the model's.</p>
+  <div class="chips">
+    <span>anywhere</span><span>title</span><span>body</span><span>status</span>
+    <span>+ ten taxonomy roles</span>
+  </div>
+  <p>A role a source cannot fill is <strong>reported as unfillable, never substituted</strong> —
+  substituting the nearest-looking field would confer a state the source does not represent. And
+  the same role can mean different things: <code>status</code> on the notebook source resolves to
+  an <em>experiment's</em> lifecycle, not a document's. The role resolves; the meaning does not
+  carry across.</p>
+  <p class="note">Why this matters, measured: <strong>19 of the 27 field names our own scope
+  configuration once advertised did not exist</strong> in the real index mappings — and a condition
+  on a nonexistent field returns 0 records at HTTP 200, indistinguishable from absence. Twenty wire
+  parameters also stay internal, because a wrong value in any of them produces a silently wrong
+  answer rather than an error.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The tools · 5 of 6</p>
+  <h2><span class="n">21</span>Eight sources, eight boundaries</h2>
+  <table>
+    <tr><th>Source</th><th>What it is</th><th>Programme boundary</th></tr>
+    <tr><td><code>meds</code></td><td>controlled and strategy documents</td><td>exact literal</td></tr>
+    <tr><td><code>mmdkx</code></td><td>product technical knowledge across Development, Commercialization and Supply</td><td>exact literal</td></tr>
+    <tr><td><code>kneat</code></td><td>eVal/KNEAT validation and qualification records</td><td><strong>prefix-derived</strong></td></tr>
+    <tr><td><code>med_comms</code></td><td>medical communications</td><td>exact literal</td></tr>
+    <tr><td><code>mrl_slides</code></td><td>slide decks and slides</td><td>exact literal</td></tr>
+    <tr><td><code>scited</code></td><td>company-authored publications</td><td>exact literal</td></tr>
+    <tr><td><code>teamspace</code></td><td>SharePoint governance-forum material</td><td>exact literal</td></tr>
+    <tr><td><code>signals</code></td><td>electronic lab notebook</td><td><strong>broad first stage</strong></td></tr>
+  </table>
+  <p>Each has its own filter field and its own stored literal; nothing is shared. The programme
+  filter is injected from the scope configuration and <strong>cannot be removed by the
+  model</strong>. Two boundaries are not plain literals: <code>kneat</code> files the programme
+  under folder paths, so its values are re-derived at every startup; <code>signals</code> is
+  bounded by a broader project code that admits other programmes, so its records need exact
+  relevance established one at a time.</p>
+  <p class="note">Nothing is merged across sources — not counts into a total, not records into a
+  uniform shape, not relevance into one ranking. A term score has no fixed range and is local to
+  its source and its query. Four sources answering out of eight is reported as four, never as
+  completeness.</p>
+</section>
+
+<section class="slide">
+  <p class="part">The tools · 6 of 6</p>
+  <h2><span class="n">22</span>A zero is never an absence</h2>
+  <p class="lead">This is the invariant every layer above exists to protect.</p>
+  <p>A search returning nothing may mean the programme has no documents. It may equally mean a
+  stored filter value stopped matching, a field does not exist, a phrase was rewritten, punctuation
+  was swallowed, or a source was denied. <strong>All of those return zero records, successfully, at
+  HTTP 200.</strong></p>
+  <p>So the connector never hands back a bare zero. Every count carries
+  <code>population_established</code>, and every empty result names, by name, which of seven causes
+  of a false zero it ruled out — six measured API behaviours plus one the connector refuses before
+  sending. Whatever is <em>not</em> on that list is what the zero might still be.</p>
+  <div class="guard">No visible matches means only that no accessible indexed record matched the
+  executed request under the represented sources, fields, filters, access and time. It is
+  <b>never</b> proof that information or evidence does not exist.</div>
+  <p>The same discipline runs through everything else. A documented control is not a demonstrated
+  contribution. A passing result is not assurance. A checked source does not verify an artifact.
+  Several projections of one basis are not independent support. And declining to certify something
+  it cannot evidence is the companion behaving correctly — not a limitation to work around.</p>
+</section>
+
+<!-- ================= CLOSE ================= -->
+
+<section class="slide">
+  <p class="part">Close · 1 of 2</p>
+  <h2><span class="n">23</span>What it will not do</h2>
+  <p>On its own initiative, never:</p>
+  <div class="cols">
+    <ul>
+      <li>declare a control strategy adequate, comparable or approved</li>
+      <li>convert a potential gap into a failure, deviation, impact or risk score</li>
+      <li>establish accepted root cause, product impact or batch disposition</li>
+      <li>create or close a formal investigation, CAPA or change control</li>
+    </ul>
+    <ul>
+      <li>assign owners, dates, actions or governance items</li>
+      <li>approve a protocol, commit resources, or execute work</li>
+      <li>release results or update registered state</li>
+      <li>fabricate programme-specific effects, ranges, thresholds, variability estimates or
+        acceptance criteria</li>
+    </ul>
+  </div>
+  <p>Authoritative programme state, qualified review, decisions, execution, batch disposition,
+  release, formal investigation state and change control all live in their owning systems and with
+  accountable people. The companion preserves permitted <em>references</em> to those acts — never
+  the acts themselves.</p>
+  <p class="note">A precise limitation, an unresolved alternative, or an inconclusive result is a
+  legitimate and often correct endpoint. Scientific usefulness does not require one root cause, a
+  clean conclusion, or organizational closure.</p>
+</section>
+
+<section class="slide">
+  <p class="part">Close · 2 of 2</p>
+  <h2><span class="n">24</span>Finding your way around</h2>
+  <table>
+    <tr><th>To understand</th><th>Read</th></tr>
+    <tr><td>what must always be active — the operating contract itself</td><td><code>AGENTS.md</code></td></tr>
+    <tr><td>the seven contracts the skills and contributors cite</td><td><code>references/</code></td></tr>
+    <tr><td>how one scientific outcome reasons</td><td><code>.deepagents/skills/&lt;name&gt;/SKILL.md</code></td></tr>
+    <tr><td>what a contributor is told, in full</td><td><code>.deepagents/agents/&lt;role&gt;/AGENTS.md</code></td></tr>
+    <tr><td>how a source is programme-scoped</td><td><code>config/program-scope/MK-6070.yaml</code></td></tr>
+    <tr><td>what a result may and may not claim</td><td><code>tools/ics_muse/server.py</code></td></tr>
+    <tr><td>what the programme workspace currently holds</td><td><code>workspace/programs/MK-6070/PROGRAM.md</code></td></tr>
+  </table>
+  <p>Verification is one command and needs no network: <code>./tools/contract_map_check.py</code>.
+  It runs eight offline harnesses and asserts each reported <strong>exactly</strong> its pinned
+  assertion total, so a harness that stops running fails the suite rather than shrinking it
+  quietly.</p>
+  <p class="lead">Setup, launch and troubleshooting: <code>RUNNING.md</code>.</p>
+</section>
+
+</div>
+
+<div class="nav">
+  <span id="pos">1 / 25</span>
+  <span class="sp"></span>
+  <span><kbd>←</kbd> <kbd>→</kbd> <b>move</b></span>
+  <span><kbd>a</kbd> <b>all on one page</b></span>
+  <span><kbd>p</kbd> <b>print</b></span>
+</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var pos = document.getElementById('pos');
+  var bar = document.getElementById('bar');
+  var i = 0;
+
+  function show(n) {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach(function (s, k) { s.classList.toggle('on', k === i); });
+    pos.textContent = (i + 1) + ' / ' + slides.length;
+    bar.style.width = ((i + 1) / slides.length * 100) + '%';
+    if (location.hash !== '#' + (i + 1)) history.replaceState(null, '', '#' + (i + 1));
+    window.scrollTo(0, 0);
+  }
+  function paged() { return document.body.classList.contains('page'); }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    var k = e.key;
+    if (k === 'a' || k === 'A') {
+      document.body.classList.toggle('page');
+      if (!paged()) show(i); else bar.style.width = '100%';
+      return;
+    }
+    if (k === 'p' || k === 'P') { window.print(); return; }
+    if (paged()) return;
+    if (k === 'ArrowRight' || k === ' ' || k === 'PageDown' || k === 'j') { e.preventDefault(); show(i + 1); }
+    else if (k === 'ArrowLeft' || k === 'PageUp' || k === 'k') { e.preventDefault(); show(i - 1); }
+    else if (k === 'Home') show(0);
+    else if (k === 'End') show(slides.length - 1);
+  });
+
+  document.addEventListener('click', function (e) {
+    if (paged() || e.target.closest('a, pre, table, svg')) return;
+    show(i + (e.clientX > window.innerWidth / 2 ? 1 : -1));
+  });
+
+  var start = parseInt((location.hash || '').slice(1), 10);
+  show(isNaN(start) ? 0 : start - 1);
+})();
+</script>
+</body>
+</html>

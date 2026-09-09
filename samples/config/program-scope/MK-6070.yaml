@@ -1,0 +1,822 @@
+# Program scope mapping -- MK-6070
+#
+# PARTLY GENERATED. Do not hand-edit anything below a source's `record_classes`.
+#   regenerate:  ./tools/regen_program_scope.py --write
+#   generated:   against index state 2026-08-30T05:55:43 .. 2026-09-03T06:05:16
+#
+# Every field list here was read from each source's real ingest mapping
+# (`mappings.document.properties`, `dynamic: strict`) and each source's own unfiltered facet
+# response, through the connector's startup cache -- so this file and the running connector
+# cannot disagree about the index.
+#
+# WHY IT IS GENERATED. The hand-written version claimed 27 `searchable_fields` of which
+# **19 did not exist**; `indexed_text` and `date` existed on no source at all. A condition on
+# a nonexistent field returns 0 records at HTTP 200, indistinguishable from absence, so the
+# file steered readers toward silent zeros while looking authoritative.
+#
+# WHAT IS STILL AUTHORED, and is not derivable from any index: the program filter field and
+# literal per source, `boundary_strength` and its caveat, `record_classes`, `display_name`,
+# typed `identifiers`, and the scientific `known_limitations`.
+#
+# STILL PROVISIONAL AND NOT PRODUCTION-OWNED OR REVIEWED. Generating the field lists closed
+# some of the original open items and none of the ownership ones -- see `verification_open_items`.
+# Being generated is not being reviewed, and the first regeneration of this file lost that
+# distinction by dropping the old `STATUS: PROVISIONAL` header.
+#
+# `null` means UNKNOWN, never "none" -- an unmeasured facet set and a source that computes no
+# facets are different facts, and only the second may be relied on.
+#
+# The connector reads only `muse_project`, and per source `enabled`,
+# `program_filter_field`, `program_filter_values` and `boundary_strength`. Everything else is
+# orientation for a human reader and for `tools/muse_contract_check.py`. The authoritative
+# field list is always the live mapping, never this file.
+
+program: MK-6070
+muse_project: muse
+identifiers:
+  exact_alias:
+  - MK-6070
+  - MK6070
+  historical_or_partner_name:
+  - HPN328
+  broader_project_code:
+  - value: M0060070
+    type: project_m_code
+    reach: Superset. Observed to return MK-6070/DLL3 records, controls, mixed DLL3/Trop2 records,
+      AND pure Trop2 records. A first-stage boundary only. Retained records additionally require exact
+      internally represented MK-6070, MK6070, or HPN328 relevance, with comparator and related-program
+      context kept distinguishable.
+  comparator_or_contextual:
+  - value: Trop2
+    note: Appears inside the broader project code population. Retrieve only as deliberate comparator
+      context; never absorb as MK-6070 program evidence.
+  unresolved_candidate: []
+verification_open_items:
+  open:
+  - production ownership and qualified review of these identifiers and per-source bindings. Nothing
+    here has been reviewed by an accountable owner.
+  - repetition with another program, and under different access conditions. Everything measured so
+    far is one program under one caller's access.
+  - correctly formed conditional INCLUSION and EXCLUSION controls per source. The exclusion identity
+    (population minus the A-or-B match equals the MUST_NOT count) is verified on meds only; the impossible-condition
+    control is verified on all five.
+  closed_by_measurement:
+  - repeatable mapping validation and drift detection — `./tools/regen_program_scope.py` regenerates
+    every field list from the live index, and `index_fingerprint` below changes when the configuration
+    does.
+  - 'pagination beyond initial result budgets — measured: the per-request record limit has no 50 cap,
+    the real ceiling is 10,000 records per request, and an offset at or past 10,000 fails loudly with
+    HTTP 400 rather than returning an empty page.'
+known_limitations:
+- Recall and completeness are UNKNOWN. Access, indexing, ranking, truncation, and result budgets all
+  shape visible coverage.
+- 'Cross-source linking is weak to moderate: shared exact identifiers are inconsistently represented
+  across sources, so same-study cross-source chains often cannot be established. Report that as a
+  coverage limitation rather than inferring the link.'
+- Distinct scientific and lifecycle roles must stay distinguishable — target profiles, validation
+  records, plans, execution records, statistical analyses, reports, notebooks, presentations, publications.
+  Relate them when represented identifiers support it; never deduplicate them because titles or indexed
+  content are similar.
+- Quoted hyphenated terms are not guaranteed to behave as literal exact matches in every datasource.
+- MK-6070 and MK6070 behaved equivalently in the tested sources; alias sensitivity is otherwise source-dependent.
+- 'CORRECTED 2026-08-26. This previously said some hybrid requests execute as keyword-only and that
+  requested mode, effective mode and fallback must stay explicit. Measured: semantic retrieval is
+  available on two of five sources. On the other three it is REFUSED rather than answered by keyword
+  under a similarity label, and where a source silently returns term matches to a similarity request
+  the connector detects it and says so. There is no fallback to keep explicit; `knn_available` per
+  source is generated below.'
+- Highlights may emphasize an opening section or table of contents and may not reliably surface later
+  conclusions. Indexed text is not guaranteed to represent the complete controlled source; full-document
+  review is a separate source-system and authorization concern.
+- 'Extracted document text is not structurally faithful: table cells arrive as separate lines with
+  row and column associations lost, so for a specification limit or acceptance criterion the locator
+  is the answer rather than an extracted value.'
+- The QA SSO token is short-lived; multi-call retrieval needs a shared deadline and bounded call budget.
+generated_from:
+  index_fingerprint: 0b5d7e648bcb4d49
+  sources_measured:
+  - kneat
+  - med_comms
+  - meds
+  - mmdkx
+  - mrl_slides
+  - scited
+  - signals
+  - teamspace
+  index_dates:
+    kneat: '2026-09-02T13:01:15'
+    med_comms: '2026-09-03T05:00:03'
+    meds: '2026-09-03T05:14:44'
+    mmdkx: '2026-09-01T00:16:52'
+    mrl_slides: '2026-09-03T06:05:16'
+    scited: '2026-08-30T05:55:43'
+    signals: '2026-09-02T03:24:16'
+    teamspace: '2026-09-03T01:01:00'
+  regenerate_with: ./tools/regen_program_scope.py --write
+sources:
+  meds:
+    display_name: MEDS
+    enabled: true
+    program_filter_field: product_name.raw
+    program_filter_values:
+    - MK-6070
+    boundary_strength: exact
+    record_classes:
+    - controlled and strategy documents
+    - validation and qualification records
+    known_limitations:
+    - Exact filter passed positive and impossible-value negative controls; this proves the filter
+      is applied, not that every admitted record is exclusively about MK-6070.
+    - 'CORRECTED 2026-08-26. This previously read "requested facets were sparse or unconfigured in
+      testing", which described a mechanism as data. Measured: the program filter field is not one
+      the facets endpoint computes a facet for, and filtering on such a field zeroes the whole distribution
+      — 1 field returned where 35 are computed unfiltered. Nothing is sparse. See `program_filter_facetable`
+      below.'
+    mapped_fields: 94
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      status:
+      - doc_status
+      title:
+      - title
+    unfillable_roles: []
+    taxonomy_roles:
+    - analytical_method
+    - cmo_name
+    - commercialization_step
+    - document_type
+    - dosage_package_form
+    - drug_name
+    - issue
+    - manufacturing_step
+    - material_type
+    - site_location
+    searchable_fields:
+    - _all
+    - applicable_areas
+    - applicable_sites_label
+    - artifact_name
+    - author
+    - country
+    - creation_date
+    - division_abbreviation
+    - doc_status
+    - document_language
+    - file_category
+    - folder_level1
+    - folder_level2
+    - folder_level3
+    - folder_level4
+    - folder_level5
+    - folder_level6
+    - folder_level7
+    - folder_level_any
+    - mmd_tag_analytical_method
+    - mmd_tag_cmo_name
+    - mmd_tag_commercialization_step
+    - mmd_tag_document_type
+    - mmd_tag_dosage_package_form
+    - mmd_tag_drug_name
+    - mmd_tag_issue
+    - mmd_tag_manufacturing_step
+    - mmd_tag_material_type
+    - mmd_tag_names_raw
+    - mmd_tag_site_location
+    - modified_date
+    - primary_group_meds
+    - sensitivity
+    - site_meds
+    - subgroup_meds
+    - text
+    - title
+    facet_fields:
+    - applicable_areas
+    - applicable_sites_label
+    - artifact_name
+    - author
+    - country
+    - creation_date
+    - division_abbreviation
+    - doc_status
+    - document_language
+    - file_category
+    - folder_level1
+    - folder_level2
+    - folder_level3
+    - folder_level4
+    - folder_level5
+    - folder_level6
+    - folder_level7
+    - folder_level_any
+    - mmd_tag_analytical_method
+    - mmd_tag_cmo_name
+    - mmd_tag_commercialization_step
+    - mmd_tag_document_type
+    - mmd_tag_dosage_package_form
+    - mmd_tag_drug_name
+    - mmd_tag_issue
+    - mmd_tag_manufacturing_step
+    - mmd_tag_material_type
+    - mmd_tag_names_raw
+    - mmd_tag_site_location
+    - modified_date
+    - primary_group_meds
+    - sensitivity
+    - site_meds
+    - subgroup_meds
+    program_filter_facetable: false
+    knn_available: true
+    full_text_retrieval: true
+    program_filter_facetable_note: 'The poison rule: this source''s program filter field is not one
+      the facets endpoint computes a facet for, so filtering on it zeroes the whole distribution.
+      A distribution request here is answered over a query-scoped superset with both counts reported,
+      or refused with the reason -- never as one sparse-looking field.'
+  med_comms:
+    display_name: Medical Communications
+    enabled: true
+    program_filter_field: primary_mkv_number1.raw
+    program_filter_values:
+    - MK-6070
+    boundary_strength: exact
+    record_classes:
+    - medical communications and evidence-dissemination records
+    known_limitations:
+    - Observed scoped population of 19 records; facets reduced it materially.
+    - Hybrid changed ranking without observed coverage gain. Treat hybrid as optional, never a default.
+    - Alias HPN328 added no unique records in the bounded clinical lane.
+    mapped_fields: 77
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      status:
+      - activity_status
+      - doc_status
+      title:
+      - title
+    unfillable_roles: []
+    taxonomy_roles: []
+    searchable_fields:
+    - _all
+    - activity_status
+    - activity_types
+    - approval_date
+    - author
+    - categories
+    - cbl_customer_business_line
+    - classification
+    - congress
+    - country
+    - creation_date
+    - department
+    - discover_tags
+    - doc_status
+    - document_number
+    - drc_approval_date
+    - effective_date
+    - file_category
+    - indication
+    - intended_use
+    - is_this_ldg
+    - key_contact
+    - language
+    - model_type
+    - modified_date
+    - payer
+    - payer_regions
+    - payer_topics
+    - plan_year
+    - planned_actual_protocol_approval_date
+    - planned_actual_report_completion_date
+    - primary_indications
+    - primary_mkv_number1
+    - proactive
+    - product
+    - product_generic_trade_name
+    - recorded
+    - send_this_document_from_vvmc_to_irms
+    - study_country
+    - study_name
+    - sub_therapeutic_area
+    - subtype
+    - text
+    - therapeutic_area
+    - therapeutic_area_veap
+    - title
+    - topic
+    - type
+    facet_fields:
+    - activity_status
+    - activity_types
+    - approval_date
+    - author
+    - categories
+    - cbl_customer_business_line
+    - classification
+    - congress
+    - country
+    - creation_date
+    - department
+    - discover_tags
+    - document_number
+    - drc_approval_date
+    - effective_date
+    - file_category
+    - indication
+    - intended_use
+    - is_this_ldg
+    - key_contact
+    - language
+    - model_type
+    - modified_date
+    - payer
+    - payer_regions
+    - payer_topics
+    - plan_year
+    - planned_actual_protocol_approval_date
+    - planned_actual_report_completion_date
+    - primary_indications
+    - primary_mkv_number1
+    - proactive
+    - product
+    - product_generic_trade_name
+    - recorded
+    - send_this_document_from_vvmc_to_irms
+    - study_country
+    - study_name
+    - sub_therapeutic_area
+    - subtype
+    - therapeutic_area
+    - therapeutic_area_veap
+    - topic
+    - type
+    program_filter_facetable: true
+    knn_available: true
+    full_text_retrieval: true
+  scited:
+    display_name: SciTed
+    enabled: true
+    program_filter_field: compound_id.raw
+    program_filter_values:
+    - MK-6070
+    boundary_strength: exact
+    record_classes:
+    - scientific abstracts
+    known_limitations:
+    - Observed scoped population of 5 abstracts.
+    - NCT04471727 linked six MRL Slides records but no SciTed records, so a same-study cross-source
+      chain was not established.
+    mapped_fields: 30
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      title:
+      - title
+    unfillable_roles:
+    - body
+    - status
+    taxonomy_roles: []
+    searchable_fields:
+    - _all
+    - author
+    - compound_id
+    - issued_date
+    - modified_date
+    - publication_type
+    - source_journal
+    - title
+    facet_fields:
+    - author
+    - compound_id
+    - issued_date
+    - modified_date
+    - publication_type
+    - source_journal
+    program_filter_facetable: true
+    knn_available: false
+    full_text_retrieval: true
+  mrl_slides:
+    display_name: MRL Slides
+    enabled: true
+    program_filter_field: compound.raw
+    program_filter_values:
+    - MK-6070 (HPN328)
+    boundary_strength: exact
+    record_classes:
+    - presentations
+    - slide decks
+    known_limitations:
+    - Filter value embeds the partner name; it is a single literal metadata value, not two separate
+      aliases.
+    - 'CORRECTED 2026-08-26. This previously read "observed population of 70 records with retrieval
+      capped at 50". The 50 was OURS, not the API''s: `limit` has no 50 cap and one request returns
+      this whole population. The real ceiling is 10,000 records per request, and above it the result
+      states that retrieval was incomplete rather than truncating silently.'
+    mapped_fields: 28
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      title:
+      - title
+    unfillable_roles:
+    - status
+    taxonomy_roles: []
+    searchable_fields:
+    - _all
+    - biomarker_and_diagnostic
+    - compound
+    - congress
+    - creation_date
+    - file_category
+    - functional_area
+    - modified_date
+    - protocol
+    - slide_keyword
+    - text
+    - title
+    - tumor_type
+    - year
+    facet_fields:
+    - biomarker_and_diagnostic
+    - compound
+    - congress
+    - creation_date
+    - file_category
+    - functional_area
+    - modified_date
+    - protocol
+    - slide_keyword
+    - tumor_type
+    - year
+    program_filter_facetable: true
+    knn_available: false
+    full_text_retrieval: true
+  signals:
+    display_name: Signals
+    enabled: true
+    program_filter_field: project_m_code.raw
+    program_filter_values:
+    - M0060070
+    boundary_strength: broad
+    caveat: BROAD FIRST-STAGE BOUNDARY ONLY. This exact filter was observed to admit MK-6070/DLL3
+      records, controls, mixed DLL3/Trop2 records, and pure Trop2 records. Establish exact program
+      relevance per record, and keep comparator and related-program context distinguishable. Do not
+      treat an admitted record as program evidence on the strength of this filter alone.
+    record_classes:
+    - experiments and notebook records
+    - assay and binding data
+    known_limitations:
+    - FIELD SELECTION IS MATERIAL. Identifier EXP22000794 was returned by a free-text search across
+      everything, but a condition limited to experiment_objective MISSED it.
+    - CORRECTED 2026-08-26. The entry above used to end "widen the field before concluding absence."
+      Widening addresses ONE of seven measured causes of a plausible zero, and the connector's own
+      advice used to name a field that exists on no source, so the retry returned a second zero that
+      read as corroboration. An empty result now arrives with the causes that were actually ruled
+      out; read those.
+    - Conditional Trop2 exclusion was NOT verified — the attempted request envelopes were invalid
+      (HTTP 400 from client-side construction, not demonstrated retrieval failure).
+    - NB-06064-0002 was the clearest direct isoform-binding record observed.
+    mapped_fields: 45
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      status:
+      - experiment_status
+      title:
+      - title
+    unfillable_roles: []
+    taxonomy_roles: []
+    searchable_fields:
+    - _all
+    - author
+    - company
+    - creation_date
+    - experiment_compound_id
+    - experiment_organism
+    - experiment_products
+    - experiment_reactants
+    - experiment_review_status
+    - experiment_solvent
+    - experiment_status
+    - experiment_technology
+    - file_category
+    - modified_date
+    - notebook
+    - organization_name
+    - project_m_code
+    - text
+    - therapeutic_modality
+    - title
+    - user_group
+    facet_fields:
+    - author
+    - company
+    - creation_date
+    - experiment_compound_id
+    - experiment_organism
+    - experiment_products
+    - experiment_reactants
+    - experiment_review_status
+    - experiment_solvent
+    - experiment_status
+    - experiment_technology
+    - file_category
+    - modified_date
+    - notebook
+    - organization_name
+    - project_m_code
+    - therapeutic_modality
+    - user_group
+    program_filter_facetable: true
+    knn_available: false
+    full_text_retrieval: true
+  mmdkx:
+    display_name: Product Technical Document
+    enabled: true
+    program_filter_field: product_site.raw
+    program_filter_values:
+    - MK-6070
+    boundary_strength: exact
+    record_classes:
+    - product technical knowledge across Development, Commercialization and Supply
+    - process characterization summary reports
+    - tech transfer documents
+    known_limitations:
+    - 'Measured 2026-09-01: exact filter took 639,661 records to 1,718; an impossible value returned
+      0, so the filter is applied. 25 of 25 sampled records carried `MK-6070` in `product_site` as
+      the sole value, so this is an exact boundary rather than a superset.'
+    - 'CONTENT STATE. Measured 2026-09-01: 1,713 of 1,718 records are `content_status: Work in progress/draft`;
+      4 are Final and 1 is For Reference Only. A draft is neither currently documented nor approved
+      state — see `references/program-state-and-currentness.md` §2. Draft status must travel with
+      any meaning taken from a record here.'
+    - Mixed formats — 459 pdf, 383 powerpoint, 237 word, 218 excel, 179 image. Extraction fidelity
+      on decks and spreadsheets is untested, and the table-fidelity caveat applies with force to the
+      218 spreadsheets.
+    - '`mmd_tag_drug_name` resolves to an unknown taxonomy node on 973 of 1,718 records, so tag-based
+      narrowing inside the population is incomplete.'
+    mapped_fields: 39
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      title:
+      - title
+    unfillable_roles:
+    - status
+    taxonomy_roles:
+    - analytical_method
+    - cmo_name
+    - commercialization_step
+    - document_type
+    - dosage_package_form
+    - drug_name
+    - issue
+    - manufacturing_step
+    - material_type
+    - site_location
+    searchable_fields:
+    - _all
+    - author
+    - content_status
+    - creation_date
+    - file_category
+    - mmd_tag_analytical_method
+    - mmd_tag_cmo_name
+    - mmd_tag_commercialization_step
+    - mmd_tag_document_type
+    - mmd_tag_dosage_package_form
+    - mmd_tag_drug_name
+    - mmd_tag_issue
+    - mmd_tag_manufacturing_step
+    - mmd_tag_material_type
+    - mmd_tag_names_raw
+    - mmd_tag_site_location
+    - modified_date
+    - product_site
+    - text
+    - title
+    facet_fields:
+    - author
+    - content_status
+    - creation_date
+    - file_category
+    - mmd_tag_analytical_method
+    - mmd_tag_cmo_name
+    - mmd_tag_commercialization_step
+    - mmd_tag_document_type
+    - mmd_tag_dosage_package_form
+    - mmd_tag_drug_name
+    - mmd_tag_issue
+    - mmd_tag_manufacturing_step
+    - mmd_tag_material_type
+    - mmd_tag_names_raw
+    - mmd_tag_site_location
+    - modified_date
+    - product_site
+    program_filter_facetable: true
+    knn_available: false
+    full_text_retrieval: true
+  teamspace:
+    display_name: SharePoint
+    enabled: true
+    program_filter_field: folder_level2.raw
+    program_filter_values:
+    - MK-6070
+    boundary_strength: exact
+    record_classes:
+    - governance forum material — session decks, minutes and recordings
+    known_limitations:
+    - 'Measured 2026-09-03: exact filter returns 48 records; an impossible value returned 0. 25 of
+      25 sampled records carried `MK-6070` in `folder_level2`. `folder_level_any` prefix-derived over
+      all aliases returns the same 48, so 48 is the complete folder-scoped set.'
+    - 'SINGLE FORUM. All 48 records sit under one SharePoint site, `SterileTechReviews`, across 21
+      dated sessions. This is decision and discussion material: product lock, commercial diluent lock,
+      stage gate, and siting. Authority for those acts is external — `references/assurance-review-and-authority.md`
+      §7. Preserve permitted references, never the act.'
+    - 13 of 48 records are video and are not retrievable as text. 22 are powerpoint and 13 are word.
+    - Narrower than free text — 48 folder-scoped against 287 free-text hits for the programme, so
+      material mentioning MK-6070 outside its folder is not reachable by this filter.
+    mapped_fields: 55
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      title:
+      - title
+    unfillable_roles:
+    - status
+    taxonomy_roles:
+    - analytical_method
+    - cmo_name
+    - commercialization_step
+    - document_type
+    - dosage_package_form
+    - drug_name
+    - issue
+    - manufacturing_step
+    - material_type
+    - site_location
+    searchable_fields:
+    - _all
+    - author
+    - creation_date
+    - file_category
+    - folder_level1
+    - folder_level2
+    - folder_level3
+    - folder_level4
+    - folder_level5
+    - folder_level6
+    - folder_level7
+    - folder_level_any
+    - mmd_tag_analytical_method
+    - mmd_tag_cmo_name
+    - mmd_tag_commercialization_step
+    - mmd_tag_document_type
+    - mmd_tag_dosage_package_form
+    - mmd_tag_drug_name
+    - mmd_tag_issue
+    - mmd_tag_manufacturing_step
+    - mmd_tag_material_type
+    - mmd_tag_names_raw
+    - mmd_tag_site_location
+    - modified_date
+    - site_name
+    - teamspace_site_group
+    - text
+    - title
+    facet_fields:
+    - author
+    - creation_date
+    - file_category
+    - folder_level1
+    - folder_level2
+    - folder_level3
+    - folder_level4
+    - folder_level5
+    - folder_level6
+    - folder_level7
+    - folder_level_any
+    - mmd_tag_analytical_method
+    - mmd_tag_cmo_name
+    - mmd_tag_commercialization_step
+    - mmd_tag_document_type
+    - mmd_tag_dosage_package_form
+    - mmd_tag_drug_name
+    - mmd_tag_issue
+    - mmd_tag_manufacturing_step
+    - mmd_tag_material_type
+    - mmd_tag_names_raw
+    - mmd_tag_site_location
+    - modified_date
+    - site_name
+    - teamspace_site_group
+    program_filter_facetable: true
+    knn_available: true
+    full_text_retrieval: true
+  kneat:
+    display_name: eVal/KNEAT
+    enabled: true
+    program_filter_field: folder_level_any.raw
+    program_filter_values: []
+    program_filter_value_prefixes:
+    - MK-6070
+    - MK6070
+    - HPN328
+    boundary_strength: exact
+    record_classes:
+    - validation and qualification documents
+    - process validation, analytical method validation and computer system validation records
+    known_limitations:
+    - 'DERIVED FILTER VALUES, not stored. This source files the programme under a folder path rather
+      than a single stored literal — measured 2026-09-03, 70 distinct folder terms begin with a programme
+      alias, one per site and activity (`MK-6070 (GAMV-AMV)`, `MK-6070 (BNX-AMV)`, `MK-6070 (500-DBY-PV)`,
+      `MK-6070 (CAR3-CAR-PV)`, `MK-6070 MDCR (EMP-500-DBY-GCSV)` and 65 more). `program_filter_values`
+      is therefore EMPTY here and re-derived by prefix search at every startup: a stored list would
+      silently stop covering the programme the first time a new site folder appeared. If the derivation
+      returns nothing the source is refused rather than searched unscoped.'
+    - 'Measured 2026-09-03: the derived 70-term filter returns 114 records; an impossible folder value
+      returned 0, so the filter is applied. 25 of 25 sampled records carried a programme folder in
+      `folder_level_any`. All 114 are `kneat_status` Approved (20) or Post Approved (94) — this source
+      carries no draft state — and 114 of 114 are PDF.'
+    - 'Narrower than free text: 114 folder-scoped against 347 free-text hits for the programme, so
+      validation material filed outside a programme folder is not reachable by this filter. `folder_level4`
+      alone reaches only 29 of the 114, so the boundary must stay at `folder_level_any`.'
+    - '`document_type` is populated on 12 of 114 records, so it is not usable for narrowing inside
+      the population. `discipline` is populated on all 114 and is the useful axis: Process Validation
+      47, GCSV 34, Analytical Method Validation 29, MRL Validation 4.'
+    mapped_fields: 44
+    mapping_complete: true
+    field_roles:
+      anywhere:
+      - _all
+      body:
+      - text
+      title:
+      - title
+    unfillable_roles:
+    - status
+    taxonomy_roles: []
+    searchable_fields:
+    - _all
+    - creation_date
+    - discipline
+    - document_category
+    - document_number
+    - document_type
+    - file_category
+    - folder_level1
+    - folder_level2
+    - folder_level3
+    - folder_level4
+    - folder_level5
+    - folder_level6
+    - folder_level7
+    - folder_level_any
+    - kneat_status
+    - modified_date
+    - site
+    - text
+    - title
+    - version
+    - workspace
+    facet_fields:
+    - creation_date
+    - discipline
+    - document_category
+    - document_number
+    - document_type
+    - file_category
+    - folder_level1
+    - folder_level2
+    - folder_level3
+    - folder_level4
+    - folder_level5
+    - folder_level6
+    - folder_level7
+    - folder_level_any
+    - kneat_status
+    - modified_date
+    - site
+    - version
+    - workspace
+    program_filter_facetable: true
+    knn_available: true
+    full_text_retrieval: true
