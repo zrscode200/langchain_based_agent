@@ -213,20 +213,50 @@ host-owned resources open until no old invocation can use them.
 
 With background enabled, `start_background_task` returns an ID immediately.
 Native `task`, `task_settled` and JavaScript `task()` wait for the child result.
-`list_background_tasks` and `cancel_background_task` only address the current
-conversation's work. Existing remote async tools retain the SDK's behavior.
+`list_background_tasks`, `inspect_background_task`, `steer_background_task` and
+`cancel_background_task` only address the current conversation's work. Existing
+remote async tools retain the SDK's behavior.
 Forks cannot recursively detach work or access the main agent's runtime controls.
 Factory approvals and hooks run before detachment, and child tools keep their
 compiled approval controls. A child interrupt becomes `needs_approval` with its
 exact pending action requests. Select Background in the dynamic subagents panel
-and click a task row (or select it with left/right and press Enter) to approve or
-deny the batch, or cancel the task. Ctrl+T expands or collapses the shared panel.
+and click a task row (or select it with left/right and press Enter) for its live
+activity window. **Review** opens a frozen approval snapshot; **Cancel task**
+stops the selected child. Ctrl+T expands or collapses the shared panel.
 Background rows survive main-turn completion and cancellation. The retained child checkpoint resumes without
 replaying completed steps. Waiting for approval is not a final result and is not
 acknowledged by the main agent's result-delivery path. Server hooks use their
 existing client-owned fulfillment path; unsupported input requests and requests
 exceeding the review panel's 24,000-character display limit remain blocked and
 can be cancelled. The TUI never resumes the parent graph to settle a child.
+
+Factory-built children support bounded main-agent inspection and steering.
+Inspection includes assignment/status/result, recent observable tool names and
+execution states, explicit findings from `report_background_task`, and steering
+delivery state. It does not expose private reasoning, model transcripts or raw
+tool outputs. The read-only TUI activity window uses the same inspection data;
+there is no direct user-to-child message box or host steering endpoint.
+
+`steer_background_task(task_id, message)` queues a correction for the child's
+next model step. An already admitted tool normally finishes. A message is
+**queued** when accepted, **delivered** when included in a child model request,
+and **acknowledged** only when the child explicitly reports its message ID through
+`report_background_task`. Delivery does not imply compliance. Activity retains
+128 recent records with at most 2,048 characters per report; steering accepts
+32 messages of at most 2,000 characters per job. A completed or cancelled child
+closes its inbox. Any remaining undelivered message records that terminal outcome;
+the child is never restarted to deliver it. A custom task tool submitted directly
+to the background registry without factory instrumentation advertises unsupported
+steering and retains its ordinary background lifecycle. This does not expand the
+factory constructor's supported subagent definitions.
+
+Steering conservatively supersedes earlier action proposals. Supported stale
+approval batches are rejected through the same checkpoint continuation, and
+old user responses are refused. Hooks keep their genuine invocation/snapshot
+response path; steering cannot grant approval or manufacture hook responses.
+A final tool admission check blocks obsolete proposals after a hook pause.
+Unknown input requests remain paused. These controls do not turn arbitrary
+shell processes, downloads or remote asynchronous jobs into steerable agents.
 
 Defaults are four running local jobs, 128 retained jobs, a one-hour execution budget,
 and 64,000 characters per result. Jobs are in memory and are cancelled at runtime

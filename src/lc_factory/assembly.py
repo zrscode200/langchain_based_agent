@@ -2123,6 +2123,9 @@ def create_factory_agent(
         if task_tool is not None:
             task_tool.metadata = {**(task_tool.metadata or {}),
                 "lc_factory_subagent_names": tuple(spec["name"] for spec in custom_subagents),
+                "lc_factory_steerable_subagents": tuple(spec["name"] for spec in custom_subagents
+                    if "runnable" not in spec and any(m.name == "BackgroundChildMiddleware"
+                                                      for m in spec.get("middleware", []))),
                 "lc_factory_structured_subagents": tuple(spec["name"] for spec in custom_subagents
                                                         if spec.get("response_format") is not None)}
     if effective_recursion_limit is not None:

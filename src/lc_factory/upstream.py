@@ -28,7 +28,7 @@ from deepagents.middleware.subagents import (
 # --- LangChain runtime ---
 from langchain.agents.middleware import ToolErrorMiddleware
 from langchain.agents.structured_output import ToolStrategy
-from langchain.agents.middleware.types import AgentMiddleware, AgentState, OmitFromSchema
+from langchain.agents.middleware.types import AgentMiddleware, AgentState, OmitFromSchema, PrivateStateAttr, hook_config
 from langchain_core._api import suppress_langchain_beta_warning
 from langgraph_sdk.runtime import ServerRuntime as LangGraphServerRuntime
 
@@ -337,6 +337,8 @@ __all__ = [
     "discover_plugin_mcp_configs", "resolve_and_load_mcp_tools",
     "get_thread_workspace",
     "AgentState",
+    "PrivateStateAttr",
+    "hook_config",
     "Runtime",
     'ToolRuntime',
     'ToolCallRequest',

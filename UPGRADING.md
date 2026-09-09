@@ -174,9 +174,23 @@ private (underscore) names that carry no semver protection.
    must resume without repeating a prior protected write, for isolated and fork
    modes. Keep host approval responses bound to owner/job/current interrupt IDs,
    separate from the foreground approval UI and main result acknowledgment.
+   Recheck child-last middleware ordering for steering: before-model injection,
+   actual request delivery, stale after-model proposals and final tool admission
+   after Hooks-v2/HITL resume. Stable steering IDs and private checkpoint revision
+   must survive continuation; explicit acknowledgments must refer to delivered
+   messages. Never fabricate hook replies or restart children to deliver late
+   guidance. Verify multi-action approval rejection, fresh published pause IDs,
+   structured results, reload and cancellation/terminal inbox races.
+   Keep inspection/model-list projections separate from host hook transport:
+   PostToolUse payloads contain raw intermediate tool results. Observe failure
+   status in both direct ToolMessages and matching Command-carried messages.
    `background_ui.py` uses RemoteAgent's authenticated transport/workspace binding
    and a hidden controller feeding the native dynamic subagent panel; its headless
-   tests guard switching, shutdown and stale decisions. `background_panel.py` extends
+   tests guard switching, shutdown and stale decisions. `background_activity.py`
+   opens a read-only, owner-bound detail window from the native row and keeps
+   live updates separate from frozen `TaskReview` approval snapshots. Recheck
+   single-flight inspection, narrow layout, scroll position and teardown.
+   `background_panel.py` extends
    the currently installed panel class (including enterprise replay handling).
    Recheck native prepare_turn/finalize_running/reset, phase navigation and row
    review at narrow widths. Recheck cancellation against

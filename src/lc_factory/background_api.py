@@ -21,10 +21,12 @@ async def background(request):
             if operation != "list":
                 return JSONResponse({"detail": "Background tasks are unavailable"}, status_code=409)
             return JSONResponse({"tasks": [], "enabled": False})
-        if operation in ("resume", "cancel"):
+        if operation in ("inspect", "resume", "cancel"):
             task_id = body.get("task_id")
             if not isinstance(task_id, str) or task_id not in tasks.jobs or tasks.jobs[task_id].owner != owner:
                 return JSONResponse({"detail": "Unknown task for this conversation"}, status_code=404)
+            if operation == "inspect":
+                return JSONResponse({"task": tasks.inspect(owner, task_id), "enabled": True})
             if operation == "resume":
                 tasks.resume(owner, task_id, body.get("responses"))
             else:

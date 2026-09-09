@@ -51,9 +51,13 @@ See [runtime configuration](../TALON_ADAPTATIONS.md#use-with-lc-code).
 
 The TUI shows background tasks in its existing dynamic subagents panel while the
 main agent is idle or working. Expand with Ctrl+T, select Background, then click
-a task row or press Enter to approve/deny its exact pending actions or cancel it; the same
-child resumes without repeating completed steps. These jobs end with the server
-session. Existing Manual/Auto/YOLO policy is unchanged.
+a task row or press Enter to see its live activity in a dedicated window. The
+window shows assignment, tool activity, reported findings, steering status and
+results. **Review** opens its exact pending actions for approval/denial, and
+**Cancel task** stops it. The same child resumes without repeating completed
+steps. The main agent can inspect and steer supported running children; normal
+chat still goes to the main agent. These jobs end with the server session.
+Existing Manual/Auto/YOLO policy is unchanged.
 
 For an application such as ICS, opt into the shared
 [project skill policy](../README.md) with `.deepagents/skills.toml`:

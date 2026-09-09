@@ -239,7 +239,7 @@ class BackgroundPanel(Vertical):
         panel = self.presentation()
         panel.on_background_reset = self.invalidate
         self.details = {j["task_id"]: (self.identity, deepcopy(j)) for j in self.jobs}
-        panel.set_background_jobs(self.jobs, self.review_task)
+        panel.set_background_jobs(self.jobs, self.show_task)
 
     def on_mount(self):
         self.timer = self.set_interval(1.0, self.schedule_refresh)
@@ -435,6 +435,33 @@ class BackgroundPanel(Vertical):
             return await self.submit(identity, **operation)
 
         self.app.push_screen(TaskReview(job, submit))
+
+    def show_task(self, task_id):
+        """Open the selected child's live activity without redirecting chat."""
+        from lc_factory.background_activity import TaskActivity
+        detail = self.details.get(task_id)
+        if detail is None:
+            return
+        identity, job = detail
+        if not self.valid(identity):
+            return
+
+        def current():
+            return self.valid(identity)
+
+        async def inspect():
+            agent, owner, _ = identity
+            async with asyncio.timeout(15):
+                response = await background_request(agent, owner, is_current=current,
+                                                    operation="inspect", task_id=task_id)
+            if not current():
+                raise ValueError("Conversation changed; reopen this task")
+            return response["task"]
+
+        async def submit(**operation):
+            return await self.submit(identity, **operation)
+
+        self.app.push_screen(TaskActivity(job, inspect, submit, current))
 
 
 @contextmanager

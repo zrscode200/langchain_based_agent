@@ -10,8 +10,9 @@ from contextlib import asynccontextmanager, aclosing
 from pathlib import Path
 from typing import Annotated, NotRequired
 
-from lc_factory.assembly import create_factory_agent, _normalize_injected_middleware
+from lc_factory.assembly import create_factory_agent, _normalize_injected_middleware, _normalize_subagent_middleware
 from lc_factory.background import BackgroundTasks, is_child, thread_id
+from lc_factory.background_child import BackgroundChildMiddleware
 from lc_factory.archive import ArchiveScope, conversation_tools
 from lc_factory.workspace_subagents import load_subagent_policy
 from lc_factory.skill_policy import skill_policy_root
@@ -295,6 +296,10 @@ class FactoryRuntime:
                 if self.background is not None:
                     phases["last"].append(self.background)
                 build = {**candidate, "middleware": phases}
+                if self.background is not None:
+                    child_phases = _normalize_subagent_middleware(candidate.get("subagent_middleware"))
+                    child_phases["last"].append(BackgroundChildMiddleware())
+                    build["subagent_middleware"] = child_phases
                 agent, backend = await asyncio.to_thread(create_factory_agent, **build)
             replacement = ServerRuntime(agent, backend, offload_operation_from(backend))
         except BaseException:

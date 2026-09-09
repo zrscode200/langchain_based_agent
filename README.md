@@ -229,12 +229,22 @@ remains compatible with the pinned harness.
 
 Both clients show background tasks in the existing dynamic subagents panel,
 independently of the main turn. Use Ctrl+T to expand it, select Background and
-click a task row (or select a task with left/right and press Enter) to review,
-approve or deny its pending actions, or cancel it. Decisions
+click a task row (or select a task with left/right and press Enter) to open its
+live activity window. It shows the assignment, recent tool activity, reported
+findings, steering status, result and pending approval. **Review** opens the exact
+actions for approval or denial; **Cancel task** stops that child. Decisions
 resume that same child; they do not restart its completed work or resume the main
 agent. Final results still reach the main agent on its next turn. Tasks live only
-for the current server session. Main-agent live inspection/steering is not yet
-part of these controls.
+for the current server session.
+
+The main agent can use `inspect_background_task` and `steer_background_task` to
+check or correct a running factory child. Corrections arrive before its next
+model step; an already running tool can finish. Queued, delivered and explicitly
+acknowledged messages are distinct. Superseded pending actions cannot use an old
+approval. Completed or cancelled children cannot receive further instructions.
+The activity window is read-only; continue speaking to the main agent in normal
+chat. Custom task tools without factory instrumentation do not support detailed
+activity or steering.
 
 Applications can opt out of personal skill discovery using
 `.deepagents/skills.toml` in their project root:

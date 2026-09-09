@@ -265,7 +265,7 @@ def background_subagent_panel_class(base_class):
                 return
             background_visible = self._background_phase is not None and self._displayed_phase() is self._background_phase
             help_widget.display = background_visible and self.expanded
-            help_text = "↑↓ phase · ←→ task · Enter/click review"
+            help_text = "↑↓ phase · ←→ task · Enter/click activity"
             if self._background_truncated:
                 help_text += f" · first {_MAX_JOBS} tasks"
             self._update_cached("subagent-background-help", Content(help_text))
