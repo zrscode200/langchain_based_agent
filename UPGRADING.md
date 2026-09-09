@@ -169,6 +169,19 @@ private (underscore) names that carry no semver protection.
    upstream state observable is tripwire maintenance, not an exemption; it
    still requires the rich-case truncation guard and drift injection.
 
+   Recheck the factory's background wrapper against the SDK task-tool invocation
+   and inherited subgraph checkpoint configuration. Two sequential child pauses
+   must resume without repeating a prior protected write, for isolated and fork
+   modes. Keep host approval responses bound to owner/job/current interrupt IDs,
+   separate from the foreground approval UI and main result acknowledgment.
+   `background_ui.py` uses RemoteAgent's authenticated transport/workspace binding
+   and a child panel mounted in the upstream bottom container; its headless tests
+   guard switching, shutdown and stale decisions. Recheck cancellation against
+   the real hook fulfillment ledger, including shielded execution and preservation
+   of unrelated foreground hooks. `skill_policy.py` adapts upstream
+   skill listing/invocation and restores client patches on exit. Recheck all three
+   catalogue paths plus child/reload behavior when those upstream seams change.
+
    Class-valued constructor arguments, including grader state schemas, are
    fingerprinted by fully qualified class identity and the `repr` of their
    declared annotations. Do not recursively traverse generated Pydantic

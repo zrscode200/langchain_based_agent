@@ -748,6 +748,18 @@ async def _workspace_runtime(binding: WorkspaceBinding, *, session=None) -> Serv
         return await _select_factory_runtime(runtime, session)
 
 
+async def background_for_workspace(binding):
+    """Resolve the original workspace owner even after graph reloads."""
+    # Building/selecting can return a newer graph generation. The cache retains
+    # the original runtime whose identity is the owner registry's stable key.
+    base = _workspace_runtimes.get(binding.resource_key)
+    if base is None:
+        await _workspace_runtime(binding)
+        base = _workspace_runtimes.get(binding.resource_key)
+    owner = _factory_runtime_owners.get(id(base.agent)) if base is not None else None
+    return owner.background if owner is not None and not owner.closed else None
+
+
 async def get_server_runtime() -> ServerRuntime:
     """Return resources shared by the graph and dcode operation routes.
 

@@ -153,7 +153,8 @@ async def test_explicit_submission_preserves_parent_and_child_approval(tmp_path)
         await runtime.ainvoke(Command(resume={"decisions": [{"type": "approve"}]}), config)
         await asyncio.wait_for(runtime.background.wait("owner"), 5)
         job = runtime.background.list("owner")[0]
-        assert job["status"] == "needs_approval" and not job["outcome"]["ok"]
+        assert job["status"] == "needs_approval" and job["outcome"] is None
+        assert job["interrupts"] and job["result"] is None
         assert not target.exists()
 
 

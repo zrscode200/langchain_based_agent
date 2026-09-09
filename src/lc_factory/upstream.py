@@ -43,6 +43,8 @@ from langgraph.checkpoint.base import BaseCheckpointSaver, ChannelVersions, Chec
 from langgraph.checkpoint.serde.types import _DeltaSnapshot
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphInterrupt
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import StateGraph, START, END
 from langgraph.types import Command
 from langgraph.runtime import Runtime
 from deepagents_code.subagents import _parse_subagent_file
@@ -237,6 +239,40 @@ def import_offload_api():  # noqa: ANN201
     return offload_api
 
 
+def import_skill_policy_modules():
+    """Lazy client-only discovery seams; do not load the TUI in server graphs."""
+    from deepagents_code import agent, app, project_utils
+    from deepagents_code.skills import invocation, load
+    from deepagents_code.config import credentials
+    return agent, app, load, invocation, credentials, project_utils
+
+
+def import_skill_command_modules():
+    """Lazy command rendering seams for the selected skill catalogue."""
+    from deepagents_code import config, output
+    from deepagents_code.skills import commands
+    return commands, config, output
+
+
+def built_in_skills_dir():
+    from deepagents_code._paths import get_built_in_skills_dir
+    return get_built_in_skills_dir()
+
+
+def find_git_root(path):
+    """Resolve dynamically so enterprise's workspace-root adaptation applies."""
+    from deepagents_code import project_utils
+    return project_utils.find_git_root(path)
+
+
+def validate_background_hook_response(payload, response):
+    from deepagents_code.hooks.interrupt import parse_hook_interrupt_payload, parse_hook_resume_value
+    request = parse_hook_interrupt_payload(payload)
+    if request is None:
+        raise ValueError("Not a hook request")
+    return parse_hook_resume_value(response, invocation_id=request.invocation_id, snapshot_id=request.snapshot_id)
+
+
 def import_tool_calling_test_model():  # noqa: ANN201
     """Load the deterministic model only for subprocess integration fixtures."""
     from deepagents_code._testing_models import ToolCallingIntegrationChatModel
@@ -291,6 +327,9 @@ def import_subagent_dispatch():
 
 
 __all__ = [
+    "StateGraph", "START", "END", "InMemorySaver",
+    "import_skill_policy_modules", "import_skill_command_modules", "built_in_skills_dir", "validate_background_hook_response",
+    "find_git_root",
     "ToolStrategy",
     "OmitFromSchema",
     "get_config_sources",

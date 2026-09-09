@@ -226,3 +226,33 @@ available by default. Trusted `[lc_factory]` preferences control these features;
 environment overrides are optional. Searchable history remains opt-in.
 Use explicit `FactoryRuntime` options when embedding; the bare constructor
 remains compatible with the pinned harness.
+
+Both clients show background tasks independently of the main turn. Open a task's
+Review button to approve or deny its pending actions, or cancel it. Decisions
+resume that same child; they do not restart its completed work or resume the main
+agent. Final results still reach the main agent on its next turn. Tasks live only
+for the current server session. Main-agent live inspection/steering is not yet
+part of these controls.
+
+Applications can opt out of personal skill discovery using
+`.deepagents/skills.toml` in their project root:
+
+```toml
+[skills]
+mode = "project"
+sources = [".agents/skills"]
+include_builtin = false
+```
+
+This selection is shared by the main agent, child agents and client skill
+catalogues. No user-home or automatically discovered plugin skills are included.
+Omit `sources` to use the project's `.deepagents/skills`, `.agents/skills` and
+`.claude/skills` directories; `sources = []` selects none. Set `include_builtin`
+to `true` to include shipped skills. Paths must stay inside the project, including
+symlink targets. Invalid policy fails discovery/startup rather than falling back
+to personal sources. Projects without this file retain personal CLI discovery.
+
+Embedders can pass `skill_policy={"mode": "project", "sources": ["skills"]}`
+to `create_factory_agent`; an explicit constructor policy overrides the file.
+`enable_skills=False` disables the model's skill middleware. Skill selection
+controls discovery, not general file access or historical conversation content.

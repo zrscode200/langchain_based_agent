@@ -49,6 +49,25 @@ structured and JavaScript delegation; both default to `true`.
 (`none` disables background, reload and history).
 See [runtime configuration](../TALON_ADAPTATIONS.md#use-with-lc-code).
 
+The TUI now shows background tasks while the main agent is idle or working. Open
+Review to approve/deny a child's exact pending actions or cancel it; the same
+child resumes without repeating completed steps. These jobs end with the server
+session. Existing Manual/Auto/YOLO policy is unchanged.
+
+For an application such as ICS, opt into the shared
+[project skill policy](../README.md) with `.deepagents/skills.toml`:
+
+```toml
+[skills]
+mode = "project"
+sources = [".agents/skills"]
+```
+
+This removes automatic personal/plugin skill discovery for that application's
+catalogue while ordinary `ddt-agent` use without this policy keeps its defaults.
+Choose the actual application skill directories; this harness does not modify
+ICS configuration automatically.
+
 Interpreter activation/PTC uses current upstream CLI/profile settings.
 The trusted `[lc_factory].interpreter_subagents = false` preference (Python
 `interpreter_subagents=False`), or the optional host-only

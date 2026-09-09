@@ -11,5 +11,50 @@ Only `lc_factory.tui` imports this module.
 """
 
 from deepagents_code import cli_main
+from deepagents_code import app as app_module
 
-__all__ = ["cli_main"]
+__all__ = ["cli_main", "app_module"]
+
+
+async def fulfill_background_hook(hooks, payload):
+    """Fulfill one captured runtime invocation and own its cancellation.
+
+    Upstream shields ledger operations from cancellation of their caller. A
+    background child instead owns this exact snapshot/invocation operation:
+    cancellation must stop and drain it without touching other ledger entries.
+    Completed entries remain cached so repeated delivery never replays a hook.
+    """
+    import asyncio
+
+    from deepagents_code.hooks.client import fulfill_hook_invocation
+    from deepagents_code.hooks.interrupt import parse_hook_interrupt_payload
+
+    runtime = hooks._runtime
+    if runtime is None:
+        raise RuntimeError("Received hook invocation without a HooksRuntime")
+    request = parse_hook_interrupt_payload(payload)
+    if request is None:
+        raise RuntimeError("Failed to parse hook interrupt")
+    ledger = runtime.fulfillments
+    key = (request.snapshot_id, request.invocation_id)
+    try:
+        return await fulfill_hook_invocation(runtime, request)
+    except asyncio.CancelledError:
+        async def cancel_exact_invocation():
+            async with ledger._lock:
+                operation = ledger._in_flight.get(key)
+                if operation is not None:
+                    operation.cancel()
+            if operation is not None:
+                await asyncio.gather(operation, return_exceptions=True)
+
+        # A switch followed by shutdown can cancel our caller twice. Cleanup
+        # still belongs to the captured runtime, even if hooks._runtime changed.
+        cleanup = asyncio.create_task(cancel_exact_invocation())
+        while not cleanup.done():
+            try:
+                await asyncio.shield(cleanup)
+            except asyncio.CancelledError:
+                continue
+        cleanup.result()
+        raise

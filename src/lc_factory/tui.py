@@ -30,5 +30,8 @@ def main() -> None:
     need upstream's original behavior back must restore it themselves.
     """
     server_manager_module._scaffold_workspace = launch.scaffold_workspace  # noqa: SLF001
-    with client_runtime_environment():
+    from lc_factory.skill_policy import client_skill_policy
+    from lc_factory.background_ui import client_background_tasks
+
+    with client_runtime_environment(), client_skill_policy(), client_background_tasks():
         cli_main()

@@ -28,8 +28,9 @@ lc-code
 Ask the main agent to use `start_background_task` to delegate while continuing
 the conversation. Native `task`, `task_settled` and JavaScript `task()` remain
 foreground operations. Background availability does not make every delegation
-asynchronous. Completed results arrive on the next conversation turn; there is
-no automatic idle wakeup or separate completion notification.
+asynchronous. The TUI shows task status and completion notifications independently
+of the main run. Completed results reach the main agent on its next conversation
+turn; no automatic model turn is started while idle.
 
 Save preferences in the trusted user/managed `config.toml` selected by
 `DEEPAGENTS_HOME`, alongside any other `[lc_factory]` settings:
@@ -216,11 +217,16 @@ Native `task`, `task_settled` and JavaScript `task()` wait for the child result.
 conversation's work. Existing remote async tools retain the SDK's behavior.
 Forks cannot recursively detach work or access the main agent's runtime controls.
 Factory approvals and hooks run before detachment, and child tools keep their
-compiled approval controls. A child interrupt becomes `needs_approval` and never
-a successful empty result; detached child approval/resume is not implemented.
-Restart that task through an interactive foreground flow when approval is needed.
+compiled approval controls. A child interrupt becomes `needs_approval` with its
+exact pending action requests. Open Review in the task panel to approve or deny
+the batch, or cancel the task. The retained child checkpoint resumes without
+replaying completed steps. Waiting for approval is not a final result and is not
+acknowledged by the main agent's result-delivery path. Server hooks use their
+existing client-owned fulfillment path; unsupported input requests and requests
+exceeding the review panel's 24,000-character display limit remain blocked and
+can be cancelled. The TUI never resumes the parent graph to settle a child.
 
-Defaults are four running local jobs, 128 retained jobs, a one-hour job timeout,
+Defaults are four running local jobs, 128 retained jobs, a one-hour execution budget,
 and 64,000 characters per result. Jobs are in memory and are cancelled at runtime
 shutdown. They do not survive a process restart. Hook observers around
 `start_background_task` see the immediate dispatch result; job status tracks
@@ -233,10 +239,20 @@ results pending; committed completion acknowledges them. For an embedding:
 pending = await runtime.background.wait("conversation-1")
 # Schedule a normal runtime.ainvoke/astream turn when your host is ready.
 # The runtime injects pending results as data automatically.
+# wait also wakes for an approval/input pause, with no completed result.
+jobs = runtime.background.list("conversation-1")
+# A trusted host UI can call runtime.background.resume(owner, task_id,
+#     {interrupt_id: {"decisions": [{"type": "approve"}]}}).
+# Pass exactly the current interrupt IDs and one allowed decision per action.
+# resume is deliberately not an agent tool: a model cannot approve its own work.
 ```
 
-There is no automatic idle-turn scheduler or extra UI channel. The server's
-existing run serialization remains responsible for interactive execution.
+Waiting for approval does not consume the execution budget. Resume respects the
+running-job limit; stale, duplicate, wrong-owner and disallowed decisions are
+rejected before execution. Dedicated workspace-bound HTTP operations serve TUI
+status/approval/cancel requests while the main conversation remains usable.
+There is no automatic idle-turn scheduler. Jobs and paused checkpoints disappear
+when the server closes; main-agent live inspection/steering is not implemented.
 
 History tools are `search_conversations`, `list_conversations`, and
 `read_conversation`. Search uses SQLite FTS5 with literal query text, bounded

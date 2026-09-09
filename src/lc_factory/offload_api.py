@@ -16,4 +16,7 @@ _upstream_offload_api.get_server_runtime = _workspace_runtime
 
 app = _upstream_offload_api.app
 
+from lc_factory.background_api import install_background_routes
+install_background_routes(app)
+
 __all__ = ["app"]

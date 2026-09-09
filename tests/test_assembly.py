@@ -51,6 +51,7 @@ def test_factory_only_parameters_are_keyword_only_and_default_off():
         "interpreter_subagents",
         "middleware",
         "rubric_grader_middleware",
+        "skill_policy",
         "subagent_definitions",
         "subagent_middleware",
         "subagent_policy",

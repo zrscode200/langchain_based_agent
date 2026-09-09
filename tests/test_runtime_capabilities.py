@@ -143,8 +143,10 @@ async def test_background_child_approval_blocks_write_and_shutdown_cancels(tmp_p
                               {"configurable": {"thread_id": "owner"}})
         # Approval to delegate is not approval for the child's protected write.
         pending = await asyncio.wait_for(runtime.background.wait("owner"), 5)
-        assert "protected action has not run" in next(iter(pending.values()))
-        assert runtime.background.list("owner")[0]["status"] == "needs_approval"
+        assert not pending  # Waiting for approval is not a completed result.
+        job = runtime.background.list("owner")[0]
+        assert job["status"] == "needs_approval" and job["interrupts"]
+        assert job["outcome"] is None
         assert not target.exists()
 
 

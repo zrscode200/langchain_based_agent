@@ -38,5 +38,7 @@ def main():
     with disabled_automatic_maintenance():
         from .upstream_cli import cli_main
         from lc_factory.runtime_config import client_runtime_environment
-        with client_adaptations(), client_runtime_environment():
+        from lc_factory.skill_policy import client_skill_policy
+        from lc_factory.background_ui import client_background_tasks
+        with client_adaptations(), client_runtime_environment(), client_skill_policy(), client_background_tasks():
             cli_main()

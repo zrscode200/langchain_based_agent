@@ -701,6 +701,7 @@ def create_factory_agent(
     enable_memory: bool = True,
     memory_auto_save: bool = True,
     enable_skills: bool = True,
+    skill_policy: Mapping[str, Any] | None = None,
     enable_shell: bool = True,
     enable_interpreter: bool = False,
     enable_settled_dispatch: bool = False,
@@ -826,6 +827,11 @@ def create_factory_agent(
             No effect when
             `enable_memory` is `False`.
         enable_skills: Enable `SkillsMiddleware` for custom agent skills
+        skill_policy: Explicit skill discovery policy, overriding the workspace's
+            `.deepagents/skills.toml`. Project mode excludes personal/plugin
+            discovery and accepts project-relative `sources` (empty disables
+            discovery) plus optional `include_builtin`. No policy preserves
+            personal CLI discovery. This is not a filesystem sandbox.
         enable_shell: Enable shell execution via `LocalShellBackend`
             (only in local mode). When enabled, the `execute` tool is available.
         enable_interpreter: Wire `CodeInterpreterMiddleware` from
@@ -1140,12 +1146,16 @@ def create_factory_agent(
         if cwd is not None
         else (project_context.user_cwd if project_context is not None else None)
     )
-    policy_root = (
-        (project_context.project_root or project_context.user_cwd)
-        if project_context is not None
-        else (effective_cwd or runtime_credentials.project_root or Path.cwd())
-    )
     supplied_subagents = checked_specs(subagents)
+    from lc_factory.skill_policy import resolve_skill_policy, project_skill_sources, ProjectSkillsMiddleware, skill_policy_root
+
+    policy_root = skill_policy_root(effective_cwd, project_context=project_context,
+                                    credentials=runtime_credentials)
+    selected_skills = resolve_skill_policy(policy_root, skill_policy)
+    selected_skill_sources = (
+        project_skill_sources(policy_root, selected_skills)
+        if selected_skills.mode == "project" else None
+    )
     resolved_subagent_policy = (
         load_subagent_policy(policy_root) if subagent_policy is None
         else validate_subagent_policy(subagent_policy)
@@ -1370,6 +1380,15 @@ def create_factory_agent(
         subagent["middleware"] = _subagent_cli_middleware(
             has_explicit_model=has_explicit_model, extra=extra_items,
         )
+        if enable_skills and selected_skill_sources is not None and subagent.get("mode") != "fork":
+            from lc_factory.workspace_subagents import resolve_skill_sources
+
+            child_sources = selected_skill_sources
+            if "skills" in subagent:
+                child_sources = [(p, "Project") for p in resolve_skill_sources(
+                    subagent["name"], subagent.pop("skills"), policy_root)]
+            subagent["middleware"].append(ProjectSkillsMiddleware(
+                backend=FilesystemBackend(virtual_mode=False), sources=child_sources))
         if has_explicit_model and subagent.get("mode") == "fork":
             subagent["middleware"].append(FixedSubagentModel())
         if resolved_interrupt_on is not None:
@@ -1470,12 +1489,12 @@ def create_factory_agent(
 
     # Add skills middleware
     if enable_skills:
-        sources = get_skill_sources(
+        sources = selected_skill_sources if selected_skill_sources is not None else get_skill_sources(
             assistant_id=assistant_id,
             project_context=project_context,
         )
         agent_middleware.append(
-            PluginSkillsMiddleware(
+            (ProjectSkillsMiddleware if selected_skill_sources is not None else PluginSkillsMiddleware)(
                 backend=FilesystemBackend(virtual_mode=False),
                 sources=sources,
             )
