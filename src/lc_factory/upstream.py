@@ -104,9 +104,15 @@ from deepagents_code.agent import (
 from deepagents_code.ask_user import AskUserMiddleware
 from deepagents_code.auto_mode import (
     AutoModeHITLMiddleware,
+    AutoModeState,
+    USER_PROMPT_METADATA_KEY,
+    _trusted_prompt_rows,
+    _active_user_directives,
+    _live_mode,
     HeadlessMCPGuardMiddleware,
     gated_mcp_tool_names,
 )
+from deepagents_code.approval_mode import APPROVAL_MODE_NAMESPACE, approval_mode_key
 
 # --- client machinery reused by the launcher/TUI seam ---
 from deepagents_code.client.launch import server_manager as server_manager_module
@@ -369,6 +375,13 @@ __all__ = [
     "AskUserMiddleware",
     "AsyncApprovalHITLMiddleware",
     "AutoModeHITLMiddleware",
+    "AutoModeState",
+    "USER_PROMPT_METADATA_KEY",
+    "_trusted_prompt_rows",
+    "_active_user_directives",
+    "_live_mode",
+    "APPROVAL_MODE_NAMESPACE",
+    "approval_mode_key",
     "CLIContextSchema",
     "CONVERSATION_HISTORY_DIRNAME",
     "CodeModelRetryMiddleware",

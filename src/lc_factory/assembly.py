@@ -1214,12 +1214,13 @@ def create_factory_agent(
                     **resolved_interrupt_on["task"],
                     "description": "Delegate work to a configured subagent.",
                 }
-    child_interrupt_on = resolved_interrupt_on
-    if resolved_interrupt_on is not None and (enable_settled_dispatch or "BackgroundTasks" in _injected_main_names):
-        # Raw interpreter dispatch has no parent Auto classifier step. Child
-        # stacks contain async HITL, not their own classifier, so Auto must
-        # remain gated here. Live YOLO and hook decisions still bypass normally.
-        child_interrupt_on = _add_interrupt_on(mcp_tools=mcp_tools, auto_mode_enabled=False)
+    # Child Auto is installed after the shared policy configuration is resolved.
+    # In graphs without Auto, keep delegated actions behind ordinary async HITL.
+    child_interrupt_on = (
+        _add_interrupt_on(mcp_tools=mcp_tools, auto_mode_enabled=False)
+        if resolved_interrupt_on is not None else None
+    )
+    delegation_approval = None
 
     user_agents_dir = get_user_agents_dir(assistant_id)
     project_agents_dir = (
@@ -1731,7 +1732,10 @@ def create_factory_agent(
         environ=environment,
     )
     if auto_mode_config is not None and resolved_interrupt_on is not None:
-        from lc_factory.auto_classifier import AutoModeHITLMiddleware
+        from lc_factory.subagent_approval import (
+            ChildApprovalAdmission, ChildAutoModeHITLMiddleware,
+            DelegationApproval, OwnerAutoModeHITLMiddleware,
+        )
         from lc_factory.upstream import resolve_auto_classifier_model
         from lc_factory.upstream import resolve_auto_classifier_timeout
 
@@ -1744,19 +1748,24 @@ def create_factory_agent(
             if auto_classifier_model is not None
             else resolve_auto_classifier_model()
         )
-        agent_middleware.append(
-            AutoModeHITLMiddleware(
-                resolved_interrupt_on,
-                worktree_root=trusted_root,
-                shell_allow_list=narrow_allow_list,
-                classifier_model=classifier_model,
-                cli_max_retries=cli_max_retries,
-                environ=environment,
-                classifier_timeout_seconds=resolve_auto_classifier_timeout(),
-                trusted_ask_user_tool=trusted_ask_user_tool,
-                trusted_compaction_tool=compaction_middleware.tools[0],
-            )
+        delegation_approval = DelegationApproval()
+        approval_kwargs = dict(
+            worktree_root=trusted_root, shell_allow_list=narrow_allow_list,
+            classifier_model=classifier_model, cli_max_retries=cli_max_retries,
+            environ=environment, classifier_timeout_seconds=resolve_auto_classifier_timeout(),
+            trusted_ask_user_tool=trusted_ask_user_tool,
+            trusted_compaction_tool=compaction_middleware.tools[0],
         )
+        agent_middleware.append(OwnerAutoModeHITLMiddleware(
+            resolved_interrupt_on, delegation=delegation_approval, **approval_kwargs))
+        for spec in custom_subagents:
+            child_approval = ChildAutoModeHITLMiddleware(
+                _add_interrupt_on(mcp_tools=mcp_tools),
+                delegation=delegation_approval, **approval_kwargs)
+            spec["middleware"] = [
+                child_approval if m.name == "HumanInTheLoopMiddleware" else m
+                for m in spec["middleware"]]
+            spec["middleware"].append(ChildApprovalAdmission(child_approval))
     elif resolved_interrupt_on is not None:
         # `AutoModeHITLMiddleware` reports the same `HumanInTheLoopMiddleware`
         # name, so installing both would trip `create_agent`'s duplicate-name
@@ -2116,6 +2125,13 @@ def create_factory_agent(
             subagents=all_subagents or None,
             name=_sanitize_agent_message_name(assistant_id),
         )
+    if delegation_approval is not None:
+        # All local dispatch forms retain this same tool object. Wrapping its
+        # actual callable also covers interpreter calls outside ToolNode HITL.
+        tool_node = agent.nodes.get("tools")
+        task_tool = tool_node.bound.tools_by_name.get("task") if tool_node else None
+        if task_tool is not None:
+            delegation_approval.bind_task(task_tool)
     if "BackgroundTasks" in _injected_main_names:
         # Generation-owned metadata travels with the compiled task retained by
         # a detached worker; never consult a newer runtime's definitions.

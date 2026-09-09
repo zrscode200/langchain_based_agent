@@ -77,11 +77,28 @@ the default safe PTC preset and does not add background submission to that prese
 The bundled clients retain JavaScript subagent support by default; set trusted
 `[lc_factory].interpreter_subagents = false` (or the optional host override
 `LC_FACTORY_INTERPRETER_SUBAGENTS=0`) to withhold JavaScript delegation.
-For settled/background compositions, children treat live Auto mode as Manual:
-they do not have their own Auto classifier, and JavaScript may bypass the
-parent's classifier. The parent's Auto behavior is unchanged. Live YOLO,
-explicit `auto_approve=True`, and authoritative hook decisions retain their
-normal semantics.
+With `auto_mode_enabled=True`, local children follow the owning session's live
+mode: Manual uses the existing approval rules, Auto reviews child actions with
+the session's classifier, and YOLO bypasses ordinary approval prompts. This
+applies to native, settled, JavaScript and background dispatch, for isolated and
+forked children. An explicit child model does not replace the session's approval
+classifier. Each child keeps separate decisions, failure counters and temporary
+artifact ownership. Explicit `auto_approve=True` and authoritative hook decisions
+retain their normal semantics; declared tool and filesystem restrictions remain.
+
+Running children read mode changes at their next approval boundary. A change
+after review can skip an unexecuted action and require a fresh proposal; it does
+not cancel an action already executing. Exact human approvals remain valid for
+the reviewed action. Existing paused approval dialogs still require a response.
+
+Auto receives the original user authorization captured when delegation starts,
+including active user-set goal/rubric directives. Assignments, summaries and
+main-agent steering cannot grant additional consent. Missing or oversized
+authorization, missing session model context, and unavailable approval state
+fall back to Manual. Classifier failures retain the normal retry/human-fallback
+policy. A parent's `ask_user` receipt is not transferred into child consent.
+Direct synchronous task invocation is unsupported for this async Auto layer.
+Remote async agents retain their own upstream approval behavior.
 
 Forks retain the SDK's recursive-delegation refusal. Allowing `js_eval` alone
 does not grant `task` or `task_settled`: both model-time bindings and runtime
@@ -125,6 +142,6 @@ Completed schema-backed results have a parsed structured value. Failed,
 cancelled, timed-out, or approval-blocked jobs have `ok: false`. Oversized results
 fail instead of returning truncated content as a claimed success. Result text
 still arrives on the next conversation turn; this does not wake an idle agent.
-Background approval cannot be resumed as a detached job: restart that work
-interactively. These are local in-memory jobs and are cancelled on shutdown;
+The dynamic subagents panel surfaces paused approvals and resumes the same job
+through the existing approval dialog. These are local in-memory jobs and are cancelled on shutdown;
 durable recovery and distributed workers are outside this capability.

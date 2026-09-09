@@ -83,6 +83,10 @@ Host-provided skill sources remain trusted configuration.
 
 Programmatic `tools` alone follows the SDK's explicit-tool semantics; it does not
 remove middleware-provided tools. Use the policy list for an exhaustive boundary.
+With Auto support enabled, local children inherit the owner's live approval mode
+and classifier configuration. Each child has independent approval bookkeeping;
+mode inheritance never widens the capability limits above. This includes Auto's
+managed temporary-artifact tools. See [approval behavior](DELEGATION.md#tool-policy-and-approval).
 An isolated child can select supplied tools and its own middleware's tools; it
 cannot borrow a parent-only middleware tool such as `js_eval` without its lifecycle.
 A fork inherits that lifecycle. Declaring `skills`, even an empty list, on a fork

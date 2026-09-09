@@ -57,6 +57,12 @@ schema; missing or invalid verdicts still block execution. This applies whether
 the classifier inherits the main model or is configured separately, without
 changing the main model's settings.
 
+Local subagents also follow the session's live Manual, Auto or YOLO mode.
+Auto uses the session's classifier even when a child uses a different model;
+child tool and filesystem restrictions still apply. Running background children
+pick up changes at their next approval boundary. See [delegation approvals](DELEGATION.md#tool-policy-and-approval)
+for authorization, fallback and resume behavior.
+
 The launch workspace and request paths share one runtime cache. With a configured
 process-wide sandbox, a second workspace is refused with HTTP 409, including
 after a failed first build. Without that sandbox, distinct workspaces can have

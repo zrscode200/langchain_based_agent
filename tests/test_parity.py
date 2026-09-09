@@ -15,6 +15,7 @@ tripwire that gates every upstream pin bump (see UPGRADING.md).
 from __future__ import annotations
 
 import dataclasses
+from copy import copy
 import functools
 import hashlib
 import json
@@ -360,9 +361,54 @@ def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = Tr
     return ours, v0
 
 
+def _auto_delegation_projection(ours, v0):
+    """Assert the owned child-Auto delta before comparing remaining upstream state.
+
+    Keep every upstream Auto constructor field visible, including the child's
+    classifier/deadline/environment. Only the deliberate replacement of stock
+    child HITL and its final admission guard are projected away for parity.
+    """
+    from deepagents_code.auto_mode import AutoModeHITLMiddleware
+    from lc_factory.subagent_approval import (
+        ChildApprovalAdmission, ChildAutoModeHITLMiddleware, OwnerAutoModeHITLMiddleware,
+    )
+
+    def native_view(middleware):
+        view = object.__new__(AutoModeHITLMiddleware)
+        view.__dict__ = {key: value for key, value in vars(middleware).items() if key != "delegation"}
+        return view
+
+    actual = {**ours, "kwargs": dict(ours["kwargs"])}
+    main = list(actual["kwargs"]["middleware"])
+    index = next(i for i, m in enumerate(main) if isinstance(m, OwnerAutoModeHITLMiddleware))
+    owner = main[index]
+    baseline = next(m for m in v0["kwargs"]["middleware"] if isinstance(m, AutoModeHITLMiddleware))
+    assert _normalize(native_view(owner)) == _normalize(baseline)
+    main[index] = native_view(owner)
+    actual["kwargs"]["middleware"] = main
+    children = []
+    for spec, old_spec in zip(actual["kwargs"]["subagents"], v0["kwargs"]["subagents"], strict=True):
+        middleware = list(spec["middleware"])
+        position = next(i for i, m in enumerate(middleware) if isinstance(m, ChildAutoModeHITLMiddleware))
+        child = middleware[position]
+        expected = copy(baseline)
+        expected._trusted_ask_user_tool = None
+        assert _normalize(native_view(child)) == _normalize(expected)
+        assert child.delegation is owner.delegation
+        assert isinstance(middleware[-1], ChildApprovalAdmission)
+        assert middleware[-1].approval is child
+        middleware.pop()
+        middleware[position] = next(m for m in old_spec["middleware"] if m.name == child.name)
+        children.append({**spec, "middleware": middleware})
+    actual["kwargs"]["subagents"] = children
+    return actual
+
+
 @pytest.mark.parametrize("case", sorted(CONFIG_MATRIX))
 def test_composition_parity(case, tmp_path):
     ours, v0 = _run_both(CONFIG_MATRIX[case], tmp_path)
+    if case == "auto_mode":
+        ours = _auto_delegation_projection(ours, v0)
     assert _fingerprint(ours) == _fingerprint(v0)
 
 
@@ -550,6 +596,7 @@ def test_composition_parity_auto_classifier_configured(tmp_path, monkeypatch):
     monkeypatch.setenv("DEEPAGENTS_CODE_AUTO_CLASSIFIER_TIMEOUT", "7.5")
 
     ours, v0 = _run_both({"auto_mode_enabled": True}, tmp_path)
+    ours = _auto_delegation_projection(ours, v0)
     fingerprint = _fingerprint(ours)
     assert fingerprint == _fingerprint(v0)
     # Guard the guard: both knobs must be observable in composed state, or
@@ -563,6 +610,17 @@ def test_composition_parity_auto_classifier_configured(tmp_path, monkeypatch):
         "the classifier timeout is no longer observable in composed state — "
         "this case no longer covers classifier_timeout_seconds threading"
     )
+
+
+def test_auto_delegation_parity_detects_child_classifier_drift(tmp_path):
+    from lc_factory.subagent_approval import ChildAutoModeHITLMiddleware
+
+    ours, v0 = _run_both({"auto_mode_enabled": True}, tmp_path)
+    child = next(m for m in ours["kwargs"]["subagents"][0]["middleware"]
+                 if isinstance(m, ChildAutoModeHITLMiddleware))
+    child._classifier_timeout_seconds = 0.25
+    with pytest.raises(AssertionError):
+        _auto_delegation_projection(ours, v0)
 
 
 def test_composition_parity_without_large_results_route(tmp_path):

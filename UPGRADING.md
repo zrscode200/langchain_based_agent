@@ -175,6 +175,21 @@ private (underscore) names that carry no semver protection.
    must resume without repeating a prior protected write, for isolated and fork
    modes. Keep host approval responses bound to owner/job/current interrupt IDs,
    separate from the foreground approval UI and main result acknowledgment.
+   Auto-enabled composition has one reviewed factory delta: `subagent_approval.py`
+   replaces local child HITL with session-aware Auto and a final admission guard.
+   Parity verifies all native constructor settings before projecting this delta;
+   its drift-injection check must fail on changed child classifier settings.
+   Recheck retained task coroutine binding across native/settled/JavaScript and
+   background dispatch, replay-stable child scopes, private state initialization,
+   and the native `_process_decision` return contract. Classifier-only history
+   must retain trusted original authorization followed by prior child actions,
+   excluding inherited parent actions and model-written user-message metadata.
+   Native routing and the recorded disposition use one mode snapshot; tool
+   admission reads live mode again. Only an actual human approve/edit decision
+   creates durable exact-action approval. Keep counters and temporary receipts
+   child-local while mode reads target the owner. Re-run child approval tests,
+   including DeepSeek transport, classifier failures, live races, tool ceilings,
+   and approval resumes, on every upstream change to these seams.
    Recheck child-last middleware ordering for steering: before-model injection,
    actual request delivery, stale after-model proposals and final tool admission
    after Hooks-v2/HITL resume. Stable steering IDs and private checkpoint revision
