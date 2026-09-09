@@ -7,11 +7,17 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.containers import Vertical
 from textual.widgets import Button, Input, Static
+from lc_factory.background_panel import background_subagent_panel_class
+from lc_factory.upstream_cli import app_module
 
 from lc_factory.background_ui import (
     BackgroundPanel, TaskReview, allows, approval_responses, background_request,
     client_background_tasks, plain,
 )
+
+
+def native_text(panel):
+    return "\n".join(str(w.render()) for w in panel.presentation().query(Static))
 
 
 def job(status="running", task_id="child-1", interrupts=None):
@@ -21,7 +27,7 @@ def job(status="running", task_id="child-1", interrupts=None):
 
 def approval(interrupt_id="pause-1", decisions=None):
     return {"id": interrupt_id, "value": {"action_requests": [
-        {"name": "write_file", "args": {"path": "report.txt", "content": "Exact content"}},
+        {"name": "write_file", "args": {"file_path": "report.txt", "content": "Exact content"}},
     ], "review_configs": [{"action_name": "write_file", "allowed_decisions": decisions or ["approve", "reject"]}]}}
 
 
@@ -61,6 +67,7 @@ class Harness(App):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="bottom-app-container"):
+            yield background_subagent_panel_class(app_module.SubagentPanel)(id="subagent-panel")
             yield BackgroundPanel()
             yield Input(id="main-prompt")
 
@@ -84,15 +91,16 @@ async def test_panel_updates_while_main_input_remains_usable():
         panel = app.query_one(BackgroundPanel)
         await settle(pilot, panel)
         panel.timer.stop()
-        assert panel.display
-        assert "1 running" in str(panel.query_one("#factory-background-summary", Static).render())
+        assert not panel.display
+        assert panel.presentation().has_class("-visible")
+        assert "running" in native_text(panel).lower()
         await pilot.click("#main-prompt")
         await pilot.press("h", "i", "enter")
         assert app.prompts == ["hi"]
         agent.jobs[0]["status"] = "completed"
         agent.jobs[0]["result"] = "Finished"
         await panel.refresh_tasks()
-        assert "0 running" in str(panel.query_one("#factory-background-summary", Static).render())
+        assert "done" in native_text(panel).lower()
         assert panel.jobs[0]["result"] == "Finished"
         assert len(app.screen_stack) == 1  # Status changes never steal focus.
         assert all(body["operation"] == "list" for _, body in agent.calls)
@@ -108,7 +116,7 @@ async def test_review_sends_exact_pause_ids_and_actions(decision):
         panel = app.query_one(BackgroundPanel)
         await settle(pilot, panel)
         panel.timer.stop()
-        await pilot.click("#" + next(iter(panel.details)))
+        panel.review_task(next(iter(panel.details)))
         await pilot.pause()
         assert isinstance(app.screen, TaskReview)
         assert "write_file" in app.screen.detail
@@ -130,7 +138,7 @@ async def test_cancel_is_child_only_and_unknown_input_remains_blocked():
         panel = app.query_one(BackgroundPanel)
         await settle(pilot, panel)
         panel.timer.stop()
-        await pilot.click("#" + next(iter(panel.details)))
+        panel.review_task(next(iter(panel.details)))
         await pilot.pause()
         assert app.screen.query_one("#background-approve", Button).disabled
         assert app.screen.query_one("#background-reject", Button).disabled
@@ -150,7 +158,7 @@ async def test_stale_review_cannot_approve_another_conversation():
         panel = app.query_one(BackgroundPanel)
         await settle(pilot, panel)
         panel.timer.stop()
-        await pilot.click("#" + next(iter(panel.details)))
+        panel.review_task(next(iter(panel.details)))
         await pilot.pause()
         app._lc_thread_id = "different"
         await pilot.click("#background-approve")
@@ -291,7 +299,7 @@ async def test_hook_failure_visible_and_not_reexecuted(fake_hook_adapter):
         await panel.refresh_tasks()
         await pilot.pause()
         assert len(calls) == 1
-        summary = str(panel.query_one("#factory-background-summary", Static).render())
+        summary = native_text(panel)
         assert "Hook response unconfirmed" in summary and "secret" not in summary
 
 
@@ -304,10 +312,88 @@ async def test_status_error_recovers_without_changed_snapshot():
         panel.timer.stop()
         agent.error = RuntimeError("secret")
         await panel.refresh_tasks()
-        assert "unavailable" in str(panel.query_one("#factory-background-summary", Static).render())
+        assert "unavailable" in native_text(panel)
         agent.error = None
         await panel.refresh_tasks()
-        assert "1 running" in str(panel.query_one("#factory-background-summary", Static).render())
+        assert "running" in native_text(panel).lower()
+
+
+async def test_native_reset_invalidates_old_actions_before_new_thread_arrives():
+    agent = Agent([job("needs_approval", interrupts=[approval()])])
+    app = Harness(agent)
+    async with app.run_test() as pilot:
+        panel = app.query_one(BackgroundPanel)
+        await settle(pilot, panel)
+        panel.timer.stop()
+        identity = panel.current()
+        panel.presentation().reset()
+        before = len(agent.calls)
+        await panel.refresh_tasks()
+        assert not panel.presentation().has_class("-visible") and not panel.details
+        assert len(agent.calls) == before
+        with pytest.raises(ValueError, match="Conversation changed"):
+            await panel.submit(identity, operation="cancel", task_id="child-1")
+        app._lc_thread_id = "new-conversation"
+        agent.jobs = []
+        await panel.refresh_tasks()
+        assert panel.suspended_identity is None
+
+
+async def test_connection_lookup_failure_clears_visible_task_actions(monkeypatch):
+    agent = Agent([job("needs_approval", interrupts=[approval()])])
+    app = Harness(agent)
+    async with app.run_test() as pilot:
+        panel = app.query_one(BackgroundPanel)
+        await settle(pilot, panel)
+        panel.timer.stop()
+        original = agent._get_graph
+        def disconnected():
+            raise RuntimeError("disconnected")
+        monkeypatch.setattr(agent, "_get_graph", disconnected)
+        panel.schedule_refresh()
+        assert not panel.details
+        assert "connection unavailable" in native_text(panel).lower()
+        monkeypatch.setattr(agent, "_get_graph", original)
+        await panel.refresh_tasks()
+        assert "child-1" in panel.details
+
+
+async def test_approval_uses_native_file_preview_and_one_shared_panel():
+    from lc_factory.upstream_cli import background_approval_widgets
+    agent = Agent([job("needs_approval", interrupts=[approval()])])
+    app = Harness(agent)
+    async with app.run_test(size=(100, 32)) as pilot:
+        panel = app.query_one(BackgroundPanel)
+        await settle(pilot, panel)
+        panel.timer.stop()
+        assert not panel.display and len(app.query("#subagent-panel")) == 1
+        panel.review_task("child-1")
+        await pilot.pause()
+        assert len(app.screen.query(background_approval_widgets().WriteFileApprovalWidget)) == 1
+        assert "Waiting for approval" in str(app.screen.query(Static).first().render())
+
+
+@pytest.mark.parametrize("payload", [
+    {"action_requests": None}, {"action_requests": [None]},
+    {"action_requests": [{"name": 1, "args": {}}]},
+    {"action_requests": [{"name": "write_file", "args": {"file_path": None, "content": "text"}}]},
+    {"action_requests": [{"name": "edit_file", "args": {"file_path": "file", "old_string": [], "new_string": "x"}}]},
+])
+async def test_unsupported_approval_details_remain_blocked_and_cancellable(payload):
+    agent = Agent([job("needs_approval", interrupts=[{"id": "unsupported", "value": payload}])])
+    app = Harness(agent)
+    async with app.run_test() as pilot:
+        controller = app.query_one(BackgroundPanel)
+        await settle(pilot, controller)
+        controller.timer.stop()
+        controller.review_task("child-1")
+        await pilot.pause()
+        assert app.screen.query_one("#background-approve", Button).disabled
+        assert app.screen.query_one("#background-reject", Button).disabled
+        assert not app.screen.query_one("#background-cancel", Button).disabled
+        await pilot.click("#background-cancel")
+        await pilot.pause()
+        assert any(body["operation"] == "cancel" for _, body in agent.calls)
 
 
 def test_only_complete_supported_batches_can_be_approved():
@@ -331,12 +417,14 @@ async def test_context_restores_mount_and_nested_use_mounts_only_one_panel(monke
 
     class Host(App):
         def compose(self):
-            yield Vertical(id="bottom-app-container")
+            with Vertical(id="bottom-app-container"):
+                yield app_module.SubagentPanel(id="subagent-panel")
 
         async def on_mount(self):
             self.original_mounted = True
 
     original = Host.on_mount
+    original_panel = app_module.SubagentPanel
     monkeypatch.setattr(app_module, "DeepAgentsApp", Host)
     with client_background_tasks(), client_background_tasks():
         app = Host()
@@ -345,6 +433,7 @@ async def test_context_restores_mount_and_nested_use_mounts_only_one_panel(monke
             assert app.original_mounted
             assert len(app.query(BackgroundPanel)) == 1
     assert Host.on_mount is original
+    assert app_module.SubagentPanel is original_panel
 
 
 async def test_switch_hides_old_rows_even_while_status_request_is_stuck():
@@ -354,7 +443,7 @@ async def test_switch_hides_old_rows_even_while_status_request_is_stuck():
         panel = app.query_one(BackgroundPanel)
         await settle(pilot, panel)
         panel.timer.stop()
-        old_button = panel.query_one(Button)
+        old_task = next(iter(panel.details))
         agent.post_gate = asyncio.Event()
         panel.schedule_refresh()
         await pilot.pause(0.02)
@@ -363,7 +452,7 @@ async def test_switch_hides_old_rows_even_while_status_request_is_stuck():
         app._lc_thread_id = "parent-two"
         panel.schedule_refresh()
         assert not panel.display and not panel.details
-        panel.review(Button.Pressed(old_button))
+        panel.review_task(old_task)
         await settle(pilot, panel)
         panel.schedule_refresh()
         await settle(pilot, panel)
@@ -378,13 +467,13 @@ async def test_literal_details_are_bounded_and_review_buttons_follow_exact_snaps
         panel = app.query_one(BackgroundPanel)
         await settle(pilot, panel)
         panel.timer.stop()
-        old_button = panel.query_one(Button)
+        old_task = next(iter(panel.details))
         agent.jobs = [job("needs_approval", task_id="new-child", interrupts=[approval()])]
         await panel.refresh_tasks()
-        panel.review(Button.Pressed(old_button))
+        panel.review_task(old_task)
         await pilot.pause()
         assert len(app.screen_stack) == 1
-        await pilot.click("#" + next(iter(panel.details)))
+        panel.review_task(next(iter(panel.details)))
         await pilot.pause()
         assert app.screen.job["task_id"] == "new-child"
         rendered_title = str(app.screen.query_one(Static).render())

@@ -227,8 +227,10 @@ environment overrides are optional. Searchable history remains opt-in.
 Use explicit `FactoryRuntime` options when embedding; the bare constructor
 remains compatible with the pinned harness.
 
-Both clients show background tasks independently of the main turn. Open a task's
-Review button to approve or deny its pending actions, or cancel it. Decisions
+Both clients show background tasks in the existing dynamic subagents panel,
+independently of the main turn. Use Ctrl+T to expand it, select Background and
+click a task row (or select a task with left/right and press Enter) to review,
+approve or deny its pending actions, or cancel it. Decisions
 resume that same child; they do not restart its completed work or resume the main
 agent. Final results still reach the main agent on its next turn. Tasks live only
 for the current server session. Main-agent live inspection/steering is not yet

@@ -175,8 +175,11 @@ private (underscore) names that carry no semver protection.
    modes. Keep host approval responses bound to owner/job/current interrupt IDs,
    separate from the foreground approval UI and main result acknowledgment.
    `background_ui.py` uses RemoteAgent's authenticated transport/workspace binding
-   and a child panel mounted in the upstream bottom container; its headless tests
-   guard switching, shutdown and stale decisions. Recheck cancellation against
+   and a hidden controller feeding the native dynamic subagent panel; its headless
+   tests guard switching, shutdown and stale decisions. `background_panel.py` extends
+   the currently installed panel class (including enterprise replay handling).
+   Recheck native prepare_turn/finalize_running/reset, phase navigation and row
+   review at narrow widths. Recheck cancellation against
    the real hook fulfillment ledger, including shielded execution and preservation
    of unrelated foreground hooks. `skill_policy.py` adapts upstream
    skill listing/invocation and restores client patches on exit. Recheck all three

@@ -11,11 +11,13 @@ from rich.text import Text
 from textual import on
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static
+from textual.widgets import Button, Collapsible, Static
 
 _MAX_DETAIL = 24_000
-_MAX_ROWS = 100
 _ACTIVE = {"running", "needs_approval", "needs_input"}
+_STATUS_LABELS = {"needs_approval": "Waiting for approval", "needs_input": "Waiting for input",
+                  "running": "Running", "completed": "Completed", "cancelled": "Cancelled",
+                  "failed": "Failed", "timed_out": "Timed out"}
 
 
 def plain(value, limit=600):
@@ -63,15 +65,43 @@ def allows(job, decision):
         return False
 
 
+def review_actions(job):
+    """Validate display inputs before constructing native file preview widgets."""
+    items = job.get("interrupts")
+    if not isinstance(items, list) or not items:
+        return None
+    result = []
+    for item in items:
+        value = item.get("value") if isinstance(item, dict) else None
+        actions = value.get("action_requests") if isinstance(value, dict) else None
+        if not isinstance(actions, list) or not actions:
+            return None
+        for action in actions:
+            if not isinstance(action, dict):
+                return None
+            name, args = action.get("name"), action.get("args")
+            if not isinstance(name, str) or not name or not isinstance(args, dict):
+                return None
+            fields = {"write_file": ("file_path", "content"),
+                      "edit_file": ("file_path", "old_string", "new_string")}.get(name, ())
+            if any(not isinstance(args.get(key), str) for key in fields):
+                return None
+            result.append((name, args))
+    return result
+
+
 class TaskReview(ModalScreen):
     """Opened explicitly by the user; never consumes the parent's approval UI."""
     BINDINGS = [("escape", "back", "Back")]
     DEFAULT_CSS = """
     TaskReview { align: center middle; }
-    TaskReview > Vertical { width: 85%; height: 85%; border: solid $primary; background: $surface; padding: 1 2; }
+    TaskReview > Vertical { width: 90%; max-width: 100; height: 85%; border: round $primary; background: $surface; padding: 1 2; }
     TaskReview VerticalScroll { height: 1fr; }
+    TaskReview .tool-approval-widget { height: auto; }
+    TaskReview .background-action-title { color: $primary; text-style: bold; margin-top: 1; }
     TaskReview Horizontal { height: 3; }
-    TaskReview Button { margin-right: 1; }
+    TaskReview Button { margin-right: 1; width: 1fr; min-width: 0; }
+    TaskReview.-compact Horizontal { layout: grid; grid-size: 2; grid-rows: 3 3; height: 6; }
     """
 
     def __init__(self, job, submit):
@@ -79,6 +109,7 @@ class TaskReview(ModalScreen):
         self.job, self.submit = deepcopy(job), submit
         self.pending = False
         self.attempted = False
+        self.actions = review_actions(self.job)
         detail = json.dumps(self.job.get("interrupts") or {
             "result": self.job.get("result"), "outcome": self.job.get("outcome")
         }, indent=2, ensure_ascii=False)
@@ -89,14 +120,34 @@ class TaskReview(ModalScreen):
         self.detail = escaped[:_MAX_DETAIL] + "\n[truncated]" if self.truncated else escaped
 
     def can_decide(self, decision):
-        return not self.truncated and allows(self.job, decision)
+        return self.actions is not None and not self.truncated and allows(self.job, decision)
 
     def compose(self):
         with Vertical():
-            yield Static(Text(plain(f"{self.job['name']} — {self.job['status']}")))
+            yield Static(Text(plain(f"{self.job['name']} — {_STATUS_LABELS.get(self.job['status'], self.job['status'])}")))
             with VerticalScroll():
                 yield Static(Text(plain(self.job.get("description", ""), 6000)))
-                yield Static(Text(self.detail))
+                if self.job["status"] == "needs_approval" and not self.truncated and self.actions is not None:
+                    from lc_factory.upstream_cli import background_approval_widgets
+                    widgets = background_approval_widgets()
+                    for name, args in self.actions:
+                        yield Static(Text(plain(name.replace("_", " ").capitalize())), classes="background-action-title")
+                        if name == "write_file":
+                            yield widgets.WriteFileApprovalWidget({key: args[key] for key in ("file_path", "content")})
+                        elif name == "edit_file":
+                            yield widgets.EditFileApprovalWidget({key: args[key] for key in ("file_path", "old_string", "new_string")})
+                        else:
+                            yield Static(Text(plain(json.dumps(args, indent=2, ensure_ascii=False), _MAX_DETAIL)))
+                        if name in ("write_file", "edit_file"):
+                            with Collapsible(title="Full action arguments", collapsed=True):
+                                yield Static(Text(plain(json.dumps(args, indent=2, ensure_ascii=False), _MAX_DETAIL)))
+                elif self.job["status"] == "needs_approval":
+                    yield Static(Text(self.detail))
+                elif self.job["status"] in _ACTIVE:
+                    yield Static(Text("This task is working." if self.job["status"] == "running" else
+                                      "This task is waiting for input. You can cancel it below."))
+                else:
+                    yield Static(Text(plain(self.job.get("result") or "No result returned.", _MAX_DETAIL)))
             warning = ""
             if self.job["status"] in ("needs_approval", "needs_input") and not any(
                 self.can_decide(d) for d in ("approve", "reject")
@@ -112,6 +163,9 @@ class TaskReview(ModalScreen):
     def action_back(self):
         if not self.pending:
             self.dismiss()
+
+    def on_resize(self, event):
+        self.set_class(event.size.width < 76, "-compact")
 
     @on(Button.Pressed)
     async def decide(self, event):
@@ -151,15 +205,8 @@ class TaskReview(ModalScreen):
 
 
 class BackgroundPanel(Vertical):
-    """A bounded task list updated independently of the main run's stream."""
-    DEFAULT_CSS = """
-    BackgroundPanel { height: auto; max-height: 12; border-top: solid $primary; }
-    BackgroundPanel > Static { height: auto; max-height: 3; }
-    BackgroundPanel VerticalScroll { height: auto; max-height: 10; }
-    BackgroundPanel Horizontal { height: 3; }
-    BackgroundPanel Horizontal Static { width: 1fr; padding: 1 0; }
-    BackgroundPanel Button { min-width: 12; }
-    """
+    """Hidden transport controller feeding the existing dynamic subagent panel."""
+    DEFAULT_CSS = "BackgroundPanel { display: none; }"
 
     def __init__(self):
         super().__init__(id="factory-background-panel")
@@ -172,13 +219,27 @@ class BackgroundPanel(Vertical):
         self.hook_tasks = {}
         self.hook_cleanup = set()
         self.details = {}
-        self.revision = 0
         self.closed = False
         self.display = False
+        self.suspended_identity = None
 
     def compose(self):
-        yield Static("Background tasks", id="factory-background-summary")
-        yield VerticalScroll(id="factory-background-rows")
+        return iter(())
+
+    def presentation(self):
+        return self.app.query_one("#subagent-panel")
+
+    def invalidate(self):
+        """A conversation reset hides old rows before the new thread ID arrives."""
+        self.suspended_identity = self.current()
+        self.cancel_hooks()
+        self.details.clear()
+
+    def present_jobs(self):
+        panel = self.presentation()
+        panel.on_background_reset = self.invalidate
+        self.details = {j["task_id"]: (self.identity, deepcopy(j)) for j in self.jobs}
+        panel.set_background_jobs(self.jobs, self.review_task)
 
     def on_mount(self):
         self.timer = self.set_interval(1.0, self.schedule_refresh)
@@ -203,7 +264,8 @@ class BackgroundPanel(Vertical):
                 and left[1] == right[1] and left[2] is right[2])
 
     def valid(self, identity):
-        return not self.closed and self.same_identity(self.current(), identity)
+        return (not self.closed and not self.same_identity(identity, self.suspended_identity)
+                and self.same_identity(self.current(), identity))
 
     def cancel_hooks(self, *, obsolete_only=False, task_id=None):
         for key, (task, current) in tuple(self.hook_tasks.items()):
@@ -234,7 +296,9 @@ class BackgroundPanel(Vertical):
         self.details.clear()
         self.hook_seen.clear()
         self.hook_errors.clear()
-        self.display = False
+        self.presentation().clear_background_jobs()
+        if not self.same_identity(identity, self.suspended_identity):
+            self.suspended_identity = None
 
     def schedule_refresh(self):
         if self.closed:
@@ -242,7 +306,10 @@ class BackgroundPanel(Vertical):
         try:
             identity = self.current()
         except Exception:
-            self.display = False
+            self.cancel_hooks()
+            self.details.clear()
+            self.presentation().clear_background_jobs()
+            self.presentation().set_background_notice("Background connection unavailable")
             return
         if not self.same_identity(identity, self.identity):
             self.switch_identity(identity)
@@ -262,7 +329,7 @@ class BackgroundPanel(Vertical):
             await self.drain_hooks()
             self.cancel_hooks(obsolete_only=True)
             await self.drain_hooks()
-            if agent is None or owner is None or graph is None or not hasattr(agent, "_workspace_for_thread"):
+            if not self.valid(identity) or agent is None or owner is None or graph is None or not hasattr(agent, "_workspace_for_thread"):
                 return
             async with asyncio.timeout(15):
                 response = await background_request(agent, owner, is_current=lambda: self.valid(identity))
@@ -277,31 +344,12 @@ class BackgroundPanel(Vertical):
                 await self.drain_hooks()
                 if not self.valid(identity):
                     return
-                self.display = bool(jobs)
-                self.revision += 1
-                self.details.clear()
-                rows = self.query_one("#factory-background-rows", VerticalScroll)
-                await rows.remove_children()
-                if not self.valid(identity):
-                    return
-                visible_jobs = sorted(jobs, key=lambda j: (
-                    0 if j["status"] in ("needs_approval", "needs_input") else
-                    1 if j["status"] == "running" else 2
-                ))[:_MAX_ROWS]
                 notifications = 0
-                for i, job in enumerate(visible_jobs):
-                    button_id = f"background-detail-{self.revision}-{i}"
-                    self.details[button_id] = (identity, deepcopy(job))
-                    await rows.mount(Horizontal(
-                        Static(Text(plain(f"{job['name']}: {job['status']}"))),
-                        Button("Review" if job["status"] == "needs_approval" else "Details", id=button_id),
-                    ))
-                    if not self.valid(identity):
-                        self.display = False
-                        return
+                for job in jobs:
                     if notifications < 5 and job["status"] in ("needs_approval", "needs_input", "completed", "failed", "timed_out", "cancelled") and prior.get(job["task_id"]) != job["status"]:
                         notifications += 1
-                        self.app.notify(plain(f"Background {job['name']}: {job['status']}"), markup=False)
+                        self.app.notify(plain(f"Background {job['name']}: {_STATUS_LABELS.get(job['status'], job['status'])}"), markup=False)
+            self.present_jobs()
             paused_keys = {(j["task_id"], tuple(i["id"] for i in j.get("interrupts", [])))
                            for j in jobs if j["status"] == "needs_input"}
             self.hook_seen.intersection_update(paused_keys)
@@ -329,20 +377,14 @@ class BackgroundPanel(Vertical):
         except asyncio.CancelledError:
             raise
         except Exception:
-            if not self.closed and self.display:
-                self.query_one("#factory-background-summary", Static).update(Text("Background status unavailable — reconnecting"))
+            if not self.closed and self.valid(self.identity):
+                self.presentation().set_background_notice("Background status unavailable — reconnecting")
         finally:
             self.polling = False
 
     def update_summary(self):
-        active = sum(j["status"] == "running" for j in self.jobs)
-        waiting = sum(j["status"] in ("needs_approval", "needs_input") for j in self.jobs)
-        summary = f"Background tasks: {active} running · {waiting} waiting · {len(self.jobs)} total"
-        if len(self.jobs) > _MAX_ROWS:
-            summary += f" (showing first {_MAX_ROWS})"
-        if self.hook_errors:
-            summary += "\nHook response unconfirmed; affected tasks remain blocked. Review or cancel them."
-        self.query_one("#factory-background-summary", Static).update(Text(summary))
+        self.presentation().set_background_notice(
+            "Hook response unconfirmed; review or cancel the waiting task." if self.hook_errors else "")
 
     async def fulfill_hooks(self, identity, job, hooks, key, current):
         from lc_factory.upstream_cli import fulfill_background_hook
@@ -381,12 +423,10 @@ class BackgroundPanel(Vertical):
         self.schedule_refresh()
         return response
 
-    @on(Button.Pressed)
-    def review(self, event):
-        detail = self.details.get(event.button.id)
+    def review_task(self, task_id):
+        detail = self.details.get(task_id)
         if detail is None:
             return
-        event.stop()
         identity, job = detail
         if not self.valid(identity):
             return
@@ -400,8 +440,11 @@ class BackgroundPanel(Vertical):
 @contextmanager
 def client_background_tasks():
     from lc_factory.upstream_cli import app_module
+    from lc_factory.background_panel import background_subagent_panel_class
     cls = app_module.DeepAgentsApp
     original = cls.on_mount
+    original_panel = app_module.SubagentPanel
+    app_module.SubagentPanel = background_subagent_panel_class(original_panel)
 
     async def mount(self):
         await original(self)
@@ -414,3 +457,4 @@ def client_background_tasks():
         yield
     finally:
         cls.on_mount = original
+        app_module.SubagentPanel = original_panel

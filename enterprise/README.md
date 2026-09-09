@@ -49,8 +49,9 @@ structured and JavaScript delegation; both default to `true`.
 (`none` disables background, reload and history).
 See [runtime configuration](../TALON_ADAPTATIONS.md#use-with-lc-code).
 
-The TUI now shows background tasks while the main agent is idle or working. Open
-Review to approve/deny a child's exact pending actions or cancel it; the same
+The TUI shows background tasks in its existing dynamic subagents panel while the
+main agent is idle or working. Expand with Ctrl+T, select Background, then click
+a task row or press Enter to approve/deny its exact pending actions or cancel it; the same
 child resumes without repeating completed steps. These jobs end with the server
 session. Existing Manual/Auto/YOLO policy is unchanged.
 

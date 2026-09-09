@@ -218,8 +218,10 @@ conversation's work. Existing remote async tools retain the SDK's behavior.
 Forks cannot recursively detach work or access the main agent's runtime controls.
 Factory approvals and hooks run before detachment, and child tools keep their
 compiled approval controls. A child interrupt becomes `needs_approval` with its
-exact pending action requests. Open Review in the task panel to approve or deny
-the batch, or cancel the task. The retained child checkpoint resumes without
+exact pending action requests. Select Background in the dynamic subagents panel
+and click a task row (or select it with left/right and press Enter) to approve or
+deny the batch, or cancel the task. Ctrl+T expands or collapses the shared panel.
+Background rows survive main-turn completion and cancellation. The retained child checkpoint resumes without
 replaying completed steps. Waiting for approval is not a final result and is not
 acknowledged by the main agent's result-delivery path. Server hooks use their
 existing client-owned fulfillment path; unsupported input requests and requests

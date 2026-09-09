@@ -12,8 +12,15 @@ Only `lc_factory.tui` imports this module.
 
 from deepagents_code import cli_main
 from deepagents_code import app as app_module
+from deepagents_code.tui.widgets import subagent_panel as subagent_panel_module
 
-__all__ = ["cli_main", "app_module"]
+__all__ = ["cli_main", "app_module", "subagent_panel_module"]
+
+
+def background_approval_widgets():
+    """Reuse native file content/diff presentation without foreground decisions."""
+    from deepagents_code.tui.widgets import tool_widgets
+    return tool_widgets
 
 
 async def fulfill_background_hook(hooks, payload):
