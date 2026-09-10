@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { mergeChunk, mergeUpdate, pendingInterrupts, readSSE, type Catalog, type Json, type Message, type Mode, type Project, type Snapshot, type Task, type Thread } from './protocol.ts';
 import type { DecisionReceipt } from './timeline.ts';
+import { AgentRunError, runFailure } from './run-errors.ts';
 
 const empty: Snapshot = { values: {}, next: [], interrupts: [] };
 export function useAgent() {
@@ -138,7 +139,7 @@ export function useAgent() {
       if (event.id && event.id === lastEvent.current) return;
       if (event.id) lastEvent.current = event.id;
       if (event.event === 'metadata' && event.data.run_id) setRunId(event.data.run_id);
-      if (event.event === 'error') throw new Error(event.data.message || event.data.error || 'The agent run failed.');
+      if (event.event === 'error') throw new AgentRunError(event.data.message || event.data.error || 'The agent run failed.');
       // Child namespaces belong in task details, never mixed into the main chat.
       if (event.event === 'messages' && Array.isArray(event.data)) {
         const [message, metadata] = event.data;
@@ -177,7 +178,10 @@ export function useAgent() {
       if (text) void refreshTitle(p, id).catch(() => {});
       await consume(response, epoch);
     } catch (e: any) {
-      if (selection.current.epoch === epoch && e.name !== 'AbortError') { setError(e.message + (submitted ? ' Reconnect to inspect the existing run; your message will not be resent.' : '')); setStatus('disconnected'); }
+      if (selection.current.epoch === epoch && e.name !== 'AbortError') {
+        const failure = runFailure(e, submitted);
+        setError(failure.message); setStatus(failure.disconnected ? 'disconnected' : 'ready');
+      }
     } finally {
       if (selection.current.epoch === epoch) {
         busy.current = false; stream.current = null;
@@ -208,7 +212,7 @@ export function useAgent() {
         stream.current = new AbortController();
         await consume(await request(base + '/join?run=' + encodeURIComponent(runs[0].run_id), 'GET', undefined, stream.current.signal, { 'Last-Event-ID': lastEvent.current }), epoch);
       }
-    } catch (e: any) { if (selection.current.epoch === epoch) setError(e.message); }
+    } catch (e: any) { if (selection.current.epoch === epoch) setError(runFailure(e, false).message); }
     finally { if (selection.current.epoch === epoch) { busy.current = false; stream.current = null; await refresh(epoch).catch(e => { setError(e.message); setStatus('disconnected'); }); } }
   }
   async function cancel() {

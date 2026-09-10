@@ -61,6 +61,14 @@ schema; missing or invalid verdicts still block execution. This applies whether
 the classifier inherits the main model or is configured separately, without
 changing the main model's settings.
 
+Main, subagent and grader model calls preserve DeepSeek's `reasoning_content`
+when sending saved assistant history back to the provider. A request-local
+compatibility adapter repairs the pinned provider serializer without modifying
+shared models, dependencies, thinking settings or saved messages. Synthetic
+assistant context carries an empty reasoning field. Provider run failures in
+the web UI offer refresh without treating them as connection loss or resending
+the submitted message.
+
 Local subagents also follow the session's live Manual, Auto or YOLO mode.
 Auto uses the session's classifier even when a child uses a different model;
 child tool and filesystem restrictions still apply. Running background children

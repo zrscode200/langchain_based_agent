@@ -1263,6 +1263,9 @@ def create_factory_agent(
         from lc_factory.upstream import CodeModelRetryMiddleware
 
         middleware.append(CodeModelRetryMiddleware(max_retries=model_retries))
+        from lc_factory.deepseek_reasoning import DeepSeekReasoningMiddleware
+
+        middleware.append(DeepSeekReasoningMiddleware())
         if restrictive_shell_allow_list is not None:
             middleware.append(ShellAllowListMiddleware(restrictive_shell_allow_list))
         # Server-owned hooks must wrap subagent tools too; otherwise Pre/Post
@@ -1889,9 +1892,12 @@ def create_factory_agent(
     # with a non-zero request-time budget.
     from lc_factory.upstream import CodeModelRetryMiddleware
 
+    from lc_factory.deepseek_reasoning import DeepSeekReasoningMiddleware
+
     agent_middleware.extend(
         [
             CodeModelRetryMiddleware(max_retries=model_retries),
+            DeepSeekReasoningMiddleware(),
             ToolErrorMiddleware(_format_task_error, tools=["task"]),
         ]
     )
@@ -1954,6 +1960,7 @@ def create_factory_agent(
             max_retries=model_retries,
             stream_output_is_visible=False,
         ),
+        DeepSeekReasoningMiddleware(),
         _ContextToolCallBudgetMiddleware(
             # `read_file` is bounded separately by the grader's in-tool
             # working-directory counter, which excludes offloaded-result reads.
