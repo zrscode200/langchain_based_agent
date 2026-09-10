@@ -37,3 +37,11 @@ test('conversation labels prefer manual titles, then the first user message', ()
   assert.equal(conversationTitle(), 'New conversation');
   assert.equal(initialTitle('😀'.repeat(72)), '😀'.repeat(70));
 });
+test('an exact skill name wins over an earlier skill with the same prefix', () => {
+  const entries = composerCommands([
+    { name: 'review-check', path: 'a', description: 'Check changes' },
+    { name: 'review', path: 'z', description: 'Review changes' },
+  ]);
+  assert.equal(filterCommands(entries, '/review')[0].skillPath, 'z');
+  assert.equal(filterCommands(entries, '/review-check')[0].skillPath, 'a');
+});

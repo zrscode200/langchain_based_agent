@@ -4,7 +4,7 @@ import path from 'node:path';
 import { artifact, catalog, files, project, snapshot, tasks, threads } from '../fixtures.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
-async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean } = {}) {
+async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean } = {}) {
   const calls: { url: string; body: any }[] = [];
   const rows = structuredClone(threads);
   const current = structuredClone(options.empty ? { ...snapshot, values: { messages: [] }, interrupts: [] } : snapshot) as any;
@@ -34,6 +34,7 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
       result = row || { thread_id: 'new-thread', metadata: { cwd: project.path } };
     }
     else if (url.pathname.endsWith('/run')) {
+      if (options.delayRun) await new Promise(resolve => setTimeout(resolve, 800));
       current.interrupts = []; current.values.messages = [...(current.values.messages || []), { id: 'stream-ai', type: 'ai', content: 'Streamed response' }];
       await route.fulfill({ contentType: 'text/event-stream', body: 'event: metadata\nid: 1\ndata: {"run_id":"r1"}\n\nevent: messages\nid: 2\ndata: [{"id":"stream-ai","type":"AIMessageChunk","content":"Streamed "},{}]\n\nevent: messages\nid: 3\ndata: [{"id":"stream-ai","type":"AIMessageChunk","content":"response"},{}]\n\n' }); return;
     }
@@ -145,4 +146,43 @@ test('slash navigation respects Escape, arrow selection, IME and multiline input
   await composer.press('Shift+Enter');
   await expect(composer).toHaveValue('my request\n');
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+});
+
+test('slash tab commands still work after manually switching definition tabs', async ({ page }) => {
+  await mount(page, { empty: true });
+  await page.getByRole('button', { name: 'Agent definition', exact: true }).click();
+  await page.getByRole('button', { name: /^Tools/ }).click();
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('/skills'); await composer.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Filter skills' })).toBeVisible();
+  await composer.fill('/tools'); await composer.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Filter tools' })).toBeVisible();
+  await page.getByRole('button', { name: /^Skills/ }).click();
+  await composer.fill('/tools'); await composer.press('Enter');
+  await expect(page.getByRole('textbox', { name: 'Filter tools' })).toBeVisible();
+});
+test('accepting an earlier message preserves a newer literal slash draft', async ({ page }) => {
+  const calls = await mount(page, { empty: true, delayRun: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('First request'); await composer.press('Enter');
+  await composer.fill('/settings');
+  await page.getByRole('button', { name: 'Use as message text' }).click();
+  await expect(page.getByText('Streamed response', { exact: true })).toBeVisible();
+  await expect(composer).toHaveValue('/settings');
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(() => calls.filter(c => c.url.endsWith('/run')).length).toBe(2);
+  expect(calls.filter(c => c.url.endsWith('/run'))[1].body.text).toBe('/settings');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+test('accepting an earlier message preserves a newer skill draft', async ({ page }) => {
+  const calls = await mount(page, { empty: true, delayRun: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('First request'); await composer.press('Enter');
+  await composer.fill('/review My next request'); await composer.press('Tab');
+  await expect(page.getByText('Streamed response', { exact: true })).toBeVisible();
+  await expect(composer).toHaveValue('My next request');
+  await expect(page.getByRole('button', { name: 'Remove selected skill' })).toBeVisible();
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(() => calls.filter(c => c.url.endsWith('/run')).length).toBe(2);
+  expect(calls.filter(c => c.url.endsWith('/run'))[1].body.skill).toBe(catalog.skills[1].path);
 });

@@ -52,9 +52,9 @@ function TasksPanel({ agent, compose }: { agent: Agent; compose: (text: string) 
   </div>;
 }
 
-function AgentPanel({ agent, chooseSkill, open, initialTab = 'skills' }: { initialTab?: string; agent: Agent; chooseSkill: (path: string) => void; open: (file: Artifact) => void }) {
-  const [tab, setTab] = useState(initialTab);
+function AgentPanel({ agent, chooseSkill, open, tab, setTab }: { tab: string; setTab: (tab: string) => void; agent: Agent; chooseSkill: (path: string) => void; open: (file: Artifact) => void }) {
   const [filter, setFilter] = useState('');
+  useEffect(() => setFilter(''), [tab, agent.projectId]);
   const readInstructions = () => {
     const current = agent.capture();
     void agent.data(`/projects/${agent.projectId}/files?read=1&path=AGENTS.md`).then(file => { if (current()) open(file); }).catch(e => { if (current()) agent.setError(e.message); });
@@ -90,6 +90,7 @@ export default function App() {
   const commandBox = useRef<HTMLDivElement>(null);
   const commandList = useRef<HTMLDivElement>(null);
   const draftKey = useRef('');
+  const draftRevision = useRef(0);
   const scroll = useRef<HTMLDivElement>(null);
   const renameBusy = useRef(false);
   const activeTasks = agent.tasks.filter(t => activeStatuses.includes(t.status)).length;
@@ -105,11 +106,12 @@ export default function App() {
   const todo: Json[] = agent.state.values.todos || [];
   const toggle = (value: Panel) => setPanel(current => current === value ? null : value);
   const updateDraft = (text: string) => {
+    draftRevision.current++;
     setDraft(text); localStorage.setItem(draftKey.current, text);
     setCommandError(''); setLiteralDraft(current => current !== null && parseSlash(current)?.name === parseSlash(text)?.name ? text : null); setDismissedFor(null); setCommandIndex(0);
   };
   const compose = (text: string) => { updateDraft(text); composer.current?.focus(); };
-  const chooseSkill = (path: string) => { setSkill(path); composer.current?.focus(); };
+  const chooseSkill = (path: string) => { draftRevision.current++; setSkill(path); composer.current?.focus(); };
   const beginRename = (id = agent.threadId, value?: string, inline = true) => {
     if (!id || renameBusy.current) return;
     setRename({ id, value: value ?? conversationTitle(agent.threads.find(t => t.thread_id === id)), inline });
@@ -182,10 +184,12 @@ export default function App() {
     }
     if (!draft.trim() || !canSend) return;
     if (skill && !selectedSkill) { setCommandError('The selected skill is unavailable. Choose it again before sending.'); return; }
-    const text = draft, savedKey = draftKey.current, current = agent.capture();
+    const text = draft, savedKey = draftKey.current, revision = draftRevision.current, current = agent.capture();
     await agent.run(text, skill || undefined, undefined, model || undefined, () => {
-      if (localStorage.getItem(savedKey) === text) localStorage.removeItem(savedKey);
-      if (current()) { setDraft(value => value === text ? '' : value); setSkill(''); setLiteralDraft(null); }
+      if (current() && draftRevision.current === revision) {
+        if (localStorage.getItem(savedKey) === text) localStorage.removeItem(savedKey);
+        setDraft(''); setSkill(''); setLiteralDraft(null);
+      }
     });
   }
   function exportChat() {
@@ -243,10 +247,10 @@ export default function App() {
                 </button>)}
               </div>
               {!matches.length && <p className="slash-empty">No matching web command or loaded skill. TUI-only commands are not available here.</p>}
-              <div className="slash-footer"><span>{selectedCommand?.kind === 'skill' ? 'Choose a skill, then write and send your message.' : 'Commands open controls without sending a message.'}</span><button className="text-button" onClick={() => { setLiteralDraft(draft); setDismissedFor(draft); setCommandError(''); composer.current?.focus(); }}>Use as message text</button></div>
+              <div className="slash-footer"><span>{selectedCommand?.kind === 'skill' ? 'Choose a skill, then write and send your message.' : 'Commands open controls without sending a message.'}</span><button className="text-button" onClick={() => { draftRevision.current++; setLiteralDraft(draft); setDismissedFor(draft); setCommandError(''); composer.current?.focus(); }}>Use as message text</button></div>
             </div>}
             {commandError && <p className="composer-error" role="alert">{commandError}</p>}
-            {selectedSkill && <div className="selected-skill"><Sparkles size={14} /><span>{selectedSkill.name}</span><IconButton label="Remove selected skill" onClick={() => setSkill('')}><X size={12} /></IconButton></div>}
+            {selectedSkill && <div className="selected-skill"><Sparkles size={14} /><span>{selectedSkill.name}</span><IconButton label="Remove selected skill" onClick={() => chooseSkill('')}><X size={12} /></IconButton></div>}
             <textarea ref={composer} role="combobox" aria-label="Message the agent" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded={menuOpen} aria-controls={menuOpen ? 'composer-commands' : undefined} aria-activedescendant={menuOpen && selectedCommand ? 'composer-command-' + matches.indexOf(selectedCommand) : undefined} placeholder={agent.interrupts.length ? 'The agent is waiting for your response above…' : 'Message the agent · / for skills and commands'} value={draft} onChange={e => updateDraft(e.target.value)} rows={3} onKeyDown={e => {
               if (e.nativeEvent.isComposing || e.keyCode === 229) return;
               if (menuOpen) {
@@ -262,7 +266,7 @@ export default function App() {
         </div>
       </section>{artifact && <ArtifactView key={artifact.path} file={artifact} close={() => setArtifact(null)} reference={() => compose(draft + `${draft ? '\n' : ''}Please refer to the project file \`${artifact.path}\`. `)} />}</div>
     </main>
-    {panel && <aside className="inspector" aria-label={panel + ' panel'}><div className="inspector-heading"><div>{panel === 'tasks' ? <Workflow size={18} /> : panel === 'agent' ? <Bot size={18} /> : <FolderOpen size={18} />}<h2>{panel === 'tasks' ? 'Background work' : panel === 'agent' ? 'Agent definition' : 'Project files'}</h2></div><IconButton label="Close inspector" onClick={() => setPanel(null)}><X size={17} /></IconButton></div><div className="inspector-body">{panel === 'tasks' ? <TasksPanel agent={agent} compose={compose} /> : panel === 'agent' ? <AgentPanel key={agentTab} initialTab={agentTab} agent={agent} chooseSkill={chooseSkill} open={setArtifact} /> : <Files key={agent.projectId} agent={agent} open={setArtifact} />}</div></aside>}
+    {panel && <aside className="inspector" aria-label={panel + ' panel'}><div className="inspector-heading"><div>{panel === 'tasks' ? <Workflow size={18} /> : panel === 'agent' ? <Bot size={18} /> : <FolderOpen size={18} />}<h2>{panel === 'tasks' ? 'Background work' : panel === 'agent' ? 'Agent definition' : 'Project files'}</h2></div><IconButton label="Close inspector" onClick={() => setPanel(null)}><X size={17} /></IconButton></div><div className="inspector-body">{panel === 'tasks' ? <TasksPanel agent={agent} compose={compose} /> : panel === 'agent' ? <AgentPanel tab={agentTab} setTab={setAgentTab} agent={agent} chooseSkill={chooseSkill} open={setArtifact} /> : <Files key={agent.projectId} agent={agent} open={setArtifact} />}</div></aside>}
     {modal === 'search' && <Modal title="Find a conversation" close={() => setModal(null)}><div className="command-search"><Search size={19} /><input autoFocus aria-label="Search conversations" placeholder="Search by conversation title…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>ESC</kbd></div><div className="command-results">{agent.threads.filter(t => conversationTitle(t).toLowerCase().includes(search.toLowerCase())).map(t => <button key={t.thread_id} onClick={() => { agent.selectThread(t.thread_id); setModal(null); }}><MessageSquare size={16} /><span>{conversationTitle(t)}</span>{t.thread_id === agent.threadId && <Check size={15} />}</button>)}</div><div className="command-footer"><Command size={13} /> K to open · Escape to close</div></Modal>}
     {modal === 'settings' && <Modal title="Session settings" close={() => setModal(null)}><div className="settings-body"><span className="eyebrow">Model</span><label className="field-label">Model for the next turn<input placeholder={agent.state.values._model_spec || agent.catalog.model || 'Use the server default'} value={model} onChange={e => setModel(e.target.value)} /></label><p className="field-hint">Use provider:model. Credentials and model policy stay on the backend. The effective model appears in Agent definition → Context after a successful turn.</p><span className="eyebrow">Tool approvals</span><div className="mode-options">{([['manual', 'Ask first', 'Review actions yourself.'], ['auto', 'Auto review', 'The configured classifier reviews actions.'], ['yolo', 'YOLO', 'Approve actions automatically within server policy.']] as const).map(([value, name, description]) => <button disabled={!agent.threadId} className={agent.mode === value ? 'selected' : ''} key={value} onClick={() => void agent.changeMode(value)}><span className="radio">{agent.mode === value && <i />}</span><div><strong>{name}</strong><p>{description}</p></div></button>)}</div><p className="field-hint">A mode change also applies to this conversation’s background agents at their next approval boundary.</p><dl className="settings-meta"><dt>Backend</dt><dd>{agent.backend}</dd><dt>Workspace</dt><dd>{agent.project?.path}</dd></dl></div></Modal>}
     {modal === 'rename' && <Modal title="Rename conversation" close={closeRename}>{titleEditor}</Modal>}

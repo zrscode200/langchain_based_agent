@@ -48,5 +48,6 @@ export function parseSlash(text: string): { name: string; args: string } | null 
 export function filterCommands(entries: ComposerCommand[], name: string): ComposerCommand[] {
   const query = name.replace(/^\//, '').toLowerCase();
   return entries.filter(c => c.name.slice(1).includes(query) || c.description.toLowerCase().includes(query))
-    .sort((a, b) => Number(b.name.startsWith('/' + query)) - Number(a.name.startsWith('/' + query)));
+    .sort((a, b) => Number(b.name === '/' + query) - Number(a.name === '/' + query)
+      || Number(b.name.startsWith('/' + query)) - Number(a.name.startsWith('/' + query)));
 }
