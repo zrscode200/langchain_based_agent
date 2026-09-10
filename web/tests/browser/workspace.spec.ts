@@ -4,10 +4,20 @@ import path from 'node:path';
 import { artifact, catalog, files, project, snapshot, tasks, threads } from '../fixtures.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
-async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean } = {}) {
+async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean } = {}) {
   const calls: { url: string; body: any }[] = [];
   const rows = structuredClone(threads);
   const current = structuredClone(options.empty ? { ...snapshot, values: { messages: [] }, interrupts: [] } : snapshot) as any;
+  const currentCatalog = structuredClone(catalog);
+  if (options.longContent) {
+    current.values.messages = Array.from({ length: 40 }, (_, i) => ({
+      id: `long-message-${i}`, type: i % 2 ? 'ai' : 'human',
+      content: `Message ${i + 1}. ` + 'A long conversation must remain scrollable while the composer stays in view. '.repeat(8),
+    }));
+    currentCatalog.skills = Array.from({ length: 30 }, (_, i) => ({
+      ...catalog.skills[0], name: `Example skill ${i + 1}`, path: `/sample/skills/${i}/SKILL.md`,
+    }));
+  }
   if (options.approval) current.interrupts = [{ id: 'pause-1', value: { action_requests: [{ name: 'write_file', args: { file_path: 'notes.md', content: '# Notes' } }], review_configs: [{ action_name: 'write_file', allowed_decisions: ['approve', 'reject'] }] } }];
   await page.route('http://127.0.0.1:3100/**', async route => {
     const req = route.request(), url = new URL(req.url());
@@ -24,7 +34,7 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
       result = url.pathname.includes('conversation-2') ? { values: { messages: [{ id: 'new', type: 'human', content: 'This belongs to the second conversation.' }] }, next: [], interrupts: [] } : current;
     }
     else if (url.pathname.endsWith('/background')) result = body.operation === 'inspect' ? { task: { ...tasks[0], conversation: { text: 'Retained task transcript', page: 0, pages: 1, limited: false, notice: '' } } } : { tasks, enabled: true, pending_results: [] };
-    else if (url.pathname.endsWith('/catalog')) result = catalog;
+    else if (url.pathname.endsWith('/catalog')) result = currentCatalog;
     else if (url.pathname.endsWith('/mode')) result = { mode: body.mode || 'manual' };
     else if (url.pathname.endsWith('/runs')) result = [];
     else if (url.pathname.endsWith('/files')) result = url.searchParams.has('read') ? artifact : files;
@@ -186,3 +196,32 @@ test('accepting an earlier message preserves a newer skill draft', async ({ page
   await expect.poll(() => calls.filter(c => c.url.endsWith('/run')).length).toBe(2);
   expect(calls.filter(c => c.url.endsWith('/run'))[1].body.skill).toBe(catalog.skills[1].path);
 });
+
+for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 }]) {
+  test(`long chat and inspector scroll within the viewport at ${viewport.width}px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await mount(page, { longContent: true });
+    await expect(page.getByText(/^Message 40\./)).toBeVisible();
+    if (viewport.width < 700) await page.getByRole('button', { name: 'Hide sidebar' }).click();
+    const chat = page.locator('.conversation-scroll');
+    const composer = page.locator('.composer-region');
+    await expect.poll(() => chat.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    const composerBox = await composer.boundingBox();
+    expect(composerBox).not.toBeNull();
+    expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(viewport.height + 1);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewport.height + 1);
+    await chat.evaluate(el => { el.scrollTop = 0; });
+    await expect.poll(() => chat.evaluate(el => el.scrollTop)).toBe(0);
+    await chat.hover();
+    await page.mouse.wheel(0, 600);
+    await expect.poll(() => chat.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+    await page.getByRole('combobox', { name: 'Message the agent' }).fill('/skills');
+    await page.getByRole('combobox', { name: 'Message the agent' }).press('Enter');
+    const inspector = page.locator('.inspector-body');
+    await expect.poll(() => inspector.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
+    await inspector.hover();
+    await page.mouse.wheel(0, 600);
+    await expect.poll(() => inspector.evaluate(el => el.scrollTop)).toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewport.height + 1);
+  });
+}
