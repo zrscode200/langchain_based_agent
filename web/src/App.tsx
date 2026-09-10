@@ -1,8 +1,9 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ArrowUp, BookOpen, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Code2, Command, Download, FolderOpen, Layers, LoaderCircle, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, ShieldCheck, Sparkles, Square, Terminal, Workflow, X, RotateCcw, Pencil } from 'lucide-react';
 import { ArtifactView, Files, IconButton, Mark, Modal, Prose, type Artifact } from './components.tsx';
 import { Approvals } from './approvals.tsx';
 import { Conversation } from './conversation.tsx';
+import { InspectorResizeHandle, useInspectorSize } from './inspector-resize.tsx';
 import { useAgent, type Agent } from './useAgent.ts';
 import { type Json, type Task } from './protocol.ts';
 
@@ -74,6 +75,7 @@ export default function App() {
   const [panel, setPanel] = useState<Panel>(null);
   const [agentTab, setAgentTab] = useState('skills');
   const [sidebar, setSidebar] = useState(() => window.innerWidth > 700);
+  const inspectorSize = useInspectorSize(sidebar);
   const [draft, setDraft] = useState('');
   const [skill, setSkill] = useState('');
   const [model, setModel] = useState('');
@@ -205,7 +207,7 @@ export default function App() {
     {renameError && <span className="inline-error" role="alert">{renameError}</span>}
   </form>;
 
-  return <div className={'workspace ' + (sidebar ? '' : 'sidebar-hidden') + (panel ? ' has-panel' : '')}>
+  return <div className={'workspace ' + (sidebar ? '' : 'sidebar-hidden') + (panel ? ' has-panel' : '') + (inspectorSize.dragging ? ' resizing-panel' : '') + (panel && artifact && inspectorSize.overlayArtifact ? ' compact-artifact' : '')} style={{ '--inspector-width': `${inspectorSize.width}px` } as CSSProperties}>
     <aside className="sidebar" aria-label="Project and conversations">
       <div className="brand"><span className="brand-mark"><Mark /></span><div><strong>Agent Workspace</strong><span>LANGCHAIN BASED AGENT</span></div><IconButton label="Hide sidebar" onClick={() => setSidebar(false)}><PanelLeftClose size={17} /></IconButton></div>
       <div className="project-switcher"><span className="project-icon"><Layers size={19} /></span><label><span>WORKSPACE</span><select aria-label="Project" value={agent.projectId} onChange={e => agent.setProjectId(e.target.value)}>{agent.projects.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label><ChevronDown size={14} /></div>
@@ -266,7 +268,7 @@ export default function App() {
         </div>
       </section>{artifact && <ArtifactView key={artifact.path} file={artifact} close={() => setArtifact(null)} reference={() => compose(draft + `${draft ? '\n' : ''}Please refer to the project file \`${artifact.path}\`. `)} />}</div>
     </main>
-    {panel && <aside className="inspector" aria-label={panel + ' panel'}><div className="inspector-heading"><div>{panel === 'tasks' ? <Workflow size={18} /> : panel === 'agent' ? <Bot size={18} /> : <FolderOpen size={18} />}<h2>{panel === 'tasks' ? 'Background work' : panel === 'agent' ? 'Agent definition' : 'Project files'}</h2></div><IconButton label="Close inspector" onClick={() => setPanel(null)}><X size={17} /></IconButton></div><div className="inspector-body">{panel === 'tasks' ? <TasksPanel agent={agent} compose={compose} /> : panel === 'agent' ? <AgentPanel tab={agentTab} setTab={setAgentTab} agent={agent} chooseSkill={chooseSkill} open={setArtifact} /> : <Files key={agent.projectId} agent={agent} open={setArtifact} />}</div></aside>}
+    {panel && <aside id="workspace-inspector" className="inspector" aria-label={panel + ' panel'}><InspectorResizeHandle sizing={inspectorSize} /><div className="inspector-heading"><div>{panel === 'tasks' ? <Workflow size={18} /> : panel === 'agent' ? <Bot size={18} /> : <FolderOpen size={18} />}<h2>{panel === 'tasks' ? 'Background work' : panel === 'agent' ? 'Agent definition' : 'Project files'}</h2></div><IconButton label="Close inspector" onClick={() => setPanel(null)}><X size={17} /></IconButton></div><div className="inspector-body">{panel === 'tasks' ? <TasksPanel agent={agent} compose={compose} /> : panel === 'agent' ? <AgentPanel tab={agentTab} setTab={setAgentTab} agent={agent} chooseSkill={chooseSkill} open={setArtifact} /> : <Files key={agent.projectId} agent={agent} open={setArtifact} />}</div></aside>}
     {modal === 'search' && <Modal title="Find a conversation" close={() => setModal(null)}><div className="command-search"><Search size={19} /><input autoFocus aria-label="Search conversations" placeholder="Search by conversation title…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>ESC</kbd></div><div className="command-results">{agent.threads.filter(t => conversationTitle(t).toLowerCase().includes(search.toLowerCase())).map(t => <button key={t.thread_id} onClick={() => { agent.selectThread(t.thread_id); setModal(null); }}><MessageSquare size={16} /><span>{conversationTitle(t)}</span>{t.thread_id === agent.threadId && <Check size={15} />}</button>)}</div><div className="command-footer"><Command size={13} /> K to open · Escape to close</div></Modal>}
     {modal === 'settings' && <Modal title="Session settings" close={() => setModal(null)}><div className="settings-body"><span className="eyebrow">Model</span><label className="field-label">Model for the next turn<input placeholder={agent.state.values._model_spec || agent.catalog.model || 'Use the server default'} value={model} onChange={e => setModel(e.target.value)} /></label><p className="field-hint">Use provider:model. Credentials and model policy stay on the backend. The effective model appears in Agent definition → Context after a successful turn.</p><span className="eyebrow">Tool approvals</span><div className="mode-options">{([['manual', 'Ask first', 'Review actions yourself.'], ['auto', 'Auto review', 'The configured classifier reviews actions.'], ['yolo', 'YOLO', 'Approve actions automatically within server policy.']] as const).map(([value, name, description]) => <button disabled={!agent.threadId} className={agent.mode === value ? 'selected' : ''} key={value} onClick={() => void agent.changeMode(value)}><span className="radio">{agent.mode === value && <i />}</span><div><strong>{name}</strong><p>{description}</p></div></button>)}</div><p className="field-hint">A mode change also applies to this conversation’s background agents at their next approval boundary.</p><dl className="settings-meta"><dt>Backend</dt><dd>{agent.backend}</dd><dt>Workspace</dt><dd>{agent.project?.path}</dd></dl></div></Modal>}
     {modal === 'rename' && <Modal title="Rename conversation" close={closeRename}>{titleEditor}</Modal>}

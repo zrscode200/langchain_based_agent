@@ -73,6 +73,10 @@ local launcher.
 - Open **Agent definition** to discover skills and tools. **Use skill** attaches
   the real server-discovered skill to your next message. Its instructions and
   invocation metadata use the harness's existing format.
+- Drag the left edge of the right panel to make more room for skills, files or
+  task details. The width is remembered in this browser. Double-click the edge
+  to reset, or focus it and use **←/→** (hold **Shift** for larger steps).
+  On phones the panel uses the full screen width.
 - **Background work** shows delegated jobs, results and pending input. The main
   agent’s current plan appears within the conversation.
   Select a task for its retained transcript, tool activity and cancellation.
@@ -109,7 +113,7 @@ local launcher.
 | Interrupted main turn | Explicit continuation from its saved checkpoint, preserving the original turn identity |
 | Reconnect | Joins the existing resumable run, or refreshes saved state; never resubmits the original message automatically |
 | Model switching / compaction | Next-turn model identifier; native server offload and cancellation |
-| Session history | Uses the server thread catalog and checkpoints; browser stores selection and drafts only |
+| Session history | Uses the server thread catalog and checkpoints; browser stores selection, drafts and panel width |
 | Native command hooks / extension lifecycle UI | Requires the native TUI; unexpected hook interrupts remain blocked and are not simulated as approvals |
 | Image uploads, terminal emulation, checkpoint editing/forking, command palette for every CLI maintenance command | Not included; retain the TUI/CLI for those workflows |
 
@@ -121,7 +125,7 @@ wake. Existing backend capabilities are not replaced with browser-owned state.
 ## Conversation experience
 
 Each user turn groups the agent's updates, tool activity, exposed reasoning and
-response. Completed activity can collapse while errors open their output. File
+response. Reasoning uses smaller, muted text without a highlighted background. Completed activity can collapse while errors open their output. File
 and command tools have readable summaries and expandable exact arguments;
 unknown tools retain a generic view. Tool results with explicit error/cancelled
 status retain that status; a nonzero structured command exit code is also a

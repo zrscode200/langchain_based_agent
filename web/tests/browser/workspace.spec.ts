@@ -336,6 +336,17 @@ test('populated preview is isolated, interactive, and responsive', async ({ page
   await page.getByRole('button', { name: 'Failure', exact: true }).click();
   await expect(page.getByText(/Link check failed/)).toBeVisible();
   await page.screenshot({ path: path.join(root, 'test-results/chat-failure-desktop.png'), fullPage: true });
+  await page.getByRole('button', { name: 'Working', exact: true }).click();
+  for (const width of [1440, 1700, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    const reasoning = page.locator('.reasoning-text .prose').last();
+    await expect(reasoning).toBeVisible();
+    const reasoningSize = await reasoning.evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    const chatSize = await page.locator('.user-message .prose').first().evaluate(el => parseFloat(getComputedStyle(el).fontSize));
+    expect(reasoningSize).toBe(12);
+    expect(reasoningSize).toBeLessThan(chatSize);
+    await expect(page.locator('.reasoning-text').last()).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Question', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Submit response', exact: true })).toBeDisabled();
@@ -346,4 +357,62 @@ test('populated preview is isolated, interactive, and responsive', async ({ page
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: path.join(root, 'test-results/chat-question-mobile.png'), fullPage: true });
   expect(apiCalls).toEqual([]);
+});
+
+test('right sidebar resizes by dragging or keyboard, remembers width, and restores it after responsive clamping', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await mount(page);
+  const open = async () => {
+    const composer = page.getByRole('combobox', { name: 'Message the agent' });
+    await composer.fill('/skills'); await composer.press('Enter');
+  };
+  await open();
+  const panel = page.locator('#workspace-inspector');
+  const handle = page.getByRole('separator', { name: 'Resize right sidebar' });
+  await expect(handle).toHaveAttribute('aria-valuenow', '342');
+  const edge = (await handle.boundingBox())!;
+  await page.mouse.move(edge.x + 4, edge.y + 100);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 4 - 278, edge.y + 100, { steps: 12 });
+  await page.mouse.up();
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBe(620);
+  await expect(page.locator('.workspace')).not.toHaveClass(/resizing-panel/);
+  await page.reload(); await open();
+  await expect(handle).toHaveAttribute('aria-valuenow', '620');
+  await page.setViewportSize({ width: 1100, height: 960 });
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBe(460);
+  expect((await page.locator('.main').boundingBox())!.width).toBeGreaterThanOrEqual(420);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(handle).toBeHidden();
+  await expect.poll(async () => (await panel.boundingBox())!.width).toBe(390);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await expect(handle).toHaveAttribute('aria-valuenow', '620');
+  await handle.focus(); await handle.press('ArrowRight');
+  await expect(handle).toHaveAttribute('aria-valuenow', '600');
+  await handle.press('Shift+ArrowLeft');
+  await expect(handle).toHaveAttribute('aria-valuenow', '650');
+  await handle.dblclick();
+  await expect(handle).toHaveAttribute('aria-valuenow', '342');
+  await page.reload(); await open();
+  await expect(handle).toHaveAttribute('aria-valuenow', '342');
+});
+
+test('widening the inspector with a file open keeps preview and chat within the center', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 960 });
+  await mount(page);
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('/skills'); await composer.press('Enter');
+  await page.getByRole('button', { name: /Project instructions/ }).click();
+  await expect(page.locator('.artifact')).toBeVisible();
+  const handle = page.getByRole('separator', { name: 'Resize right sidebar' });
+  await handle.focus(); await handle.press('End');
+  await expect(handle).toHaveAttribute('aria-valuenow', '614');
+  await expect(page.locator('.workspace')).toHaveClass(/compact-artifact/);
+  const chat = (await page.locator('.conversation').boundingBox())!;
+  const preview = (await page.locator('.artifact').boundingBox())!;
+  const panel = (await page.locator('#workspace-inspector').boundingBox())!;
+  expect(chat.width).toBeGreaterThanOrEqual(420);
+  expect(preview.x).toBe(chat.x);
+  expect(preview.x + preview.width).toBeLessThanOrEqual(panel.x);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1280);
 });
