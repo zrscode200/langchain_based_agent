@@ -117,6 +117,41 @@ agent-workspace workflows above. In particular, it does not run configured
 client-side command hooks or automatically initiate the TUI's idle background
 wake. Existing backend capabilities are not replaced with browser-owned state.
 
+## Conversation experience
+
+Each user turn groups the agent's updates, tool activity, exposed reasoning and
+response. Completed activity can collapse while errors open their output. File
+and command tools have readable summaries and expandable exact arguments;
+unknown tools retain a generic view. Tool results with explicit error/cancelled
+status retain that status; a nonzero structured command exit code is also a
+failure even when the tool envelope reports success. Untyped results say “Result received”; a missing
+result does not become a fabricated running or successful action.
+
+Provider-exposed reasoning is supported in reasoning/thinking content blocks,
+public summary blocks, and `additional_kwargs.reasoning_content` (including
+streamed deltas). Opaque/redacted payloads are not displayed. The reasoning
+section is open while reasoning arrives and can be expanded or collapsed by the
+reader; the model must actually supply reasoning for it to appear. Completed
+node updates deliver tool results without waiting for the final checkpoint.
+
+A single supported approval has direct **Approve this action** and **Reject**
+buttons. Multiple requested actions require a choice for each action and an
+explicit **Submit decisions**. Questions use their own answer card. Backend
+interrupt IDs and allowed decisions remain authoritative. A decision receipt
+means the response was sent, not that the action succeeded; receipts are local
+to the current visit and disappear on conversation navigation/reload. The saved
+backend messages and outcomes remain authoritative.
+
+Scroll back to read earlier work without following new output. **New activity**
+(or **Jump to latest** after the run) returns to the conversation's end. Opening
+details also releases automatic following so expanding content stays readable.
+
+A separate populated design preview is available at
+`http://127.0.0.1:3100/chat-preview.html` after building. It uses the same chat
+components with labelled synthetic data and includes working, approval,
+question, completed and failure examples. Its buttons only update local sample
+state: it makes no API calls and cannot change project files or real sessions.
+
 ## Recovery and storage
 
 The backend is authoritative. A browser disconnect leaves an already accepted

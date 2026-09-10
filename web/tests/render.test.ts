@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Approvals, Prose, ArtifactView, MessageView } from '../src/components.tsx';
+import { Prose, ArtifactView } from '../src/components.tsx';
+import { Approvals } from '../src/approvals.tsx';
+import { ToolView } from '../src/tool-view.tsx';
 
 test('upstream choice prompts render real labels and optional questions allow submit', () => {
   const html = renderToStaticMarkup(createElement(Approvals, { interrupts: [{ id: 'q', value: { type: 'ask_user', questions: [{ question: 'Choose a language', type: 'multi_select', required: false, choices: [{ value: 'TypeScript' }, { value: 'Python' }] }] } }], submit: async () => {} }));
@@ -13,7 +15,7 @@ test('upstream choice prompts render real labels and optional questions allow su
 test('Markdown and tool text cannot create executable HTML or fetch external images', () => {
   const html = renderToStaticMarkup(createElement(Prose, { children: '<script>alert(1)</script>\n\n![tracking](https://evil.test/image)\n\n[bad](javascript:alert(1))' }));
   assert.doesNotMatch(html, /<script/); assert.doesNotMatch(html, /<img/); assert.doesNotMatch(html, /href="javascript:/);
-  const tool = renderToStaticMarkup(createElement(MessageView, { message: { id: 'ai', type: 'ai', content: '', tool_calls: [{ id: 'call', name: 'shell', args: { command: '<script>bad()</script>' } }] }, all: [{ type: 'tool', content: '<img src=x onerror=bad()>', tool_call_id: 'call' }] }));
+  const tool = renderToStaticMarkup(createElement(ToolView, { call: { id: 'call', name: 'shell', args: { command: '<script>bad()</script>' } }, messages: [{ type: 'tool', status: 'error', content: '<img src=x onerror=bad()>', tool_call_id: 'call' }], active: false, interrupts: [] }));
   assert.doesNotMatch(tool, /<script/); assert.doesNotMatch(tool, /<img/); assert.match(tool, /&lt;img/);
 });
 test('HTML preview uses an opaque sandbox and a restrictive resource policy', () => {

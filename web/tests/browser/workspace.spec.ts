@@ -4,7 +4,7 @@ import path from 'node:path';
 import { artifact, catalog, files, project, snapshot, tasks, threads } from '../fixtures.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
-async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean } = {}) {
+async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean; multipleApprovals?: boolean; failApproval?: boolean; reasoningStream?: boolean } = {}) {
   const calls: { url: string; body: any }[] = [];
   const rows = structuredClone(threads);
   const current = structuredClone(options.empty ? { ...snapshot, values: { messages: [] }, interrupts: [] } : snapshot) as any;
@@ -19,6 +19,33 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
     }));
   }
   if (options.approval) current.interrupts = [{ id: 'pause-1', value: { action_requests: [{ name: 'write_file', args: { file_path: 'notes.md', content: '# Notes' } }], review_configs: [{ action_name: 'write_file', allowed_decisions: ['approve', 'reject'] }] } }];
+  if (options.multipleApprovals) current.interrupts[0].value.action_requests.push({ name: 'write_file', args: { file_path: 'second.md', content: '# Second' } });
+  const reasonMessages = [
+    { id: 'reason-ai', type: 'ai', content: '', additional_kwargs: { reasoning_content: 'First second.' }, tool_calls: [{ id: 'read-stream', name: 'read_file', args: { file_path: 'missing.md' } }] },
+    { id: 'reason-tool', type: 'tool', tool_call_id: 'read-stream', status: 'error', content: 'File does not exist.' },
+    { id: 'stream-ai', type: 'ai', content: 'Streamed response' },
+  ];
+  if (options.reasoningStream) {
+    const events = [
+      { event: 'metadata', data: { run_id: 'r1' } },
+      { event: 'messages', data: [{ id: 'reason-ai', type: 'AIMessageChunk', content: '', additional_kwargs: { reasoning_content: 'First ' } }, {}] },
+      { event: 'messages', data: [{ id: 'reason-ai', type: 'AIMessageChunk', content: '', additional_kwargs: { reasoning_content: 'second.' } }, {}] },
+      { event: 'messages', data: [{ id: 'reason-ai', type: 'AIMessageChunk', content: '', tool_call_chunks: [{ index: 0, id: 'read-stream', name: 'read_file', args: '{"file_path":"missing.md"}' }] }, {}] },
+      { event: 'updates', data: { tools: { messages: [reasonMessages[1]] } } },
+      { event: 'messages', data: [reasonMessages[2], {}] },
+    ].map((event, i) => `event: ${event.event}\nid: ${i + 1}\ndata: ${JSON.stringify(event.data)}\n\n`);
+    await page.addInitScript(({ events }) => {
+      const original = window.fetch.bind(window);
+      window.fetch = async (...args) => {
+        const response = await original(...args);
+        if (!String(args[0]).endsWith('/run') || !response.ok) return response;
+        return new Response(new ReadableStream({ start(controller) {
+          events.forEach((event, i) => setTimeout(() => controller.enqueue(new TextEncoder().encode(event)), i * 500));
+          setTimeout(() => controller.close(), events.length * 500);
+        } }), { headers: response.headers });
+      };
+    }, { events });
+  }
   await page.route('http://127.0.0.1:3100/**', async route => {
     const req = route.request(), url = new URL(req.url());
     if (!url.pathname.startsWith('/api/')) {
@@ -45,7 +72,10 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
     }
     else if (url.pathname.endsWith('/run')) {
       if (options.delayRun) await new Promise(resolve => setTimeout(resolve, 800));
-      current.interrupts = []; current.values.messages = [...(current.values.messages || []), { id: 'stream-ai', type: 'ai', content: 'Streamed response' }];
+      if (options.failApproval && body.responses && calls.filter(c => c.url.endsWith('/run')).length === 1) {
+        await route.fulfill({ status: 503, json: { detail: 'Approval was not accepted. Please retry.' } }); return;
+      }
+      current.interrupts = []; current.values.messages = [...(current.values.messages || []), ...(body.text ? [{ id: 'saved-user', type: 'human', content: body.text }] : []), ...(options.reasoningStream ? reasonMessages : [{ id: 'stream-ai', type: 'ai', content: 'Streamed response' }])];
       await route.fulfill({ contentType: 'text/event-stream', body: 'event: metadata\nid: 1\ndata: {"run_id":"r1"}\n\nevent: messages\nid: 2\ndata: [{"id":"stream-ai","type":"AIMessageChunk","content":"Streamed "},{}]\n\nevent: messages\nid: 3\ndata: [{"id":"stream-ai","type":"AIMessageChunk","content":"response"},{}]\n\n' }); return;
     }
     await route.fulfill({ json: result });
@@ -69,14 +99,37 @@ test('welcome, skill selection, chat streaming and keyboard search', async ({ pa
   await page.keyboard.press('Meta+k'); await expect(page.getByRole('dialog')).toBeVisible(); await page.keyboard.press('Escape');
   expect(errors).toEqual([]);
 });
-test('approval is never sent before an explicit decision and submit', async ({ page }) => {
-  const calls = await mount(page, { approval: true });
-  await expect(page.getByRole('button', { name: 'Submit decisions' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Approve', exact: true }).click();
+test('single approval submits once directly; a receipt replaces the request', async ({ page }) => {
+  const calls = await mount(page, { approval: true, delayRun: true });
+  await expect(page.getByRole('button', { name: 'Submit decisions' })).toHaveCount(0);
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
-  await page.getByRole('button', { name: 'Submit decisions' }).click();
-  await expect(page.getByText('Your input is needed')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Approve this action', exact: true })).toBeDisabled();
+  await expect(page.getByText('Approval sent', { exact: true })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Approval request' })).toHaveCount(0);
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(1);
   expect(calls.find(c => c.url.endsWith('/run'))?.body.responses['pause-1'].decisions).toEqual([{ type: 'approve' }]);
+});
+test('multiple actions require complete choices and explicit batch submission', async ({ page }) => {
+  const calls = await mount(page, { approval: true, multipleApprovals: true });
+  const submit = page.getByRole('button', { name: 'Submit decisions' });
+  await expect(submit).toBeDisabled();
+  await page.getByRole('button', { name: 'Approve', exact: true }).nth(0).click();
+  await expect(submit).toBeDisabled();
+  await page.getByRole('button', { name: 'Reject', exact: true }).nth(1).click();
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await submit.click();
+  await expect(page.getByText('Streamed response', { exact: true })).toBeVisible();
+  expect(calls.find(c => c.url.endsWith('/run'))?.body.responses['pause-1'].decisions).toEqual([{ type: 'approve' }, { type: 'reject' }]);
+});
+test('an unaccepted approval retains its request and can be explicitly retried', async ({ page }) => {
+  const calls = await mount(page, { approval: true, failApproval: true });
+  await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Decision was not accepted' })).toBeVisible();
+  await expect(page.getByText('Approval sent', { exact: true })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect(page.getByText('Approval sent', { exact: true })).toBeVisible();
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(2);
 });
 test('navigation ignores late state, with project files and task inspection available', async ({ page }) => {
   await mount(page, { delayOldState: true });
@@ -202,7 +255,7 @@ for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await mount(page, { longContent: true });
     await expect(page.getByText(/^Message 40\./)).toBeVisible();
-    if (viewport.width < 700) await page.getByRole('button', { name: 'Hide sidebar' }).click();
+    if (await page.getByRole('button', { name: 'Hide sidebar' }).isVisible()) await page.getByRole('button', { name: 'Hide sidebar' }).click();
     const chat = page.locator('.conversation-scroll');
     const composer = page.locator('.composer-region');
     await expect.poll(() => chat.evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true);
@@ -225,3 +278,63 @@ for (const viewport of [{ width: 1440, height: 960 }, { width: 390, height: 844 
     expect(await page.evaluate(() => document.documentElement.scrollHeight)).toBeLessThanOrEqual(viewport.height + 1);
   });
 }
+
+test('reasoning streams, tool failures arrive during the run, and saved reload preserves reasoning', async ({ page }) => {
+  await mount(page, { empty: true, reasoningStream: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('Check the file'); await composer.press('Enter');
+  await expect(page.getByText('First second.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: /Reasoning/ }).click();
+  await expect(page.getByText('File does not exist.', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Reasoning/ })).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Exact tool arguments', exact: true }).click();
+  const work = page.locator('.work-log > .disclosure-toggle').last();
+  await work.click(); await work.click();
+  await expect(page.getByRole('button', { name: 'Exact tool arguments', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByText('Streamed response', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeVisible();
+  await expect(work).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByRole('button', { name: 'Exact tool arguments', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  await page.reload();
+  await page.getByRole('button', { name: /Reasoning/ }).click();
+  await expect(page.getByText('First second.', { exact: true })).toBeVisible();
+});
+test('reading earlier content stays anchored when new streaming activity arrives', async ({ page }) => {
+  await mount(page, { longContent: true, reasoningStream: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('Check the file'); await composer.press('Enter');
+  const chat = page.locator('.conversation-scroll');
+  await chat.evaluate(el => { el.scrollTop = 100; });
+  await expect.poll(() => chat.evaluate(el => el.scrollTop)).toBeLessThan(200);
+  await page.waitForTimeout(1600);
+  await expect.poll(() => chat.evaluate(el => el.scrollTop)).toBeLessThan(200);
+  await page.getByRole('button', { name: 'New activity', exact: true }).click();
+  await expect.poll(() => chat.evaluate(el => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThan(24);
+});
+test('populated preview is isolated, interactive, and responsive', async ({ page }) => {
+  const apiCalls: string[] = [];
+  await page.route('http://127.0.0.1:3100/**', async route => {
+    const url = new URL(route.request().url());
+    if (url.pathname.startsWith('/api/')) { apiCalls.push(url.pathname); await route.abort(); return; }
+    const file = path.join(root, 'dist', url.pathname);
+    await route.fulfill({ body: await readFile(file), contentType: file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'text/html' });
+  });
+  await page.goto('http://127.0.0.1:3100/chat-preview.html');
+  await expect(page.getByText('Chat design preview', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'View requested replacement' }).click();
+  await expect(page.getByText('Before updating project notes:', { exact: false })).toBeVisible();
+  await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect(page.getByText('Approval sent', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Failure', exact: true }).click();
+  await expect(page.getByText(/Link check failed/)).toBeVisible();
+  await page.screenshot({ path: path.join(root, 'test-results/chat-failure-desktop.png'), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Question', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Submit response', exact: true })).toBeDisabled();
+  await page.getByRole('button', { name: 'By workflow', exact: true }).click();
+  await page.getByRole('button', { name: 'Submit response', exact: true }).click();
+  await expect(page.getByText('Answer sent', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: path.join(root, 'test-results/chat-question-mobile.png'), fullPage: true });
+  expect(apiCalls).toEqual([]);
+});

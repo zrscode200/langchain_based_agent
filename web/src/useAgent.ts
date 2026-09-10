@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { mergeChunk, pendingInterrupts, readSSE, type Catalog, type Json, type Message, type Mode, type Project, type Snapshot, type Task, type Thread } from './protocol.ts';
+import { mergeChunk, mergeUpdate, pendingInterrupts, readSSE, type Catalog, type Json, type Message, type Mode, type Project, type Snapshot, type Task, type Thread } from './protocol.ts';
+import type { DecisionReceipt } from './timeline.ts';
 
 const empty: Snapshot = { values: {}, next: [], interrupts: [] };
 export function useAgent() {
@@ -18,6 +19,8 @@ export function useAgent() {
   const [notice, setNotice] = useState('');
   const [runId, setRunId] = useState('');
   const [activity, setActivity] = useState<Json[]>([]);
+  const [receipts, setReceipts] = useState<DecisionReceipt[]>([]);
+  const submittedInterrupts = useRef(new Set<string>());
   const [backend, setBackend] = useState('');
   const [creating, setCreating] = useState(false);
   const creation = useRef(false);
@@ -89,7 +92,8 @@ export function useAgent() {
     const base = route(p, t);
     const [snapshot, background, runs, liveMode] = await Promise.all([data(base + '/state'), data(base + '/background', 'POST', { operation: 'list' }), data(base + '/runs'), data(base + '/mode')]);
     if (selection.current.epoch !== epoch) return;
-    setState(snapshot); setTasks(background.tasks); setPendingResults(background.pending_results || []);
+    const visible = busy.current ? hideSubmitted(snapshot, submittedInterrupts.current) : snapshot;
+    setState(visible); setTasks(background.tasks); setPendingResults(background.pending_results || []);
     setMode(liveMode.mode);
     void refreshTitle(p, t).catch(() => {});
     if (!busy.current) { setMessages(old => runs.length && lastEvent.current ? old : snapshot.values?.messages || []); setRunId(runs[0]?.run_id || ''); setStatus(runs.length ? 'running' : 'ready'); }
@@ -100,7 +104,7 @@ export function useAgent() {
     stream.current?.abort(); stream.current = null; busy.current = false; compaction.current = '';
     selection.current = { projectId, threadId, epoch: selection.current.epoch + 1 };
     const epoch = selection.current.epoch;
-    setMessages([]); setTasks([]); setPendingResults([]); setState(empty); setRunId(''); setActivity([]); setError(''); setNotice(''); setMode('manual'); setCatalog({ skills: [], tools: [] });
+    setMessages([]); setTasks([]); setPendingResults([]); setState(empty); setRunId(''); setActivity([]); setReceipts([]); submittedInterrupts.current.clear(); setError(''); setNotice(''); setMode('manual'); setCatalog({ skills: [], tools: [] });
     lastEvent.current = ''; turnId.current = '';
     if (!threadId) return;
     setStatus('loading');
@@ -143,7 +147,10 @@ export function useAgent() {
           setMessages(old => mergeChunk(reset && first ? old.filter(m => m.id !== message.id) : old, message));
         }
       }
-      if (event.event === 'updates' && event.data?.__interrupt__) setState(old => ({ ...old, interrupts: event.data.__interrupt__ }));
+      if (event.event === 'updates') {
+        setMessages(old => mergeUpdate(old, event.data));
+        if (event.data?.__interrupt__) setState(old => ({ ...old, interrupts: event.data.__interrupt__.filter((i: Json) => !submittedInterrupts.current.has(i.id)) }));
+      }
       if (event.event === 'custom') setActivity(old => [...old.slice(-49), typeof event.data === 'object' ? event.data : { message: String(event.data) }]);
     });
   }
@@ -157,6 +164,12 @@ export function useAgent() {
     try {
       const response = await request(base + '/run', 'POST', { text, skill, responses, model, continue: text === undefined && !responses, turn_id: turnId.current || crypto.randomUUID() }, stream.current.signal);
       submitted = true;
+      if (selection.current.epoch === epoch && responses) {
+        const interrupts = pendingInterrupts(state).filter(i => Object.hasOwn(responses, i.id));
+        submittedInterrupts.current = new Set(Object.keys(responses));
+        setReceipts(old => [...old, { id: crypto.randomUUID(), afterMessage: messages.at(-1)?.id, interrupts, responses }]);
+        setState(old => hideSubmitted(old, submittedInterrupts.current));
+      }
       if (selection.current.epoch === epoch && text) {
         setMessages(old => [...old, { id: 'optimistic-' + turnId.current, type: 'human', content: text }]);
         onSubmitted?.();
@@ -236,6 +249,9 @@ export function useAgent() {
     setThreadId(''); setProjectId(id);
   }
   const capture = () => { const epoch = selection.current.epoch; return () => selection.current.epoch === epoch; };
-  return { projects, project, projectId, setProjectId: changeProject, threads, thread, threadId, selectThread, newThread, creating, state, messages, tasks, pendingResults, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
+  return { projects, project, projectId, setProjectId: changeProject, threads, thread, threadId, selectThread, newThread, creating, state, messages, receipts, tasks, pendingResults, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
+}
+function hideSubmitted(snapshot: Snapshot, submitted: Set<string>): Snapshot {
+  return { ...snapshot, interrupts: snapshot.interrupts?.filter(i => !submitted.has(i.id)), tasks: snapshot.tasks?.map(t => ({ ...t, interrupts: t.interrupts?.filter((i: Json) => !submitted.has(i.id)) })) };
 }
 export type Agent = ReturnType<typeof useAgent>;

@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, BookOpen, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Code2, Command, Download, FolderOpen, Layers, LoaderCircle, MessageSquare, MoreHorizontal, PanelLeftClose, PanelLeftOpen, Plus, Search, ShieldCheck, Sparkles, Square, Terminal, Workflow, X, RotateCcw, Pencil } from 'lucide-react';
-import { Approvals, ArtifactView, Files, IconButton, Mark, MessageView, Modal, Prose, type Artifact } from './components.tsx';
+import { ArtifactView, Files, IconButton, Mark, Modal, Prose, type Artifact } from './components.tsx';
+import { Approvals } from './approvals.tsx';
+import { Conversation } from './conversation.tsx';
 import { useAgent, type Agent } from './useAgent.ts';
 import { type Json, type Task } from './protocol.ts';
 
@@ -128,12 +130,12 @@ export default function App() {
     finally { renameBusy.current = false; setRenaming(false); }
   }
   useEffect(() => {
-    setArtifact(null); setSkill(''); setModel(''); setRename(null); setRenameError(''); setModal(null);
+    setAtBottom(true); setArtifact(null); setSkill(''); setModel(''); setRename(null); setRenameError(''); setModal(null);
     setCommandError(''); setLiteralDraft(null); setDismissedFor(null); setCommandIndex(0);
     draftKey.current = `lc.draft.${agent.projectId}.${agent.threadId}`;
     setDraft(localStorage.getItem(draftKey.current) || '');
   }, [agent.projectId, agent.threadId]);
-  useEffect(() => { if (atBottom) scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'instant' }); }, [agent.messages, agent.interrupts, atBottom]);
+  useLayoutEffect(() => { if (atBottom) scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'instant' }); }, [agent.messages, agent.interrupts, atBottom]);
   useEffect(() => {
     commandList.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
   }, [commandIndex, draft]);
@@ -225,16 +227,14 @@ export default function App() {
         <div className="topbar-actions"><button className={'toolbar-button ' + (panel === 'tasks' ? 'active' : '')} aria-label={'Background work' + (activeTasks ? ` · ${activeTasks} active` : '')} onClick={() => toggle('tasks')}><Workflow size={16} /><span>Background work</span>{activeTasks > 0 && <b>{activeTasks}</b>}{taskAttention > 0 && <i className="attention-dot" />}</button><IconButton label="Conversation actions" onClick={() => setModal('actions')} disabled={!agent.threadId}><MoreHorizontal size={19} /></IconButton></div>
       </header>
       <div className="working-surface"><section className="conversation" aria-label="Conversation">
-        <div className="conversation-scroll" ref={scroll} onScroll={() => { const el = scroll.current!; setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 100); }}>
-          {agent.messages.length ? <div className="messages">{agent.messages.map((message, i) => <MessageView key={message.id || i} message={message} all={agent.messages} />)}</div> : <div className="welcome"><div className="welcome-label"><span className="status-dot completed" />YOUR PROJECT, IN FOCUS</div><div className="welcome-mark"><Mark /></div><h1>What will we<br /><span>work on today?</span></h1><p>{agent.threadId ? <>Ask a question or describe your next task.<br />Type <kbd>/</kbd> for skills and commands.</> : <>Choose New conversation in the sidebar to begin.</>}</p></div>}
+        <div className="conversation-scroll" ref={scroll} onWheel={event => { if (event.deltaY < 0) setAtBottom(false); }} onClickCapture={event => { if ((event.target as HTMLElement).closest('.disclosure-toggle')) setAtBottom(false); }} onScroll={() => { const el = scroll.current!; setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 24); }}>
+          {agent.messages.length || agent.interrupts.length ? <Conversation key={agent.projectId + ':' + agent.threadId} scope={agent.threadId} messages={agent.messages} interrupts={agent.interrupts} running={isBusy} disconnected={agent.status === 'disconnected'} receipts={agent.receipts} submit={async responses => { const sent = await agent.run(undefined, undefined, responses, model || undefined); if (!sent) throw new Error('Decision was not accepted. Refresh and review the current request.'); }} /> : <div className="welcome"><div className="welcome-label"><span className="status-dot completed" />YOUR PROJECT, IN FOCUS</div><div className="welcome-mark"><Mark /></div><h1>What will we<br /><span>work on today?</span></h1><p>{agent.threadId ? <>Ask a question or describe your next task.<br />Type <kbd>/</kbd> for skills and commands.</> : <>Choose New conversation in the sidebar to begin.</>}</p></div>}
           <div className="messages conversation-status">
             {todo.length > 0 && <details className="plan conversation-plan"><summary>Current plan · {todo.filter(t => t.status === 'completed').length}/{todo.length}</summary>{todo.map((item, i) => <div className={'todo ' + item.status} key={i}>{item.status === 'completed' ? <Check size={15} /> : item.status === 'in_progress' ? <LoaderCircle size={15} className="spin" /> : <span className="todo-ring" />}<span>{item.content}</span></div>)}</details>}
-            {isBusy && <div className="thinking"><span className="thinking-dots"><i /><i /><i /></span>Agent is responding{agent.runId && <button className="text-button" onClick={() => void agent.reconnect()}>Connect to live output</button>}</div>}
-            <Approvals interrupts={agent.interrupts} submit={async responses => { const sent = await agent.run(undefined, undefined, responses, model || undefined); if (!sent) throw new Error('Decision was not accepted. Refresh and review the current request.'); }} />
           </div>
         </div>
         <div className="composer-region">
-          {!atBottom && <button className="jump-button" onClick={() => { setAtBottom(true); scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'smooth' }); }}>Jump to latest <ChevronDown size={14} /></button>}
+          {!atBottom && <button className="jump-button" onClick={() => { setAtBottom(true); scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'smooth' }); }}>{isBusy ? 'New activity' : 'Jump to latest'} <ChevronDown size={14} /></button>}
           {!!agent.state.next?.length && !agent.interrupts.length && !isBusy && <div className="notice-banner"><span>This turn was interrupted. Continue from its saved checkpoint when you’re ready.</span><button className="text-button" onClick={() => void agent.run()}>Continue turn</button></div>}
           {agent.error && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>{agent.error}</span><button onClick={() => void agent.reconnect()}>Reconnect</button><IconButton label="Dismiss error" onClick={() => agent.setError('')}><X size={14} /></IconButton></div>}
           {agent.notice && <div className="notice-banner"><span>{agent.notice}</span><IconButton label="Dismiss notice" onClick={() => agent.setNotice('')}><X size={14} /></IconButton></div>}
