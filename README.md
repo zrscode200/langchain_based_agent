@@ -31,6 +31,10 @@ For daily interactive use, model and approval setup, the baseline TUI dogfood
 pass, and optional middleware injection, see
 [`USING_LC_CODE.md`](USING_LC_CODE.md).
 
+For the React/TypeScript web workspace—conversation, approvals, background tasks,
+skills, and side-by-side artifacts—see [`WEB_UI.md`](WEB_UI.md). The frontend and
+local Node adapter live in `web/` and use the same factory/LangGraph backend.
+
 Bumping the upstream pin follows [`UPGRADING.md`](UPGRADING.md) — the parity
 suite gates it. Every bump so far, and what each cost, is recorded in
 [`VERSION_BUMPS.md`](VERSION_BUMPS.md).

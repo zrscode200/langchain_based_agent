@@ -260,6 +260,13 @@ def import_skill_command_modules():
     return commands, config, output
 
 
+def web_skill_helpers():
+    """Existing safe skill loader and invocation format used by the web adapter."""
+    from deepagents_code.skills.load import load_skill_content
+    from deepagents_code.skills.invocation import build_skill_invocation_envelope
+    return load_skill_content, build_skill_invocation_envelope
+
+
 def built_in_skills_dir():
     from deepagents_code._paths import get_built_in_skills_dir
     return get_built_in_skills_dir()

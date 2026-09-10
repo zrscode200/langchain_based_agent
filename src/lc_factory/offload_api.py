@@ -19,4 +19,7 @@ app = _upstream_offload_api.app
 from lc_factory.background_api import install_background_routes
 install_background_routes(app)
 
+from lc_factory.web_api import install_web_routes
+install_web_routes(app)
+
 __all__ = ["app"]
