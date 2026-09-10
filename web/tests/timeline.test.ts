@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { messageReasoning, mergeChunk, mergeUpdate, textContent, type Message } from '../src/protocol.ts';
-import { conversationTurns, describeTool, runDescription, toolState, turnActivityKey } from '../src/timeline.ts';
-import { Conversation } from '../src/conversation.tsx';
+import { conversationTurns, describeTool, runDescription, toolState, turnActivityKey, receiptAnchor, type DecisionReceipt } from '../src/timeline.ts';
+import { Conversation, DecisionReceiptView } from '../src/conversation.tsx';
 import { Approvals } from '../src/approvals.tsx';
 import { previewScenario } from '../src/chat-samples.ts';
 
@@ -102,4 +102,45 @@ test('activity identity survives replacement of the optimistic user message by i
   const live = conversationTurns([{ id: 'optimistic-123', type: 'human', content: 'Read this' }, assistant]);
   const saved = conversationTurns([{ id: 'backend-human-id', type: 'human', content: 'Read this' }, assistant]);
   assert.equal(turnActivityKey(live[0]), turnActivityKey(saved[0]));
+});
+
+
+const commandReceipt: DecisionReceipt = {
+  id: 'receipt-1', afterMessage: 'request-ai',
+  interrupts: [{ id: 'permission', value: { action_requests: [
+    { name: 'execute', args: { command: 'FULL_COMMAND_ONE && ' + 'find ./example -type f; '.repeat(40) } },
+    { name: 'execute', args: { command: 'FULL_COMMAND_TWO && git status --short' } },
+  ] } }],
+  responses: { permission: { decisions: [{ type: 'approve' }, { type: 'approve' }] } },
+};
+test('approval receipts start as a compact count without exposing full commands or retention text', () => {
+  const html = renderToStaticMarkup(createElement(DecisionReceiptView, { receipt: commandReceipt }));
+  assert.match(html, /Approval sent/); assert.match(html, /2 actions/); assert.match(html, /aria-expanded="false"/);
+  assert.doesNotMatch(html, /FULL_COMMAND|find \.\/example|kept for this visit|Sent during this visit/);
+  const mixed = renderToStaticMarkup(createElement(DecisionReceiptView, { receipt: { ...commandReceipt, responses: { permission: { decisions: [{ type: 'approve' }, { type: 'reject' }] } } } }));
+  assert.match(mixed, /Decisions sent/);
+});
+test('receipts stay beside original work before later updates and collapse with completed activity', () => {
+  const messages: Message[] = [
+    { id: 'user', type: 'human', content: 'Explore the files' },
+    { id: 'request-ai', type: 'ai', content: 'I will inspect the files.', tool_calls: [{ id: 'call-1', name: 'execute', args: { command: 'ls' } }] },
+    { id: 'result', type: 'tool', tool_call_id: 'call-1', status: 'success', artifact: { exit_code: 0 }, content: 'README.md' },
+    { id: 'later-ai', type: 'ai', content: 'Later assistant update.', tool_calls: [{ id: 'call-2', name: 'read_file', args: { file_path: 'README.md' } }] },
+    { id: 'answer', type: 'ai', content: 'Final answer.' },
+  ];
+  const props = { messages, receipts: [commandReceipt], submit: async () => {} };
+  const live = renderToStaticMarkup(createElement(Conversation, { ...props, running: true }));
+  assert.ok(live.indexOf('Approval sent') > live.indexOf('Run command'));
+  assert.ok(live.indexOf('Approval sent') < live.indexOf('Later assistant update.'));
+  const complete = renderToStaticMarkup(createElement(Conversation, props));
+  assert.match(complete, /Final answer/); assert.doesNotMatch(complete, /Approval sent|FULL_COMMAND/);
+});
+test('a receipt never moves into a newer turn if its original message was removed', () => {
+  const messages: Message[] = [{ id: 'new-user', type: 'human', content: 'A different request' }, { id: 'new-answer', type: 'ai', content: 'New answer' }];
+  assert.equal(receiptAnchor(commandReceipt, messages), undefined);
+  const html = renderToStaticMarkup(createElement(Conversation, { messages, receipts: [commandReceipt], running: true, submit: async () => {} }));
+  assert.doesNotMatch(html, /Approval sent/);
+  const tool: Message = { id: 'tool-result', type: 'tool', tool_call_id: 'call', content: '' };
+  assert.equal(receiptAnchor({ ...commandReceipt, afterMessage: tool.id }, [{ id: 'old-ai', type: 'ai', content: '', tool_calls: [{ id: 'call' }] }, ...messages.slice(0, 1), tool]), tool.id);
+  assert.equal(receiptAnchor({ ...commandReceipt, afterMessage: tool.id }, [{ id: 'owner-ai', type: 'ai', content: '', tool_calls: [{ id: 'call' }] }, tool]), 'owner-ai');
 });

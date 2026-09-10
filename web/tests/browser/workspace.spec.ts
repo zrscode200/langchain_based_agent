@@ -105,6 +105,10 @@ test('single approval submits once directly; a receipt replaces the request', as
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
   await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Approve this action', exact: true })).toBeDisabled();
+  await expect(page.getByText('Streamed response', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeVisible();
+  await expect(page.getByText('Approval sent', { exact: true })).toHaveCount(0);
+  await page.locator('.work-log > .disclosure-toggle').last().click();
   await expect(page.getByText('Approval sent', { exact: true })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Approval request' })).toHaveCount(0);
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(1);
@@ -128,6 +132,8 @@ test('an unaccepted approval retains its request and can be explicitly retried',
   await expect(page.getByRole('alert').filter({ hasText: 'Decision was not accepted' })).toBeVisible();
   await expect(page.getByText('Approval sent', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Approval request' })).toHaveCount(0);
+  await page.locator('.work-log > .disclosure-toggle').last().click();
   await expect(page.getByText('Approval sent', { exact: true })).toBeVisible();
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(2);
 });
@@ -324,6 +330,8 @@ test('populated preview is isolated, interactive, and responsive', async ({ page
   await page.getByRole('button', { name: 'View requested replacement' }).click();
   await expect(page.getByText('Before updating project notes:', { exact: false })).toBeVisible();
   await page.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Approval request' })).toHaveCount(0);
+  await page.locator('.work-log > .disclosure-toggle').last().click();
   await expect(page.getByText('Approval sent', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Failure', exact: true }).click();
   await expect(page.getByText(/Link check failed/)).toBeVisible();
@@ -333,6 +341,7 @@ test('populated preview is isolated, interactive, and responsive', async ({ page
   await expect(page.getByRole('button', { name: 'Submit response', exact: true })).toBeDisabled();
   await page.getByRole('button', { name: 'By workflow', exact: true }).click();
   await page.getByRole('button', { name: 'Submit response', exact: true }).click();
+  await page.locator('.work-log > .disclosure-toggle').last().click();
   await expect(page.getByText('Answer sent', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: path.join(root, 'test-results/chat-question-mobile.png'), fullPage: true });

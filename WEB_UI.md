@@ -77,8 +77,9 @@ local launcher.
   agent’s current plan appears within the conversation.
   Select a task for its retained transcript, tool activity and cancellation.
   **Guide via agent** prepares a message to the main agent; review and send it.
-- Real approval requests display the action and arguments. Select decisions,
-  then submit. Questions support text, single choice, multiple selections,
+- Real approval requests display the action and arguments. Approve or reject
+  a single action directly; select each decision and submit for multiple actions.
+  Questions support text, single choice, multiple selections,
   custom choices and optional answers. Stale requests are refreshed, never
   silently replayed.
 - **Project files** previews Markdown, code/text and inert HTML. Use **Reference
@@ -138,9 +139,12 @@ A single supported approval has direct **Approve this action** and **Reject**
 buttons. Multiple requested actions require a choice for each action and an
 explicit **Submit decisions**. Questions use their own answer card. Backend
 interrupt IDs and allowed decisions remain authoritative. A decision receipt
-means the response was sent, not that the action succeeded; receipts are local
-to the current visit and disappear on conversation navigation/reload. The saved
-backend messages and outcomes remain authoritative.
+means the response was sent, not that the action succeeded. It appears as a
+compact expandable line beside the original activity; full commands stay in
+details. Receipts collapse with completed activity, and are omitted if their
+original message is no longer retained. They are local to the current visit and
+disappear on conversation navigation/reload. The saved backend messages and
+outcomes remain authoritative.
 
 Scroll back to read earlier work without following new output. **New activity**
 (or **Jump to latest** after the run) returns to the conversation's end. Opening

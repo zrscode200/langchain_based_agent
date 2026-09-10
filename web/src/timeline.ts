@@ -6,6 +6,18 @@ export type ToolState = 'requested' | 'awaiting_approval' | 'succeeded' | 'resul
 export const isUser = (message: Message) => ['human', 'user', 'HumanMessage'].includes(message.type || message.role || '');
 export const isTool = (message: Message) => ['tool', 'ToolMessage', 'ToolMessageChunk'].includes(message.type || message.role || '');
 
+export function receiptAnchor(receipt: DecisionReceipt, messages: Message[]): string | undefined {
+  const anchor = messages.find(m => m.id && m.id === receipt.afterMessage);
+  if (!anchor) return undefined; // Its context may have been compacted; never attach it to a newer turn.
+  if (isTool(anchor) && anchor.tool_call_id) {
+    for (let i = messages.indexOf(anchor) - 1; i >= 0; i--) {
+      if (isUser(messages[i])) break;
+      if (messages[i].tool_calls?.some(call => call.id === anchor.tool_call_id)) return messages[i].id || anchor.id;
+    }
+  }
+  return anchor.id;
+}
+
 export function conversationTurns(messages: Message[]): Turn[] {
   const turns: Turn[] = [];
   for (const [i, message] of messages.entries()) {
