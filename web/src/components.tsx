@@ -89,7 +89,7 @@ export function Approvals({ interrupts, submit }: { interrupts: Interrupt[]; sub
   </section>;
 }
 export type Artifact = { path: string; text: string; kind: string; size: number };
-export function Files({ agent, open, memory = false }: { agent: Agent; open: (file: Artifact) => void; memory?: boolean }) {
+export function Files({ agent, open }: { agent: Agent; open: (file: Artifact) => void }) {
   const [folder, setFolder] = useState('');
   const [entries, setEntries] = useState<Json[]>([]);
   const [error, setError] = useState('');
@@ -103,7 +103,7 @@ export function Files({ agent, open, memory = false }: { agent: Agent; open: (fi
     agent.data(`/projects/${agent.projectId}/files?path=${encodeURIComponent(folder)}`).then(result => { if (active) { setEntries(result.entries); if (result.limited) setError('Showing the first 500 entries. Open a folder to narrow the view.'); } }).catch(e => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [agent.projectId, folder, agent.data, revision]);
-  return <div className="files-panel"><div className="panel-intro"><p>{memory ? 'Explore the notes and persistent state in this project. Files retain their existing storage and lifecycle.' : 'Browse this project and open files alongside the conversation.'}</p></div>
+  return <div className="files-panel"><div className="panel-intro"><p>Browse this project and open files alongside the conversation.</p></div>
     <input className="search-input" aria-label="Filter files" placeholder="Filter this folder…" value={filter} onChange={e => setFilter(e.target.value)} />
     <div className="file-breadcrumb"><IconButton label="Parent folder" disabled={!folder} onClick={() => setFolder(folder.split('/').slice(0, -1).join('/'))}><ArrowLeft size={15} /></IconButton><span title={folder}>{folder || agent.project?.name}</span><button className="text-button" onClick={() => setRevision(v => v + 1)}>Refresh</button></div>
     {error && <p className="inline-error" role="alert">{error}</p>}

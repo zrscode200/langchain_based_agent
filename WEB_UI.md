@@ -3,8 +3,7 @@
 A React and TypeScript client for `langchain_based_agent`, with a local Node
 adapter and the existing Python/LangGraph agent backend. The TUI remains available.
 
-The interface keeps conversation central. Tasks, files, agent definition and
-memory open in a contextual panel; files can open beside the chat. No model API
+The interface keeps conversation central. Background work, files and agent definition open in a contextual panel; files can open beside the chat. No model API
 keys are sent to the browser.
 
 ## Start locally
@@ -60,13 +59,22 @@ local launcher.
 ## Everyday workflow
 
 - Choose a project and start or resume a conversation. Search titles with
-  **⌘/Ctrl K**. Rename or export a conversation from its `…` menu.
+  **⌘/Ctrl K**. Click the header title to rename, or use the pencil on a sidebar
+  conversation. An untitled conversation is named from its first accepted message;
+  your chosen title takes precedence. Export remains in the `…` menu.
 - Type a message; **Enter** sends and **Shift+Enter** adds a line. Typed drafts
   and the last selected conversation are remembered in this browser.
+- Type **/** to search loaded skills and web commands. Use **↑/↓** to choose,
+  **Enter/Tab** to select, and **Escape** to close. Selecting a skill prepares your
+  next message; write the request and send it. `/model`, `/settings`, `/skills`,
+  `/tools`, `/files`, `/tasks`, `/rename`, `/new`, `/compact`, and `/help` open
+  supported controls without sending a prompt. Unknown commands stay in the draft;
+  **Use as message text** explicitly prepares literal slash text for sending.
 - Open **Agent definition** to discover skills and tools. **Use skill** attaches
   the real server-discovered skill to your next message. Its instructions and
   invocation metadata use the harness's existing format.
-- **Tasks** shows the current plan, background jobs, results and pending input.
+- **Background work** shows delegated jobs, results and pending input. The main
+  agent’s current plan appears within the conversation.
   Select a task for its retained transcript, tool activity and cancellation.
   **Guide via agent** prepares a message to the main agent; review and send it.
 - Real approval requests display the action and arguments. Select decisions,
@@ -76,9 +84,8 @@ local launcher.
 - **Project files** previews Markdown, code/text and inert HTML. Use **Reference
   in chat** to name a file in your message. The agent reads it through its own
   tools. The browser does not upload file contents or automatically grant edits.
-- **Memory & notes** browses existing project files. It introduces no separate
-  memory database or inferred graph.
-- **Session settings** selects the next turn's model and the live Manual, Auto
+- The combined model/approval control below the composer opens **Session settings**,
+  which selects the next turn's model and the live Manual, Auto
   or YOLO approval mode. Mode changes affect running background agents at their
   next approval boundary, as in the TUI. The effective model and saved state are
   available in **Agent definition → Context**.
@@ -97,7 +104,7 @@ local launcher.
 | Manual / Auto / YOLO | Reads and writes live approval store; literal user text is tagged with upstream authorization metadata |
 | Human questions | Upstream text, single-choice, multi-select and optional-answer format |
 | Background jobs | Status, cancellation, approvals, paged transcript, findings and guidance delivery |
-| Background outcome delivery | Delivered at the main agent's next normal turn; the Tasks panel can compose an explicit review request |
+| Background outcome delivery | Delivered at the main agent's next normal turn; the Background work panel can compose an explicit review request |
 | Interrupted main turn | Explicit continuation from its saved checkpoint, preserving the original turn identity |
 | Reconnect | Joins the existing resumable run, or refreshes saved state; never resubmits the original message automatically |
 | Model switching / compaction | Next-turn model identifier; native server offload and cancellation |
@@ -167,7 +174,7 @@ Python adapter/launcher tests:
 python -m pytest tests/test_web_api.py
 ```
 
-Development verification in the implementation session included TypeScript,
+Initial implementation verification included TypeScript,
 production build, Node protocol/security tests and in-process Python tests.
 Live backend/model calls and browser visual/E2E checks were unavailable under
 that session's permissions. Treat the browser suite as supplied checks awaiting

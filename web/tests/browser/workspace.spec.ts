@@ -6,6 +6,7 @@ import { artifact, catalog, files, project, snapshot, tasks, threads } from '../
 const root = path.resolve(import.meta.dirname, '../..');
 async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean } = {}) {
   const calls: { url: string; body: any }[] = [];
+  const rows = structuredClone(threads);
   const current = structuredClone(options.empty ? { ...snapshot, values: { messages: [] }, interrupts: [] } : snapshot) as any;
   if (options.approval) current.interrupts = [{ id: 'pause-1', value: { action_requests: [{ name: 'write_file', args: { file_path: 'notes.md', content: '# Notes' } }], review_configs: [{ action_name: 'write_file', allowed_decisions: ['approve', 'reject'] }] } }];
   await page.route('http://127.0.0.1:3100/**', async route => {
@@ -17,7 +18,7 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
     const body = req.postDataJSON() || {}; calls.push({ url: url.pathname, body });
     let result: unknown = {};
     if (url.pathname === '/api/bootstrap') result = { token: 'test-token', projects: [project], backend: 'http://127.0.0.1:2024' };
-    else if (url.pathname.endsWith('/threads')) result = req.method() === 'POST' ? { ...threads[0], thread_id: 'new-thread' } : threads;
+    else if (url.pathname.endsWith('/threads')) result = req.method() === 'POST' ? { ...rows[0], thread_id: 'new-thread', metadata: { cwd: project.path } } : rows;
     else if (url.pathname.endsWith('/state')) {
       if (options.delayOldState && url.pathname.includes('conversation-1')) await new Promise(r => setTimeout(r, 450));
       result = url.pathname.includes('conversation-2') ? { values: { messages: [{ id: 'new', type: 'human', content: 'This belongs to the second conversation.' }] }, next: [], interrupts: [] } : current;
@@ -27,6 +28,11 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
     else if (url.pathname.endsWith('/mode')) result = { mode: body.mode || 'manual' };
     else if (url.pathname.endsWith('/runs')) result = [];
     else if (url.pathname.endsWith('/files')) result = url.searchParams.has('read') ? artifact : files;
+    else if (/\/threads\/[^/]+$/.test(url.pathname)) {
+      const row = rows.find(t => url.pathname.endsWith('/' + t.thread_id));
+      if (row && req.method() === 'PATCH') row.metadata.title = body.title;
+      result = row || { thread_id: 'new-thread', metadata: { cwd: project.path } };
+    }
     else if (url.pathname.endsWith('/run')) {
       current.interrupts = []; current.values.messages = [...(current.values.messages || []), { id: 'stream-ai', type: 'ai', content: 'Streamed response' }];
       await route.fulfill({ contentType: 'text/event-stream', body: 'event: metadata\nid: 1\ndata: {"run_id":"r1"}\n\nevent: messages\nid: 2\ndata: [{"id":"stream-ai","type":"AIMessageChunk","content":"Streamed "},{}]\n\nevent: messages\nid: 3\ndata: [{"id":"stream-ai","type":"AIMessageChunk","content":"response"},{}]\n\n' }); return;
@@ -40,9 +46,12 @@ test('welcome, skill selection, chat streaming and keyboard search', async ({ pa
   const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
   const calls = await mount(page, { empty: true });
   await expect(page.getByRole('heading', { name: /What will we/ })).toBeVisible();
-  await page.getByRole('button', { name: 'Start with a skill' }).click();
-  await page.getByRole('button', { name: 'Use skill' }).first().click();
-  await page.getByRole('textbox', { name: 'Message the agent' }).fill('Explore the memory system');
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('/brain');
+  await expect(page.getByRole('option', { name: /brainstorm/ })).toBeVisible();
+  await composer.press('Tab');
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await page.getByRole('combobox', { name: 'Message the agent' }).fill('Explore the memory system');
   await page.getByRole('button', { name: 'Send message', exact: true }).click();
   await expect(page.getByText('Streamed response', { exact: true })).toHaveCount(1);
   expect(calls.find(c => c.url.endsWith('/run'))?.body.skill).toBe(catalog.skills[0].path);
@@ -64,13 +73,13 @@ test('navigation ignores late state, with project files and task inspection avai
   await expect(page.getByText('This belongs to the second conversation.')).toBeVisible();
   await page.waitForTimeout(650);
   await expect(page.getByText('Explore the memory components of this agent.', { exact: false })).toHaveCount(0);
-  await page.getByRole('button', { name: 'Browse project files' }).click();
+  await page.getByRole('button', { name: 'Project files', exact: true }).click();
   await page.getByRole('button', { name: 'architecture.md', exact: true }).click();
   await expect(page.getByRole('region', { name: 'File preview' })).toBeVisible();
   await page.getByRole('button', { name: 'Reference in chat' }).click();
-  await expect(page.getByRole('textbox', { name: 'Message the agent' })).toHaveValue(/architecture.md/);
+  await expect(page.getByRole('combobox', { name: 'Message the agent' })).toHaveValue(/architecture.md/);
   await page.getByRole('button', { name: 'Close file preview' }).click();
-  await page.getByRole('button', { name: /^Tasks/ }).click();
+  await page.getByRole('button', { name: /^Background work/ }).click();
   await page.getByRole('button', { name: /Memory & persistence/ }).click();
   await expect(page.getByText('Retained task transcript')).toBeVisible();
 });
@@ -82,4 +91,58 @@ test('desktop and mobile avoid horizontal overflow', async ({ page }) => {
   await page.getByRole('button', { name: 'Hide sidebar' }).click();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: path.join(root, 'test-results/workspace-mobile.png'), fullPage: true });
+});
+
+test('slash commands open controls, unknown commands stay local and literal text requires a separate send', async ({ page }) => {
+  const calls = await mount(page, { empty: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('/settings');
+  await composer.press('Enter');
+  await expect(page.getByRole('dialog', { name: 'Session settings' })).toBeVisible();
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await page.keyboard.press('Escape');
+  await composer.fill('/unsupported argument');
+  await composer.press('Enter');
+  await expect(composer).toHaveValue('/unsupported argument');
+  await expect(page.getByRole('alert')).toContainText('not a web command');
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await page.getByRole('button', { name: 'Use as message text' }).click();
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await page.getByRole('button', { name: 'Send message', exact: true }).click();
+  await expect.poll(() => calls.filter(c => c.url.endsWith('/run')).length).toBe(1);
+  expect(calls.find(c => c.url.endsWith('/run'))?.body.text).toBe('/unsupported argument');
+});
+test('inline and sidebar renaming persist and target the intended conversation', async ({ page }) => {
+  const calls = await mount(page);
+  await page.getByTitle('Rename conversation', { exact: true }).click();
+  await page.getByRole('textbox', { name: 'Conversation title' }).fill('My named conversation');
+  await page.getByRole('textbox', { name: 'Conversation title' }).press('Enter');
+  await expect(page.getByTitle('Rename conversation', { exact: true })).toContainText('My named conversation');
+  await page.getByRole('button', { name: 'Rename Memory design exploration', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Conversation title' }).fill('Another title');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Another title', exact: true })).toBeVisible();
+  await expect(page.getByTitle('Rename conversation', { exact: true })).toContainText('My named conversation');
+  expect(calls.find(c => c.body.title === 'Another title')?.url).toContain('conversation-2');
+  await page.reload();
+  await expect(page.getByTitle('Rename conversation', { exact: true })).toContainText('My named conversation');
+});
+test('slash navigation respects Escape, arrow selection, IME and multiline input', async ({ page }) => {
+  const calls = await mount(page, { empty: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('/');
+  await composer.press('ArrowDown');
+  await expect(page.getByRole('option', { selected: true })).toContainText('/settings');
+  await composer.press('Escape');
+  await expect(page.getByRole('listbox')).toHaveCount(0);
+  await composer.fill('/review my request');
+  await composer.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true });
+  await expect(composer).toHaveValue('/review my request');
+  await composer.press('Enter');
+  await expect(composer).toHaveValue('my request');
+  await expect(page.getByRole('button', { name: 'Remove selected skill' })).toBeVisible();
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await composer.press('Shift+Enter');
+  await expect(composer).toHaveValue('my request\n');
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
 });

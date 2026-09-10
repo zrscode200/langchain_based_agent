@@ -97,7 +97,7 @@ test('pending work requires explicit continue and a user message cannot resume i
 test('skill instructions do not become trusted user authorization evidence', async () => {
   const { call, calls } = await setup({ '/lc-factory/threads/t/web': () => Response.json({ role: 'user', content: 'Expanded instructions from SKILL.md', additional_kwargs: { __skill: { name: 'review' } } }) });
   assert.equal((await call('run', 'POST', { text: 'Review the changes', skill: '/project/skill/SKILL.md' })).status, 200);
-  const message = calls.at(-1)?.body.input.messages[0];
+  const message = calls.find(c => c.path.endsWith('/runs/stream'))!.body.input.messages[0];
   assert.equal(message.content, 'Expanded instructions from SKILL.md');
   assert.equal(message.additional_kwargs.deepagents_code_user_prompt.literal_user_text, 'Review the changes');
   assert.equal(message.additional_kwargs.__skill.name, 'review');
@@ -136,4 +136,34 @@ test('large and binary artifacts fail without returning partial secret data', as
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'lc-web-bounds-')));
   await writeFile(path.join(root, 'large.txt'), 'a'.repeat(1_048_577)); await writeFile(path.join(root, 'binary.txt'), Buffer.from([1, 0, 2]));
   await assert.rejects(() => readFile(root, 'large.txt'), /1 MiB/); await assert.rejects(() => readFile(root, 'binary.txt'), /Binary/);
+});
+
+test('an accepted turn starts naming before its stream finishes, using literal skill arguments', async () => {
+  const row = { thread_id: 't', metadata: { cwd: workspace.cwd } as Record<string, string> };
+  const { call } = await setup({
+    '/threads/t': (body: any, method: string) => { if (method === 'PATCH') Object.assign(row.metadata, body.metadata); return Response.json(row); },
+    '/threads/t/runs/stream': () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('event: metadata\ndata: {"run_id":"r"}\n\n')); } }), { headers: { 'content-type': 'text/event-stream' } }),
+    '/lc-factory/threads/t/web': () => Response.json({ content: 'Expanded private skill instructions' }),
+  });
+  const response = await call('run', 'POST', { text: 'Review this project', skill: 'opaque-key' });
+  assert.equal(response.status, 200);
+  assert.equal((await (await call('')).json()).metadata.title, 'Review this project');
+  await response.body?.cancel();
+  await call('', 'PATCH', { title: 'My chosen title' });
+  assert.equal((await (await call('')).json()).metadata.title, 'My chosen title');
+});
+test('rejected runs and approval resumes never initialize conversation names', async () => {
+  const rejected = await setup({ '/threads/t/runs/stream': () => Response.json({ detail: 'busy' }, { status: 409 }) });
+  assert.equal((await rejected.call('run', 'POST', { text: 'Rejected message' })).status, 409);
+  assert.equal(rejected.calls.some(c => c.method === 'PATCH'), false);
+  const paused = await setup({ '/threads/t/state': () => Response.json({ values: {}, next: ['tools'] }) });
+  assert.equal((await paused.call('run', 'POST', { continue: true })).status, 200);
+  assert.equal(paused.calls.some(c => c.method === 'PATCH'), false);
+});
+test('title storage failure does not turn an accepted run into an error', async () => {
+  const { call } = await setup({ '/threads/t': (_body: any, method: string) => method === 'PATCH' ? Response.json({ detail: 'Title storage unavailable' }, { status: 503 }) : Response.json({ metadata: { cwd: workspace.cwd } }) });
+  const response = await call('run', 'POST', { text: 'Accepted message' });
+  assert.equal(response.status, 200);
+  assert.match(await response.text(), /run_id/);
+  assert.equal((await call('')).status, 200);
 });

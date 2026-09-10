@@ -19,6 +19,9 @@ export function useAgent() {
   const [runId, setRunId] = useState('');
   const [activity, setActivity] = useState<Json[]>([]);
   const [backend, setBackend] = useState('');
+  const [creating, setCreating] = useState(false);
+  const creation = useRef(false);
+  const titleRevisions = useRef(new Map<string, number>());
   const token = useRef('');
   const selection = useRef({ projectId: '', threadId: '', epoch: 0 });
   const stream = useRef<AbortController | null>(null);
@@ -38,6 +41,14 @@ export function useAgent() {
   }, []);
   const data = useCallback(async (route: string, method = 'GET', body?: unknown) => (await request(route, method, body)).json(), [request]);
   const route = (p = selection.current.projectId, t = selection.current.threadId) => `/projects/${p}/threads${t ? '/' + t : ''}`;
+  const refreshTitle = useCallback(async (p: string, id: string) => {
+    const key = p + '/' + id;
+    const revision = (titleRevisions.current.get(key) || 0) + 1;
+    titleRevisions.current.set(key, revision);
+    const row = await data(`/projects/${p}/threads/${id}`);
+    if (selection.current.projectId === p && titleRevisions.current.get(key) === revision)
+      setThreads(old => old.map(t => t.thread_id === id ? { ...t, metadata: row.metadata } : t));
+  }, [data]);
 
   const bootstrap = useCallback(async () => {
     const load = ++bootstrapLoad.current;
@@ -80,8 +91,9 @@ export function useAgent() {
     if (selection.current.epoch !== epoch) return;
     setState(snapshot); setTasks(background.tasks); setPendingResults(background.pending_results || []);
     setMode(liveMode.mode);
+    void refreshTitle(p, t).catch(() => {});
     if (!busy.current) { setMessages(old => runs.length && lastEvent.current ? old : snapshot.values?.messages || []); setRunId(runs[0]?.run_id || ''); setStatus(runs.length ? 'running' : 'ready'); }
-  }, [data]);
+  }, [data, refreshTitle]);
 
   useEffect(() => {
     if (threadId && !threads.some(t => t.thread_id === threadId)) return;
@@ -108,9 +120,11 @@ export function useAgent() {
 
   async function newThread() {
     const p = selection.current.projectId;
-    if (!p) return;
+    if (!p || creation.current) return;
+    creation.current = true; setCreating(true);
     try { const row = await data(route(p, ''), 'POST', {}); if (selection.current.projectId !== p) return; setThreads(old => [row, ...old]); setThreadId(row.thread_id); }
     catch (e: any) { if (selection.current.projectId === p) setError(e.message); }
+    finally { creation.current = false; setCreating(false); }
   }
   async function consume(response: Response, epoch: number) {
     const reset = !lastEvent.current;
@@ -135,7 +149,7 @@ export function useAgent() {
   }
   async function run(text?: string, skill?: string, responses?: Json, model?: string, onSubmitted?: () => void) {
     if (busy.current || !selection.current.threadId) return false;
-    const epoch = selection.current.epoch, base = route();
+    const { epoch, projectId: p, threadId: id } = selection.current, base = route();
     busy.current = true; setError(''); setStatus('running'); setRunId(''); lastEvent.current = '';
     if (!responses) turnId.current = crypto.randomUUID();
     stream.current = new AbortController();
@@ -147,8 +161,8 @@ export function useAgent() {
         setMessages(old => [...old, { id: 'optimistic-' + turnId.current, type: 'human', content: text }]);
         onSubmitted?.();
       }
+      if (text) void refreshTitle(p, id).catch(() => {});
       await consume(response, epoch);
-      if (text && !thread?.metadata?.title) { const title = text.slice(0, 70); await data(base, 'PATCH', { title }); if (selection.current.epoch === epoch) setThreads(old => old.map(t => t.thread_id === selection.current.threadId ? { ...t, metadata: { ...t.metadata, title } } : t)); }
     } catch (e: any) {
       if (selection.current.epoch === epoch && e.name !== 'AbortError') { setError(e.message + (submitted ? ' Reconnect to inspect the existing run; your message will not be resent.' : '')); setStatus('disconnected'); }
     } finally {
@@ -209,10 +223,12 @@ export function useAgent() {
     } catch (e: any) { if (selection.current.epoch === epoch) { setNotice(''); setError(e.message + ' Refresh saved state before retrying.'); } }
     finally { if (selection.current.epoch === epoch) { compaction.current = ''; busy.current = false; await refresh(epoch).catch(e => { setError(e.message); setStatus('disconnected'); }); } }
   }
-  async function rename(title: string) {
-    const epoch = selection.current.epoch, id = threadId;
-    await data(route(), 'PATCH', { title });
-    if (selection.current.epoch === epoch) setThreads(old => old.map(t => t.thread_id === id ? { ...t, metadata: { ...t.metadata, title } } : t));
+  async function rename(title: string, id = threadId) {
+    const p = selection.current.projectId, key = p + '/' + id;
+    titleRevisions.current.set(key, (titleRevisions.current.get(key) || 0) + 1);
+    await data(route(p, id), 'PATCH', { title });
+    titleRevisions.current.set(key, (titleRevisions.current.get(key) || 0) + 1);
+    if (selection.current.projectId === p) setThreads(old => old.map(t => t.thread_id === id ? { ...t, metadata: { ...t.metadata, title: title.trim() } } : t));
   }
   function changeProject(id: string) {
     stream.current?.abort(); busy.current = false; compaction.current = '';
@@ -220,6 +236,6 @@ export function useAgent() {
     setThreadId(''); setProjectId(id);
   }
   const capture = () => { const epoch = selection.current.epoch; return () => selection.current.epoch === epoch; };
-  return { projects, project, projectId, setProjectId: changeProject, threads, thread, threadId, selectThread, newThread, state, messages, tasks, pendingResults, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
+  return { projects, project, projectId, setProjectId: changeProject, threads, thread, threadId, selectThread, newThread, creating, state, messages, tasks, pendingResults, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
 }
 export type Agent = ReturnType<typeof useAgent>;

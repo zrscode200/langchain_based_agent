@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { HttpError, listFiles, readFile } from './files.ts';
+import { conversationTitles } from './titles.ts';
 import { allowedDecisions, pendingInterrupts, validAnswer, type Json, type Project, type Workspace, type Snapshot } from '../src/protocol.ts';
 
 export type Config = { projects: Project[]; backend: string; apiKey?: string; origin: string; fetch?: typeof fetch };
@@ -40,6 +41,7 @@ export function createApp(config: Config) {
     const result = await upstream(route, method, body);
     return result.status === 204 ? {} : result.json();
   };
+  const titles = conversationTitles(upJson);
   async function owned(project: Project, thread: string): Promise<Workspace> {
     const record = await upJson(`/threads/${thread}`);
     if (record.metadata?.cwd !== project.path) throw new HttpError(404, 'Conversation is not in this workspace.');
@@ -89,9 +91,10 @@ export function createApp(config: Config) {
     if (!validId(thread)) throw new HttpError(400, 'Invalid conversation ID.');
     const workspace = await owned(project, thread);
     const prefix = `/threads/${thread}`;
+    if (parts.length === 5 && request.method === 'GET') return json(await titles.read(thread));
     if (parts.length === 5 && request.method === 'PATCH') {
       if (typeof body.title !== 'string' || !body.title.trim() || body.title.length > 160) throw new HttpError(400, 'Use a title between 1 and 160 characters.');
-      return json(await upJson(prefix, 'PATCH', { metadata: { title: body.title.trim() } }));
+      return json(await titles.rename(thread, body.title));
     }
     const operation = parts[5];
     if (operation === 'state' && request.method === 'GET') return json(await upJson(prefix + '/state?subgraphs=true'));
@@ -151,7 +154,11 @@ export function createApp(config: Config) {
         message.additional_kwargs = { ...message.additional_kwargs, deepagents_code_user_prompt: { literal_user_text: body.text, referenced_paths: [], turn_id: turnId } };
         payload.input = { messages: [message] };
       }
-      return upstream(prefix + '/runs/stream', 'POST', payload, {}, request.signal);
+      const response = await upstream(prefix + '/runs/stream', 'POST', payload, {}, request.signal);
+      // Start naming as soon as the run is accepted. Metadata failure must not
+      // delay live output or make an accepted message look safe to resend.
+      if (payload.input?.messages) void titles.initialize(thread, body.text).catch(() => {});
+      return response;
     }
     throw new HttpError(404, 'Unknown operation.');
   }
