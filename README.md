@@ -242,19 +242,31 @@ remains compatible with the pinned harness.
 Both clients show background tasks in the existing dynamic subagents panel,
 independently of the main turn. Use Ctrl+T to expand it, select Background and
 click a task row (or select a task with left/right and press Enter) to open its
-live activity window. It shows the assignment, recent tool activity, reported
-findings, steering status, result and pending approval. **Review** opens the exact
+live conversation window. It shows child messages, complete tool arguments and
+results, and reasoning when the provider exposes it. Previous/Next browse long
+conversations; Latest follows new pages. Activity switches to the existing
+assignment, findings and steering summary. **Review** opens the exact
 actions for approval or denial; **Cancel task** stops that child. Decisions
 resume that same child; they do not restart its completed work or resume the main
-agent. Final results still reach the main agent on its next turn. Tasks live only
-for the current server session.
+agent. Success, failure, timeout and cancellation reach the main model at its next
+model boundary. When the main agent is idle, the TUI starts a continuation to
+handle those outcomes. Drafts, queued user input, approval dialogs and an explicit
+main-agent stop take priority; stopping suppresses automatic continuations until
+you send another chat message. A failed continuation retains the results without
+an automatic retry loop. Tasks live only for the current server session.
+
+Up to four children run at once. Additional submissions queue in order and start
+as slots free, so you can dispatch another batch while the first is running.
+The runtime retains up to 128 jobs and evicts acknowledged finished jobs only
+when room is needed. Child conversations stay local in a temporary spool while
+the job is retained, with an explicit notice if capture reaches 64 MiB per job.
 
 The main agent can use `inspect_background_task` and `steer_background_task` to
 check or correct a running factory child. Corrections arrive before its next
 model step; an already running tool can finish. Queued, delivered and explicitly
 acknowledged messages are distinct. Superseded pending actions cannot use an old
 approval. Completed or cancelled children cannot receive further instructions.
-The activity window is read-only; continue speaking to the main agent in normal
+The conversation window is read-only; continue speaking to the main agent in normal
 chat. Custom task tools without factory instrumentation do not support detailed
 activity or steering.
 

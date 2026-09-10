@@ -814,5 +814,13 @@ async def make_graph(
         from lc_factory.upstream import require_thread_workspace
 
         binding = await require_thread_workspace(thread_id, context.workspace)
-        return (await _workspace_runtime(binding, session=thread_id)).agent
+        selected = await _workspace_runtime(binding, session=thread_id)
+        wake_key = "lc_factory_background_wake_checkpoint"
+        if wake_key in (config or {}).get("configurable", {}):
+            from lc_factory.server_checkpointer import require_background_checkpoint
+            await require_background_checkpoint(thread_id, config["configurable"][wake_key])
+            background = await background_for_workspace(binding)
+            if background is None or not background.pending(thread_id):
+                raise ValueError("Background outcomes have already been consumed")
+        return selected.agent
     return (await get_server_runtime()).agent

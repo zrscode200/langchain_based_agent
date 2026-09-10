@@ -206,6 +206,22 @@ private (underscore) names that carry no semver protection.
    opens a read-only, owner-bound detail window from the native row and keeps
    live updates separate from frozen `TaskReview` approval snapshots. Recheck
    single-flight inspection, narrow layout, scroll position and teardown.
+   `background_wake.py` owns empty-input continuation admission. Recheck native
+   `_run_agent_task(graph_input=...)`, quiescent cleanup, `_submit_input`, queued
+   dispatch, `_cancel_worker` and synchronous `_force_interrupt_active_work`.
+   Verify no user-prompt metadata/hooks, stale owner, approval recovery or repeated
+   failed-wake loop. Preserve the existing trusted turn ID for actual `ask_user`
+   receipts, remove wake context from normal successor sends, and restrict the
+   expected checkpoint to initial admission so approval/hook resumes work.
+   Its ContextVar-limited `RemoteGraph.astream` adapter requires
+   `multitask_strategy="reject"`; the server otherwise defaults to enqueue.
+   Server graph selection compares the completed checkpoint through the live
+   factory saver. Recheck factory invocation after run reservation on server bumps.
+   Exercise two concurrent batches, queued cancellation/resume, retention eviction,
+   active/resumed outcome receipts and Auto's latest trusted user-turn identity.
+   `background_transcript.py` projects message content and exposed reasoning into
+   a local spool. Verify real model/tool responses, pagination, terminal retention,
+   literal rendering and exclusion of opaque/provider/hook metadata.
    `background_panel.py` extends
    the currently installed panel class (including enterprise replay handling).
    Recheck native prepare_turn/finalize_running/reset, phase navigation and row

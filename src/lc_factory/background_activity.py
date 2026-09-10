@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from copy import deepcopy
 
 from rich.text import Text
@@ -11,6 +12,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Static
 
 from lc_factory.background_ui import TaskReview, _ACTIVE, _STATUS_LABELS, plain
+from lc_factory.background_transcript import PAGE_CHARS
 
 
 def activity_text(job):
@@ -77,6 +79,16 @@ def activity_text(job):
     return output
 
 
+def conversation_text(conversation):
+    output = Text(plain(conversation.get("text", ""), PAGE_CHARS * 4))
+    if not output:
+        output.append("Waiting for the child's first conversation messages…")
+    for title in ("User / assignment", "Assistant", "Tool result", "Tool call", "System",
+                  "Reasoning (provider-exposed)", "Reasoning summary (provider-exposed)"):
+        output.highlight_regex(r"(?m)^" + re.escape(title) + r".*$", "bold cyan")
+    return output
+
+
 class TaskActivity(ModalScreen):
     """One live read-only detail window; approval review uses a frozen snapshot."""
     BINDINGS = [("escape", "back", "Back to main agent")]
@@ -101,6 +113,8 @@ class TaskActivity(ModalScreen):
         self.polling = self.closed = self.fresh = self.pending = False
         self.cancel_attempted = False
         self.rendered = None
+        self.view_activity = False
+        self.page = -1  # Follow the latest page until the user navigates back.
 
     def compose(self):
         with Vertical():
@@ -109,6 +123,11 @@ class TaskActivity(ModalScreen):
             with VerticalScroll(id="activity-scroll"):
                 yield Static(id="activity-body")
             yield Static(Text("Loading activity…"), id="activity-notice")
+            with Horizontal(id="conversation-navigation"):
+                yield Button("Activity", id="conversation-toggle")
+                yield Button("Previous", id="conversation-previous")
+                yield Button("Next", id="conversation-next")
+                yield Button("Latest", id="conversation-latest")
             with Horizontal():
                 yield Button("Review", id="activity-review", disabled=True)
                 yield Button("Cancel task", id="activity-cancel", disabled=True)
@@ -121,11 +140,24 @@ class TaskActivity(ModalScreen):
             return False
 
     def render_job(self):
-        body = activity_text(self.job)
+        conversation = self.job.get("conversation")
+        available = isinstance(conversation, dict)
+        self.query_one("#conversation-navigation").display = available
+        show_conversation = available and not self.view_activity
+        body = conversation_text(conversation) if show_conversation else activity_text(self.job)
         if body != self.rendered:
             self.query_one("#activity-body", Static).update(body)
             self.rendered = body
         label = _STATUS_LABELS.get(self.job.get("status"), "Unknown status")
+        if show_conversation:
+            label += f" · Conversation · Page {conversation['page'] + 1}/{max(1, conversation['pages'])}"
+            if self.page == -1:
+                label += " · Following latest"
+        self.query_one("#conversation-toggle", Button).label = "Conversation" if self.view_activity else "Activity"
+        self.query_one("#conversation-toggle", Button).disabled = not self.current()
+        self.query_one("#conversation-previous", Button).disabled = not (show_conversation and conversation["page"] > 0)
+        self.query_one("#conversation-next", Button).disabled = not (show_conversation and conversation["page"] + 1 < conversation["pages"])
+        self.query_one("#conversation-latest", Button).disabled = not show_conversation or self.page == -1
         self.query_one("#activity-status", Static).update(Text(label))
         self.update_controls()
 
@@ -160,7 +192,7 @@ class TaskActivity(ModalScreen):
             if not self.current():
                 self.invalidate()
                 return
-            value = await self.inspect()
+            value = await self.inspect() if self.page == -1 else await self.inspect(transcript_page=self.page)
             if not self.current():
                 self.invalidate()
                 return
@@ -169,8 +201,9 @@ class TaskActivity(ModalScreen):
             self.job = deepcopy(value)
             self.fresh = True
             self.render_job()
-            self.query_one("#activity-notice", Static).update(Text(
-                "Read-only activity · Esc returns to the main agent"))
+            conversation = self.job.get("conversation")
+            notice = conversation.get("notice", "") if isinstance(conversation, dict) and not self.view_activity else "Read-only activity"
+            self.query_one("#activity-notice", Static).update(Text(plain(notice, 500) + " · Esc returns to the main agent"))
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -191,6 +224,8 @@ class TaskActivity(ModalScreen):
         self.query_one("#activity-title", Static).update(Text("Subagent activity"))
         self.query_one("#activity-status", Static).update(Text("Unavailable"))
         self.query_one("#activity-notice", Static).update(Text("Esc returns to the main agent"))
+        for button in self.query("#conversation-navigation Button"):
+            button.disabled = True
         self.update_controls()
         self.timer.stop()
 
@@ -203,6 +238,22 @@ class TaskActivity(ModalScreen):
         event.stop()
         if event.button.id == "activity-back":
             self.action_back()
+            return
+        if event.button.id == "conversation-toggle":
+            if not self.current():
+                self.invalidate()
+                return
+            self.view_activity = not self.view_activity
+            self.render_job()
+            return
+        if event.button.id in ("conversation-previous", "conversation-next", "conversation-latest"):
+            conversation = self.job.get("conversation", {})
+            if not self.fresh or not self.current() or self.polling or event.button.disabled:
+                return
+            self.page = (-1 if event.button.id == "conversation-latest" else
+                         conversation["page"] + (-1 if event.button.id == "conversation-previous" else 1))
+            await self.refresh_task()
+            self.query_one("#activity-scroll").scroll_home(animate=False)
             return
         if not self.fresh or not self.current() or self.pending:
             self.update_controls()

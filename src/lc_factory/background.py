@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from time import monotonic
@@ -16,13 +17,14 @@ from typing import Any, TypedDict
 
 from lc_factory.upstream import (
     AgentMiddleware, Command, GraphInterrupt, SystemMessage,
-    ToolRuntime, tool, Runtime, use_environment,
+    ToolMessage, ToolRuntime, tool, Runtime, use_environment,
     InMemorySaver, StateGraph, START, END,
 )
+from lc_factory.background_transcript import ChildTranscript
 
 _IN_WORKER = contextvars.ContextVar("lc_factory_background_worker", default=False)
 _CURRENT_JOB = contextvars.ContextVar("lc_factory_background_job", default=None)
-_LIVE = {"running", "needs_approval", "needs_input"}
+_LIVE = {"queued", "running", "needs_approval", "needs_input"}
 
 
 def is_child(state):
@@ -89,6 +91,8 @@ class Job:
     model_revision: int = 0
     activity_sequence: int = 0
     interrupt_ids: dict[str, str] = field(default_factory=dict, repr=False)
+    queued_input: Any = field(default=None, repr=False)
+    transcript: ChildTranscript = field(default_factory=ChildTranscript, repr=False)
 
     def record(self, kind, **fields):
         self.activity_sequence += 1
@@ -117,6 +121,7 @@ class BackgroundTasks(AgentMiddleware):
         self.environ = environ
         self.max_running, self.max_jobs, self.timeout = max_running, max_jobs, timeout
         self.jobs: dict[str, Job] = {}
+        self._queue = deque()
         self.changed = asyncio.Condition()
         self.closed = False
 
@@ -141,7 +146,10 @@ class BackgroundTasks(AgentMiddleware):
 
         @tool
         async def start_background_task(description: str, subagent_type: str, runtime: ToolRuntime[Any, Any]) -> dict:
-            """Start a local subagent in the background; return its running task ID or a failure."""
+            """Start a local background subagent; return its running/queued ID or a failure.
+
+            At concurrency capacity, tasks queue FIFO and start automatically as slots free.
+            """
             task_tool = next((t for t in runtime.tools if getattr(t, "name", None) == "task"), None)
             return self._submit(task_tool, {"name": "task", "id": runtime.tool_call_id,
                 "type": "tool_call", "args": {"description": description, "subagent_type": subagent_type}}, runtime)
@@ -173,6 +181,21 @@ class BackgroundTasks(AgentMiddleware):
         self.tools = [list_background_tasks, cancel_background_task, start_background_task,
                       inspect_background_task, steer_background_task]
 
+    async def awrap_tool_call(self, request, handler):
+        result = await handler(request)
+        # Receipt travels with the actual tool message. UI reads never produce
+        # one, and merely returning a result does not acknowledge consumption.
+        if (not is_child(request.state) and request.tool in self.tools
+                and request.tool_call["name"] in ("list_background_tasks", "inspect_background_task")
+                and isinstance(result, ToolMessage) and result.status != "error"):
+            value = json.loads(result.content)
+            values = value if isinstance(value, list) else [value]
+            ids = [v["task_id"] for v in values if isinstance(v, dict)
+                   and v.get("result") is not None and isinstance(v.get("task_id"), str)]
+            result = result.model_copy(update={"additional_kwargs": {
+                **result.additional_kwargs, "lc_factory_background_ids": ids}})
+        return result
+
     @staticmethod
     def _snapshot(key, job, *, inspection=False):
         return dict(task_id=key, name=job.name, description=job.description, status=job.status,
@@ -191,10 +214,13 @@ class BackgroundTasks(AgentMiddleware):
             raise ValueError("Unknown task for this conversation")
         return job
 
-    def inspect(self, owner, task_id):
+    def inspect(self, owner, task_id, *, transcript_page=None):
         job = self._owned(owner, task_id)
-        return {**self._snapshot(task_id, job, inspection=True), "steering": deepcopy(job.steering),
+        value = {**self._snapshot(task_id, job, inspection=True), "steering": deepcopy(job.steering),
                 "activity": deepcopy(job.activity)}
+        if transcript_page is not None:
+            value["conversation"] = job.transcript.page(transcript_page)
+        return value
 
     def steer(self, owner, task_id, message):
         job = self._owned(owner, task_id)
@@ -237,8 +263,7 @@ class BackgroundTasks(AgentMiddleware):
             names = {t.name for t in self.tools}
             return await handler(request.override(tools=[t for t in request.tools
                                                          if getattr(t, "name", "") not in names]))
-        # ModelRequest has a Runtime, not a RunnableConfig. Results are injected
-        # by the runtime's before-agent middleware using the graph config.
+        # Checkpointed outcome delivery runs before each main model boundary.
         blocks = request.system_message.content_blocks if request.system_message else []
         system = SystemMessage(content_blocks=[*blocks, {"type": "text", "text":
             "Use start_background_task to start local background work and immediately receive an ID. "
@@ -251,7 +276,10 @@ class BackgroundTasks(AgentMiddleware):
             "delivered until the child model receives it, and acknowledgment requires its explicit "
             "report. Pending earlier actions are superseded, never approved by steering. "
             "Use cancel_background_task when needed; do not repeatedly poll. Results are "
-            "delivered on the next conversation turn. Remote async tools keep their "
+            "delivered at the next model boundary; the bundled TUI also continues an idle main agent. "
+            "Queued tasks start automatically when concurrency slots free; do not resubmit them. "
+            "Failed, timed-out and cancelled tasks are terminal outcomes, not permission to retry them. "
+            "Remote async tools keep their "
             "ordinary start/check/cancel behavior."}])
         return await handler(request.override(system_message=system))
 
@@ -261,12 +289,19 @@ class BackgroundTasks(AgentMiddleware):
         if is_child(parent_runtime.state):
             return failure("Background submission is available to the main agent only.")
         owner = thread_id(parent_runtime.config)
-        self.jobs = {k: j for k, j in self.jobs.items()
-                     if not (j.acknowledged and j.worker is not None and j.worker.done())}
-        if self.closed or len(self.jobs) >= self.max_jobs or sum(
-                j.worker is not None and not j.worker.done() for j in self.jobs.values()
-        ) >= self.max_running:
-            return failure("Background task capacity unavailable.")
+        if self.closed or self.max_running < 1:
+            return failure("Background task capacity unavailable: the scheduler is closed or disabled.")
+        # Retain completed conversations until space is actually needed. Never
+        # evict unconsumed outcomes, paused children, or queued/running work.
+        if len(self.jobs) >= self.max_jobs:
+            expired = next((k for k, j in self.jobs.items() if j.acknowledged and j.result is not None
+                            and (j.worker is None or j.worker.done())), None)
+            if expired is not None:
+                self.jobs[expired].transcript.close()
+                del self.jobs[expired]
+        if len(self.jobs) >= self.max_jobs:
+            return failure(f"Background task capacity unavailable: all {self.max_jobs} retained task slots "
+                           "are occupied. Collect finished results before submitting more work.")
         if task_tool is None:
             return failure("No permitted compiled task tool is available.")
         metadata = getattr(task_tool, "metadata", None) or {}
@@ -304,12 +339,34 @@ class BackgroundTasks(AgentMiddleware):
         job.graph = builder.compile(checkpointer=InMemorySaver())
         job.config = config
         self.jobs[key] = job
-        self._launch(key, job, {})
-        return {"ok": True, "task_id": key, "status": "running"}
+        self._enqueue(key, job, {})
+        return {"ok": True, "task_id": key, "status": job.status}
+
+    def _enqueue(self, key, job, value):
+        job.status, job.queued_input = "queued", value
+        self._queue.append(key)
+        self._drain_queue()
+
+    def _drain_queue(self):
+        if self.closed:
+            return
+        while self._queue and sum(j.worker is not None and not j.worker.done()
+                                  for j in self.jobs.values()) < self.max_running:
+            key = self._queue.popleft()
+            job = self.jobs.get(key)
+            if job is None or job.status != "queued" or not job.inbox_open:
+                continue
+            value, job.queued_input = job.queued_input, None
+            self._launch(key, job, value)
+
+    def _worker_finished(self):
+        self._drain_queue()
+        self._drain_stale_approvals()
 
     def _launch(self, key, job, value):
+        job.status = "running"
         job.worker = asyncio.create_task(self._run(job, value), name=key, context=contextvars.Context())
-        job.worker.add_done_callback(lambda _: self._drain_stale_approvals())
+        job.worker.add_done_callback(lambda _: self._worker_finished())
 
     def _drain_stale_approvals(self):
         if self.closed:
@@ -342,8 +399,7 @@ class BackgroundTasks(AgentMiddleware):
                     if decision["type"] == "reject":
                         job.record("tool", tool_name=action["name"], status="skipped")
         job.interrupts, job.interrupt_ids = [], {}
-        job.status = "running"
-        self._launch(task_id, job, Command(resume=actual))
+        self._enqueue(task_id, job, Command(resume=actual))
 
     def resume(self, owner, task_id, responses):
         """Accept an exact, user-originated interrupt response once.
@@ -356,8 +412,8 @@ class BackgroundTasks(AgentMiddleware):
             raise ValueError("Task is not waiting for a response")
         if job.worker is not None and not job.worker.done():
             raise ValueError("Task is still publishing its pause; refresh before responding")
-        if sum(j.worker is not None and not j.worker.done() for j in self.jobs.values()) >= self.max_running:
-            raise ValueError("Background task capacity unavailable; retry when a running task finishes")
+        if self.max_running < 1:
+            raise ValueError("Background task capacity unavailable: scheduler is disabled")
         if not isinstance(responses, dict) or set(responses) != {i["id"] for i in job.interrupts}:
             raise ValueError("Response does not match the current task interrupts")
         for item in job.interrupts:
@@ -441,11 +497,14 @@ class BackgroundTasks(AgentMiddleware):
             if (owner is None or job.owner == owner) and (task_id is None or key == task_id):
                 # Revoke inbox acceptance before cancellation cleanup can yield.
                 job.close_inbox()
-                if job.status in ("needs_approval", "needs_input"):
+                if job.status in ("queued", "needs_approval", "needs_input"):
+                    if job.status == "queued":
+                        self._queue = deque(queued for queued in self._queue if queued != key)
                     job.status, job.result = "cancelled", "Background task cancelled."
                     job.interrupts, job.graph, job.config = [], None, {}
                     job.outcome = {"ok": False, "error": {"type": "cancelled", "message": job.result}}
                     job.interrupt_ids = {}
+                    job.queued_input = None
                     job.close_inbox()
                 if job.worker is not None and not job.worker.done():
                     job.worker.cancel()
@@ -469,11 +528,16 @@ class BackgroundTasks(AgentMiddleware):
 
     async def discard(self, owner):
         await self.cancel(owner)
+        for job in self.jobs.values():
+            if job.owner == owner:
+                job.transcript.close()
         self.jobs = {key: job for key, job in self.jobs.items() if job.owner != owner}
 
     async def close(self):
         self.closed = True
         await self.cancel()
+        for job in self.jobs.values():
+            job.transcript.close()
         async with self.changed:
             self.changed.notify_all()
 

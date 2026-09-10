@@ -416,6 +416,12 @@ async def test_context_restores_mount_and_nested_use_mounts_only_one_panel(monke
     from lc_factory.upstream_cli import app_module
 
     class Host(App):
+        _submit_input = app_module.DeepAgentsApp._submit_input
+        _dispatch_queued_message = app_module.DeepAgentsApp._dispatch_queued_message
+        _send_to_agent = app_module.DeepAgentsApp._send_to_agent
+        _cancel_worker = app_module.DeepAgentsApp._cancel_worker
+        _force_interrupt_active_work = app_module.DeepAgentsApp._force_interrupt_active_work
+
         def compose(self):
             with Vertical(id="bottom-app-container"):
                 yield app_module.SubagentPanel(id="subagent-panel")

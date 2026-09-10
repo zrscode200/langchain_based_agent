@@ -29,8 +29,8 @@ Ask the main agent to use `start_background_task` to delegate while continuing
 the conversation. Native `task`, `task_settled` and JavaScript `task()` remain
 foreground operations. Background availability does not make every delegation
 asynchronous. The TUI shows task status and completion notifications independently
-of the main run. Completed results reach the main agent on its next conversation
-turn; no automatic model turn is started while idle.
+of the main run. All terminal outcomes reach the next main-model boundary, and
+the bundled TUI starts a guarded continuation when the main agent is idle.
 
 Save preferences in the trusted user/managed `config.toml` selected by
 `DEEPAGENTS_HOME`, alongside any other `[lc_factory]` settings:
@@ -221,21 +221,32 @@ Factory approvals and hooks run before detachment, and child tools keep their
 compiled approval controls. A child interrupt becomes `needs_approval` with its
 exact pending action requests. Select Background in the dynamic subagents panel
 and click a task row (or select it with left/right and press Enter) for its live
-activity window. **Review** opens a frozen approval snapshot; **Cancel task**
+conversation window. **Review** opens a frozen approval snapshot; **Cancel task**
 stops the selected child. Ctrl+T expands or collapses the shared panel.
 Background rows survive main-turn completion and cancellation. The retained child checkpoint resumes without
 replaying completed steps. Waiting for approval is not a final result and is not
 acknowledged by the main agent's result-delivery path. Server hooks use their
 existing client-owned fulfillment path; unsupported input requests and requests
 exceeding the review panel's 24,000-character display limit remain blocked and
-can be cancelled. The TUI never resumes the parent graph to settle a child.
+can be cancelled. Child review resumes only the saved child checkpoint.
 
 Factory-built children support bounded main-agent inspection and steering.
 Inspection includes assignment/status/result, recent observable tool names and
 execution states, explicit findings from `report_background_task`, and steering
 delivery state. It does not expose private reasoning, model transcripts or raw
-tool outputs. The read-only TUI activity window uses the same inspection data;
-there is no direct user-to-child message box or host steering endpoint.
+tool outputs. The host-only detail endpoint additionally exposes a paged child
+conversation: model/assignment messages, full tool arguments/results and
+provider-exposed reasoning. It never serializes opaque reasoning, hook transport
+or arbitrary callback metadata. The window updates at model and tool boundaries;
+it does not reconstruct hidden reasoning. Activity switches back to the bounded
+summary. There is no direct user-to-child message box or host steering endpoint.
+
+Conversation text is split into 24,000-character pages, without clipping individual
+tool output at page boundaries. A private temporary spool retains up to 64 MiB
+per job; reaching that limit produces a visible notice that later messages were
+not retained. Spools close on eviction, thread deletion or shutdown. Text remains
+available after the child ends while its job is retained. Main-model inspection
+does not include this conversation content.
 
 `steer_background_task(task_id, message)` queues a correction for the child's
 next model step. An already admitted tool normally finishes. A message is
@@ -260,16 +271,34 @@ shell processes, downloads or remote asynchronous jobs into steerable agents.
 
 Defaults are four running local jobs, 128 retained jobs, a one-hour execution budget,
 and 64,000 characters per result. Jobs are in memory and are cancelled at runtime
-shutdown. They do not survive a process restart. Hook observers around
+shutdown. Extra submissions and approved resumptions queue FIFO, including while
+another batch runs. Queued jobs are visible and cancellable. Queue/approval wait
+does not consume the budget. Acknowledged finished jobs are evicted only when
+retention capacity is needed. Jobs do not survive a process restart. Hook observers around
 `start_background_task` see the immediate dispatch result; job status tracks
 actual completion. Hooks around native `task` see its foreground result.
 
-Results arrive on the next main-agent turn. A failed/cancelled delivery keeps
-results pending; committed completion acknowledges them. For an embedding:
+Results arrive before each main model call, including after an approval resume.
+A failed/cancelled delivery keeps results pending; committed completion acknowledges
+them. Model list/inspection results carry consumption receipts to prevent an
+extra notification after the model already read them. UI polling never acknowledges.
+
+The bundled TUI coalesces terminal outcomes into a normal empty-input continuation
+when quiescent. It yields to drafts, typing, queued/submitting input, modal dialogs,
+permission/input pauses, reloads and shutdown. An explicit main stop suppresses
+wake-up until new chat input; a failed wake batch is not retried automatically.
+No synthetic user prompt, consent marker or UserPromptSubmit hook is created.
+The original trusted turn identity is preserved for genuine `ask_user` replies;
+queued user turns and permission resumes keep their normal lifecycle.
+Remote admission uses reject-on-busy and checks that the observed completed
+checkpoint still matches. This adds no distributed lock for concurrent external
+state-update clients; coordinate such clients through the server's normal ownership
+rules. Bare embeddings still own idle scheduling. For an embedding:
 
 ```python
 pending = await runtime.background.wait("conversation-1")
-# Schedule a normal runtime.ainvoke/astream turn when your host is ready.
+# Schedule runtime.ainvoke({"messages": []}, config) when the main graph is idle
+# and has no pending interrupt, or let its current turn reach the next model call.
 # The runtime injects pending results as data automatically.
 # wait also wakes for an approval/input pause, with no completed result.
 jobs = runtime.background.list("conversation-1")

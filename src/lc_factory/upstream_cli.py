@@ -13,8 +13,10 @@ Only `lc_factory.tui` imports this module.
 from deepagents_code import cli_main
 from deepagents_code import app as app_module
 from deepagents_code.tui.widgets import subagent_panel as subagent_panel_module
+from langgraph.pregel.remote import RemoteGraph
+from deepagents_code.auto_mode import _latest_turn_id as latest_trusted_turn_id
 
-__all__ = ["cli_main", "app_module", "subagent_panel_module"]
+__all__ = ["cli_main", "app_module", "subagent_panel_module", "RemoteGraph", "latest_trusted_turn_id"]
 
 
 def background_approval_widgets():

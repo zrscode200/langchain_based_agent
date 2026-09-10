@@ -9,6 +9,21 @@ from lc_factory.archive_saver import ConversationSaver
 from lc_factory.upstream import AsyncSqliteSaver, get_thread_workspace
 
 _archive = None
+_execution_saver = None
+
+
+async def require_background_checkpoint(owner, expected):
+    """Refuse a continuation if its observed completed checkpoint has changed.
+
+    Runs already hold server admission here. This supplements reject-on-busy
+    transport; it does not introduce a new cross-client state-update lock.
+    """
+    if _execution_saver is None or not isinstance(expected, str) or not expected:
+        raise ValueError("Background continuation checkpoint unavailable")
+    saved = await _execution_saver.aget_tuple({"configurable": {"thread_id": owner}})
+    if (saved is None or saved.config["configurable"].get("checkpoint_id") != expected
+            or saved.checkpoint.get("channel_values", {}).get("_factory_turn_complete") is not True):
+        raise ValueError("Background continuation checkpoint changed or is unfinished")
 
 
 def get_archive():
@@ -32,7 +47,7 @@ async def create_checkpointer():
     from lc_factory.runtime import RuntimeOptions
     from lc_factory.server_graph import close_factory_runtimes, factory_checkpoint_committed, cancel_factory_background, forget_factory_conversation
 
-    global _archive
+    global _archive, _execution_saver
     path = os.environ.get("DEEPAGENTS_CODE_SERVER_DB_PATH")
     if not path:
         raise ValueError("DEEPAGENTS_CODE_SERVER_DB_PATH is required")
@@ -46,8 +61,10 @@ async def create_checkpointer():
         saver = ConversationSaver(saver, archive=_archive, scope_resolver=server_scope,
                                   on_commit=factory_checkpoint_committed, before_delete=cancel_factory_background,
                                   after_delete=forget_factory_conversation)
+        _execution_saver = saver
         try:
             yield saver
         finally:
             await close_factory_runtimes()
             _archive = None
+            _execution_saver = None

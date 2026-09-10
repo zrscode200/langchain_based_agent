@@ -288,7 +288,7 @@ def test_remote_reload_rejects_partial_invalid_definitions(monkeypatch):
 
 async def test_background_capacity_rejects_before_dispatch():
     from lc_factory.background import BackgroundTasks, Job
-    background = BackgroundTasks(max_running=1)
+    background = BackgroundTasks(max_running=1, max_jobs=1)
     worker = asyncio.create_task(asyncio.Event().wait())
     background.jobs["existing"] = Job("owner", "worker", worker=worker)
     async def execute(*args, **kwargs):

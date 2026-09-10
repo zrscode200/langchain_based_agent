@@ -14,9 +14,9 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Collapsible, Static
 
 _MAX_DETAIL = 24_000
-_ACTIVE = {"running", "needs_approval", "needs_input"}
+_ACTIVE = {"queued", "running", "needs_approval", "needs_input"}
 _STATUS_LABELS = {"needs_approval": "Waiting for approval", "needs_input": "Waiting for input",
-                  "running": "Running", "completed": "Completed", "cancelled": "Cancelled",
+                  "queued": "Queued", "running": "Running", "completed": "Completed", "cancelled": "Cancelled",
                   "failed": "Failed", "timed_out": "Timed out"}
 
 
@@ -210,6 +210,8 @@ class BackgroundPanel(Vertical):
 
     def __init__(self):
         super().__init__(id="factory-background-panel")
+        from lc_factory.background_wake import BackgroundWake
+        self.wake = BackgroundWake(self)
         self.identity = None
         self.snapshot = None
         self.jobs = []
@@ -374,6 +376,7 @@ class BackgroundPanel(Vertical):
                     return self.hook_current(identity, job, hooks, runtime)
                 task = asyncio.create_task(self.fulfill_hooks(identity, captured_job, hooks, key, current))
                 self.hook_tasks[key] = task, current
+            await self.wake.consider(identity, response)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -449,11 +452,11 @@ class BackgroundPanel(Vertical):
         def current():
             return self.valid(identity)
 
-        async def inspect():
+        async def inspect(*, transcript_page=-1):
             agent, owner, _ = identity
             async with asyncio.timeout(15):
                 response = await background_request(agent, owner, is_current=current,
-                                                    operation="inspect", task_id=task_id)
+                                                    operation="inspect", task_id=task_id, transcript_page=transcript_page)
             if not current():
                 raise ValueError("Conversation changed; reopen this task")
             return response["task"]
@@ -468,6 +471,7 @@ class BackgroundPanel(Vertical):
 def client_background_tasks():
     from lc_factory.upstream_cli import app_module
     from lc_factory.background_panel import background_subagent_panel_class
+    from lc_factory.background_wake import client_background_wake
     cls = app_module.DeepAgentsApp
     original = cls.on_mount
     original_panel = app_module.SubagentPanel
@@ -481,7 +485,8 @@ def client_background_tasks():
 
     cls.on_mount = mount
     try:
-        yield
+        with client_background_wake(cls):
+            yield
     finally:
         cls.on_mount = original
         app_module.SubagentPanel = original_panel

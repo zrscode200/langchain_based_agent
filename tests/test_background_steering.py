@@ -448,7 +448,7 @@ async def test_stale_approval_waits_for_worker_publication_and_available_quota()
         await asyncio.wait_for(asyncio.shield(worker), 5)
         await asyncio.sleep(0)
         assert job.worker is worker and job.status == "needs_approval"
-        with pytest.raises(ValueError, match="capacity"):
+        with pytest.raises(ValueError, match="superseded"):
             tasks.resume("owner", key, responses(job))
         blocker_release.set()
         await blocker

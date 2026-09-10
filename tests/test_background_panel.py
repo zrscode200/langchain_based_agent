@@ -82,7 +82,7 @@ async def test_mixed_native_phases_and_literal_background_rows(width):
         assert panel.query_one("#subagent-agents").virtual_size.height == 7
         if width >= 80:
             assert "[bold]literal[/bold]" in rows
-        assert "Enter/click activity" in rendered(panel, "subagent-background-help")
+        assert "Enter/click conversation" in rendered(panel, "subagent-background-help")
         assert panel.size.width <= width
         assert panel.query_one("#subagent-body").size.height <= 12
 

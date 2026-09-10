@@ -63,6 +63,8 @@ class BackgroundChildMiddleware(AgentMiddleware):
 
     async def abefore_model(self, state, runtime):
         job = _CURRENT_JOB.get()
+        if job is not None:
+            job.transcript.capture(state.get("messages", []))
         if job is None or state.get("_background_steering_revision", 0) >= job.revision:
             return None
         items = [item for item in job.steering
@@ -94,11 +96,16 @@ class BackgroundChildMiddleware(AgentMiddleware):
             "for concise explicit findings the parent may inspect, and to acknowledge delivered "
             "steering IDs. Do not report private reasoning or dump tool output. Finish your "
             "assignment normally; there is no idle inbox or later restart."}])
-        return await handler(request.override(system_message=system))
+        job.transcript.capture([system, *request.messages])
+        response = await handler(request.override(system_message=system))
+        job.transcript.capture(response.result)
+        return response
 
     @hook_config(can_jump_to=["model"])
     async def aafter_model(self, state, runtime):
         job = _CURRENT_JOB.get()
+        if job is not None:
+            job.transcript.capture(state.get("messages", []))
         if job is None or state.get("_background_steering_revision", 0) >= job.revision:
             return None
         messages = state["messages"]
@@ -148,4 +155,7 @@ class BackgroundChildMiddleware(AgentMiddleware):
             job.record("tool", **fields, status="failed")
             raise
         job.record("tool", **fields, status="failed" if tool_result_failed(result, call["id"]) else "completed")
+        messages = result.update.get("messages", []) if isinstance(result, Command) and isinstance(result.update, dict) else (
+            [result] if isinstance(result, ToolMessage) else [])
+        job.transcript.capture(convert_to_messages(messages))
         return result

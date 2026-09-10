@@ -861,3 +861,31 @@ async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_pol
     assert kwargs["summarization_model"] == "test:summarizer"
     assert kwargs["auto_classifier_model"] == "resolved:reviewer"
     assert kwargs["project_context"] is project_context
+
+
+async def test_background_wake_validates_checkpoint_and_pending_outcomes(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    from deepagents_code.workspace import bind_thread_workspace
+    from lc_factory import server_graph, server_checkpointer
+    monkeypatch.setenv('DEEPAGENTS_CODE_SERVER_DB_PATH', str(tmp_path / 'sessions.db'))
+    binding = await bind_thread_workspace('wake-owner', str(tmp_path))
+    graph = object()
+    seen = []
+    pending = {'child': 'result'}
+    async def selected(verified, *, session=None):
+        assert verified == binding and session == 'wake-owner'
+        return SimpleNamespace(agent=graph)
+    async def require(owner, checkpoint):
+        seen.append((owner, checkpoint))
+    async def background(verified):
+        return SimpleNamespace(pending=lambda owner: pending)
+    monkeypatch.setattr(server_graph, '_workspace_runtime', selected)
+    monkeypatch.setattr(server_graph, 'background_for_workspace', background)
+    monkeypatch.setattr(server_checkpointer, 'require_background_checkpoint', require)
+    config = {'configurable': {'thread_id': 'wake-owner', 'lc_factory_background_wake_checkpoint': 'exact'}}
+    runtime = SimpleNamespace(execution_runtime=SimpleNamespace(context={'workspace': binding.to_payload()}))
+    assert await server_graph.make_graph(config=config, runtime=runtime) is graph
+    assert seen == [('wake-owner', 'exact')]
+    pending.clear()
+    with pytest.raises(ValueError, match='consumed'):
+        await server_graph.make_graph(config=config, runtime=runtime)

@@ -133,15 +133,21 @@ intended; native `task` now always preserves foreground delegation semantics.
 
 All background submission uses one quota, snapshot, scheduling, and shutdown
 path. Jobs retain their original compiled dispatcher across configuration
-reloads. Defaults remain four running jobs, 128 retained jobs, and one hour per
-job. Only the owning conversation can list, cancel, or receive results; children
+reloads. Defaults remain four running jobs, 128 retained jobs, and one hour of
+execution per job. Additional jobs queue FIFO; queue and approval wait time do
+not consume the execution budget. Approved resumptions can queue too. A full
+retention table evicts acknowledged finished jobs before rejecting submission
+with a specific capacity explanation. Only the owning conversation can list, cancel, or receive results; children
 cannot submit further background jobs.
 
 `list_background_tasks` keeps the existing `result` string and adds `outcome`.
 Completed schema-backed results have a parsed structured value. Failed,
-cancelled, timed-out, or approval-blocked jobs have `ok: false`. Oversized results
+cancelled and timed-out jobs have `ok: false`; approval/input pauses have no outcome yet. Oversized results
 fail instead of returning truncated content as a claimed success. Result text
-still arrives on the next conversation turn; this does not wake an idle agent.
+arrives at the next main-model boundary, including resumed turns. Bundled TUIs
+also wake an idle main agent, respecting user input, pauses and cancellation.
+Results are child data and supply no new user authorization. Consumption is
+acknowledged after committed completion; host status/detail reads never consume it.
 The dynamic subagents panel surfaces paused approvals and resumes the same job
 through the existing approval dialog. These are local in-memory jobs and are cancelled on shutdown;
 durable recovery and distributed workers are outside this capability.

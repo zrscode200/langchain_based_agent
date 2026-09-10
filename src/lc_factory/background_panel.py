@@ -23,7 +23,7 @@ _WAITING = {"needs_approval", "needs_input"}
 # A non-string key cannot collide with a foreground eval id from the stream.
 _BACKGROUND = object()
 _STATUS_LABELS = {
-    "running": "running", "needs_approval": "approval", "needs_input": "input",
+    "queued": "queued", "running": "running", "needs_approval": "approval", "needs_input": "input",
     "completed": "done", "failed": "failed", "timed_out": "timed out", "cancelled": "cancelled",
 }
 
@@ -265,7 +265,7 @@ def background_subagent_panel_class(base_class):
                 return
             background_visible = self._background_phase is not None and self._displayed_phase() is self._background_phase
             help_widget.display = background_visible and self.expanded
-            help_text = "↑↓ phase · ←→ task · Enter/click activity"
+            help_text = "↑↓ phase · ←→ task · Enter/click conversation"
             if self._background_truncated:
                 help_text += f" · first {_MAX_JOBS} tasks"
             self._update_cached("subagent-background-help", Content(help_text))
@@ -299,6 +299,8 @@ def background_subagent_panel_class(base_class):
                     icon, tint = glyphs.circle_empty, colors.muted
                 elif status == "running":
                     icon, tint = self._spinner.current_frame(), colors.warning
+                elif status == "queued":
+                    icon, tint = glyphs.circle_empty, colors.muted
                 else:
                     icon, tint = "?", colors.warning
                 selected = task_id == self._background_selected_id

@@ -14,7 +14,8 @@ async def test_inspection_is_owner_scoped_and_host_cannot_steer(monkeypatch):
     from lc_factory.upstream import WorkspaceConflictError
 
     calls = []
-    def inspect(owner, task_id):
+    def inspect(owner, task_id, *, transcript_page):
+        assert transcript_page == -1
         calls.append((owner, task_id))
         return {"task_id": task_id, "status": "completed", "result": "Reported result", "activity": [], "steering": []}
     tasks = SimpleNamespace(jobs={"own": SimpleNamespace(owner="owner"), "other": SimpleNamespace(owner="another")}, inspect=inspect)
