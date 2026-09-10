@@ -61,6 +61,27 @@ test('mode lookup failure cannot create a run with guessed consent', async () =>
   assert.equal((await call('run', 'POST', { text: 'Hello' })).status, 503);
   assert.equal(calls.some(c => c.path.endsWith('/runs/stream')), false);
 });
+test('a new conversation defaults to Manual when the store returns JSON null', async () => {
+  const { call, calls } = await setup({ '/store/items': () => Response.json(null) });
+  const mode = await call('mode');
+  assert.equal(mode.status, 200);
+  assert.deepEqual(await mode.json(), { mode: 'manual' });
+  assert.equal((await call('run', 'POST', { text: 'Hello' })).status, 200);
+  const payload = calls.find(c => c.path.endsWith('/runs/stream'))!.body;
+  assert.equal(payload.context.approval_mode, 'manual');
+  assert.equal(payload.context.auto_approve, false);
+  assert.equal(calls.some(c => c.path === '/store/items' && c.method === 'PUT'), false);
+});
+test('reading a saved mode preserves the user selection', async () => {
+  for (const mode of ['manual', 'auto', 'yolo']) {
+    const { call, calls } = await setup({ '/store/items': () => Response.json({ value: { mode } }) });
+    assert.deepEqual(await (await call('mode')).json(), { mode });
+    assert.equal((await call('run', 'POST', { text: 'Hello' })).status, 200);
+    const payload = calls.find(c => c.path.endsWith('/runs/stream'))!.body;
+    assert.equal(payload.context.approval_mode, mode);
+    assert.equal(payload.context.auto_approve, mode !== 'manual');
+  }
+});
 test('run cancellation uses POST and handles an empty successful response', async () => {
   const { call, calls } = await setup();
   assert.equal((await call('cancel', 'POST', { run_id: 'run' })).status, 200);

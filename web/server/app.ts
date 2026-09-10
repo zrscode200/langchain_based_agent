@@ -49,7 +49,12 @@ export function createApp(config: Config) {
   }
   const modeKey = (thread: string) => createHash('sha256').update(thread).digest('hex');
   async function getMode(thread: string) {
-    try { const data = await upJson(`/store/items?namespace=${encodeURIComponent('deepagents_code.approval_mode')}&key=${modeKey(thread)}`); return ['manual', 'auto', 'yolo'].includes(data.value?.mode) ? data.value.mode : 'manual'; }
+    try {
+      const data = await upJson(`/store/items?namespace=${encodeURIComponent('deepagents_code.approval_mode')}&key=${modeKey(thread)}`);
+      // The live store returns JSON null for a conversation with no saved mode.
+      const mode = data?.value?.mode;
+      return ['manual', 'auto', 'yolo'].includes(mode) ? mode : 'manual';
+    }
     catch (error) { if (error instanceof HttpError && error.status === 404) return 'manual'; throw error; }
   }
   async function api(request: Request) {
