@@ -108,8 +108,8 @@ export function createApp(config: Config) {
       throw new HttpError(400, 'Choose Manual, Auto, or YOLO.');
     }
     if (operation === 'background' && request.method === 'POST') {
-      if (!['list', 'inspect', 'cancel', 'resume'].includes(body.operation)) throw new HttpError(400, 'Unknown task operation.');
-      return json(await upJson(`/lc-factory/threads/${thread}/background`, 'POST', { workspace, operation: body.operation, task_id: body.task_id, transcript_page: body.transcript_page, responses: body.responses }));
+      if (!['list', 'inspect', 'conversation', 'message', 'cancel', 'resume'].includes(body.operation)) throw new HttpError(400, 'Unknown task operation.');
+      return json(await upJson(`/lc-factory/threads/${thread}/background`, 'POST', { workspace, operation: body.operation, task_id: body.task_id, transcript_page: body.transcript_page, before: body.before, after: body.after, message_id: body.message_id, offset: body.offset, revision: body.revision, responses: body.responses }));
     }
     if (operation === 'runs' && request.method === 'GET') {
       const [running, pending] = await Promise.all([upJson(prefix + '/runs?status=running'), upJson(prefix + '/runs?status=pending')]);

@@ -4,9 +4,14 @@ import path from 'node:path';
 import { artifact, catalog, files, project, snapshot, tasks, threads } from '../fixtures.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
-async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean; multipleApprovals?: boolean; failApproval?: boolean; reasoningStream?: boolean } = {}) {
+async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean; multipleApprovals?: boolean; failApproval?: boolean; reasoningStream?: boolean; childRequests?: boolean; structuredTasks?: boolean } = {}) {
   const calls: { url: string; body: any }[] = [];
   const rows = structuredClone(threads);
+  const taskRows = structuredClone(tasks) as any[];
+  if (options.childRequests) for (const [index, task] of taskRows.entries()) {
+    task.status = 'needs_approval'; task.result = undefined;
+    task.interrupts = [{ id: 'same-pause-id', value: { action_requests: [{ name: 'write_file', args: { file_path: `child-${index}.md`, content: '# Notes' } }], review_configs: [{ action_name: 'write_file', allowed_decisions: ['approve', 'reject'] }] } }];
+  }
   const current = structuredClone(options.empty ? { ...snapshot, values: { messages: [] }, interrupts: [] } : snapshot) as any;
   const currentCatalog = structuredClone(catalog);
   if (options.longContent) {
@@ -60,7 +65,23 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
       if (options.delayOldState && url.pathname.includes('conversation-1')) await new Promise(r => setTimeout(r, 450));
       result = url.pathname.includes('conversation-2') ? { values: { messages: [{ id: 'new', type: 'human', content: 'This belongs to the second conversation.' }] }, next: [], interrupts: [] } : current;
     }
-    else if (url.pathname.endsWith('/background')) result = body.operation === 'inspect' ? { task: { ...tasks[0], conversation: { text: 'Retained task transcript', page: 0, pages: 1, limited: false, notice: '' } } } : { tasks, enabled: true, pending_results: [] };
+    else if (url.pathname.endsWith('/background')) {
+      const task = taskRows.find(task => task.task_id === body.task_id) || taskRows[0];
+      if (body.operation === 'conversation') {
+        if (!options.structuredTasks) { await route.fulfill({ status: 422, json: { detail: 'Unknown operation' } }); return; }
+        const records = [
+          { id: 'assignment', type: 'human', content: 'Inspect the source', _transcript: { order: 0, revision: 1, truncated: false } },
+          { id: 'work', type: 'ai', content: 'Reading the relevant module.', additional_kwargs: { reasoning_content: 'I will check the implementation.' }, tool_calls: [{ id: 'child-read', name: 'read_file', args: { file_path: 'src/agent.py' } }], _transcript: { order: 1, revision: 2, truncated: false } },
+          { id: 'output', type: 'tool', tool_call_id: 'child-read', name: 'read_file', content: 'Module contents', status: 'success', _transcript: { order: 2, revision: 3, truncated: false } },
+          { id: 'final', type: 'ai', content: 'Completed task result.', additional_kwargs: { reasoning_content: 'Final reasoning remains available.' }, _transcript: { order: 3, revision: 4, truncated: false } },
+        ];
+        result = { task: { ...task, result: 'Completed task result.', status: 'completed', conversation_records: { version: 1, messages: body.after ? [] : records, cursor: 4, before: 0, notice: '', limited: false } } };
+      } else if (body.operation === 'inspect') result = { task: { ...task, conversation: { text: 'Retained task transcript', page: 0, pages: 1, limited: false, notice: '' } } };
+      else {
+        if (body.operation === 'resume') { task.status = 'queued'; task.interrupts = []; }
+        result = { tasks: taskRows, enabled: true, pending_results: [] };
+      }
+    }
     else if (url.pathname.endsWith('/catalog')) result = currentCatalog;
     else if (url.pathname.endsWith('/mode')) result = { mode: body.mode || 'manual' };
     else if (url.pathname.endsWith('/runs')) result = [];
@@ -151,6 +172,7 @@ test('navigation ignores late state, with project files and task inspection avai
   await page.getByRole('button', { name: 'Close file preview' }).click();
   await page.getByRole('button', { name: /^Background work/ }).click();
   await page.getByRole('button', { name: /Memory & persistence/ }).click();
+  await page.getByRole('button', { name: 'Retained text transcript', exact: true }).click();
   await expect(page.getByText('Retained task transcript')).toBeVisible();
 });
 test('desktop and mobile avoid horizontal overflow', async ({ page }) => {
@@ -415,4 +437,37 @@ test('widening the inspector with a file open keeps preview and chat within the 
   expect(preview.x).toBe(chat.x);
   expect(preview.x + preview.width).toBeLessThanOrEqual(panel.x);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(1280);
+});
+
+test('child approvals stay in main chat, preserve drafts and target one child at a time', async ({ page }) => {
+  const calls = await mount(page, { childRequests: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('Keep this draft');
+  const attention = page.getByRole('region', { name: 'Needs your attention' });
+  await attention.getByRole('button', { name: new RegExp(tasks[0].name) }).click();
+  await expect(attention.getByRole('button', { name: 'Approve this action', exact: true })).toBeVisible();
+  await attention.getByRole('button', { name: 'Approve this action', exact: true }).click();
+  await expect.poll(() => calls.filter(c => c.body.operation === 'resume').length).toBe(1);
+  expect(calls.find(c => c.body.operation === 'resume')!.body.task_id).toBe(tasks[0].task_id);
+  await expect(composer).toHaveValue('Keep this draft');
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await expect(page.locator('.inspector')).toHaveCount(0);
+  await expect(attention.getByRole('button', { name: 'Approve this action', exact: true })).toBeVisible();
+});
+
+test('subagent history uses shared chat rendering, shows the result once and expands for reading', async ({ page }) => {
+  await mount(page, { structuredTasks: true });
+  await page.getByRole('button', { name: /^Background work/ }).click();
+  await page.getByRole('button', { name: new RegExp(tasks[0].name) }).click();
+  const inspector = page.locator('.inspector');
+  await expect(inspector.getByText('Completed task result.', { exact: true })).toHaveCount(1);
+  await inspector.getByRole('button', { name: /Reasoning/ }).click();
+  await expect(inspector.getByText('Final reasoning remains available.', { exact: true })).toBeVisible();
+  await inspector.getByRole('button', { name: 'Work history', exact: true }).click();
+  await expect(inspector.getByText('Completed task result.', { exact: true })).toHaveCount(1);
+  await expect(inspector.getByText('Reading the relevant module.', { exact: true })).toBeVisible();
+  await inspector.getByRole('button', { name: 'Expand view', exact: true }).click();
+  await expect(page.locator('.workspace')).toHaveClass(/expanded-task/);
+  await inspector.getByRole('button', { name: 'Return to sidebar', exact: true }).click();
+  await expect(page.locator('.workspace')).not.toHaveClass(/expanded-task/);
 });

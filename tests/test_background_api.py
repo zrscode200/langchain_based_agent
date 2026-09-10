@@ -115,3 +115,37 @@ async def test_hook_inspection_omits_private_transport_payload(monkeypatch):
         "type": "hook_invocation", "event": "PostToolUse", "tool_name": "read_file"}
     assert transport.json()["tasks"][0]["interrupts"][0]["value"] == payload
     assert not tasks.jobs["child"].acknowledged and not tasks.pending("owner")
+
+
+async def test_structured_host_routes_preserve_owner_boundary_and_do_not_consume_results(monkeypatch):
+    from langchain_core.messages import AIMessage
+    from lc_factory.background import BackgroundTasks, Job
+    import lc_factory.background_api as api
+    import lc_factory.server_graph as server
+    tasks = BackgroundTasks()
+    own, other = Job('owner', 'child', status='completed'), Job('other', 'other', status='completed')
+    tasks.jobs.update(own=own, other=other)
+    own.transcript.capture([AIMessage('Retained result', id='answer')])
+    async def require(owner, descriptor): return 'bound'
+    async def get_tasks(binding): return tasks
+    monkeypatch.setattr(api, 'require_thread_workspace', require)
+    monkeypatch.setattr(server, 'background_for_workspace', get_tasks)
+    app = Starlette(); install_background_routes(app)
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            path = '/lc-factory/threads/owner/background'
+            body = {'workspace': {}, 'operation': 'conversation', 'task_id': 'own'}
+            response = await client.post(path, json=body)
+            assert response.status_code == 200
+            records = response.json()['task']['conversation_records']
+            message = records['messages'][0]
+            full = {**body, 'operation': 'message', 'message_id': message['id'], 'revision': message['_transcript']['revision']}
+            assert (await client.post(path, json=full)).status_code == 200
+            for operation in ('message', 'conversation'):
+                assert (await client.post(path, json={**full, 'operation': operation, 'task_id': 'other'})).status_code == 404
+            assert (await client.post(path, json={**body, 'after': True})).status_code == 422
+            assert (await client.post(path, json={**full, 'revision': 999})).status_code == 422
+        assert not own.acknowledged
+        assert 'conversation_records' not in tasks.list('owner')[0]
+    finally:
+        own.transcript.close(); other.transcript.close()

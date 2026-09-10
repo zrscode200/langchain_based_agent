@@ -167,3 +167,15 @@ test('title storage failure does not turn an accepted run into an error', async 
   assert.match(await response.text(), /run_id/);
   assert.equal((await call('')).status, 200);
 });
+
+test('structured child reads and approvals use the owned workspace without creating a parent run', async () => {
+  const { call, calls } = await setup();
+  for (const operation of ['conversation', 'message', 'resume']) {
+    const response = await call('background', 'POST', { operation, task_id: 'child', after: 12, message_id: 'message', revision: 4, offset: 24000, workspace: { cwd: '/wrong' }, responses: { pause: { decisions: [{ type: 'approve' }] } } });
+    assert.equal(response.status, 200);
+    const body = calls.at(-1)!.body;
+    assert.deepEqual(body.workspace, workspace); assert.equal(body.task_id, 'child');
+    assert.equal(body.operation, operation); assert.equal(body.revision, 4); assert.equal(body.offset, 24000);
+  }
+  assert.equal(calls.some(call => call.path.includes('/runs/')), false);
+});

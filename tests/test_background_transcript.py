@@ -206,3 +206,69 @@ async def test_owner_change_cannot_restore_old_conversation_by_toggling_view():
         body = str(screen.query_one('#activity-body', Static).render())
         assert 'Conversation changed' in body and 'PREVIOUS_OWNER_CHAT' not in body
         assert all(button.disabled for button in screen.query('#conversation-navigation Button'))
+
+
+def test_structured_messages_replace_revisions_and_keep_call_identity():
+    transcript = ChildTranscript()
+    try:
+        transcript.capture([HumanMessage('Assignment', id='user'), AIMessage('Working', id='ai',
+            tool_calls=[{'name': 'read_file', 'id': 'read-one', 'args': {'path': 'notes.md'}, 'type': 'tool_call'}])])
+        initial = transcript.structured()
+        assert [m['type'] for m in initial['messages']] == ['human', 'ai']
+        transcript.capture([ToolMessage('Result', tool_call_id='read-one', name='read_file')])
+        first = transcript.structured(after=initial['cursor'])
+        transcript.capture([ToolMessage('Result', id='assigned-id', tool_call_id='read-one', name='read_file')])
+        assert transcript.structured(after=first['cursor'])['messages'] == []
+        transcript.capture([ToolMessage('Revised', id='assigned-id', tool_call_id='read-one', name='read_file', status='error', artifact={'exit_code': 2, 'private': 'SECRET'})])
+        revised = transcript.structured(after=first['cursor'])['messages'][0]
+        assert revised['id'] == first['messages'][0]['id']
+        assert revised['_transcript']['order'] == first['messages'][0]['_transcript']['order']
+        assert revised['content'] == 'Revised' and revised['artifact'] == {'exit_code': 2}
+        assert 'SECRET' not in str(transcript.structured())
+    finally: transcript.close()
+    assert transcript.records_file.closed
+
+
+def test_structured_history_and_change_cursors_have_no_gaps():
+    transcript = ChildTranscript()
+    try:
+        transcript.capture([AIMessage(f'Message {i}', id=str(i)) for i in range(40)])
+        latest = transcript.structured()
+        assert len(latest['messages']) == 12 and latest['before'] == 28
+        middle = transcript.structured(before=latest['before'])
+        assert [m['_transcript']['order'] for m in middle['messages']] == list(range(16, 28))
+        cursor = latest['cursor']
+        transcript.capture([AIMessage('Changed first', id='0'), *[AIMessage(f'New {i}', id=f'new{i}') for i in range(15)]])
+        first = transcript.structured(after=cursor)
+        second = transcript.structured(after=first['cursor'])
+        assert len(first['messages']) == 12 and len(second['messages']) == 4
+        assert first['messages'][0]['_transcript']['order'] == 0
+        assert transcript.structured(after=second['cursor'])['messages'] == []
+        for kwargs in ({'before': True}, {'after': -1}, {'after': '0'}, {'before': 1, 'after': 1}, {'after': 99999}):
+            with pytest.raises(ValueError): transcript.structured(**kwargs)
+    finally: transcript.close()
+
+
+def test_structured_large_unicode_message_has_bounded_preview_and_complete_pages():
+    transcript = ChildTranscript()
+    try:
+        message = AIMessage(content=[{'type': 'reasoning', 'reasoning': 'Known thought', 'encrypted_content': 'PRIVATE_OPAQUE'},
+            {'type': 'text', 'text': '🙂全文' * 25000}], additional_kwargs={'secret': 'PRIVATE_TRANSPORT'}, id='long')
+        transcript.capture([message])
+        preview = transcript.structured()['messages'][0]
+        assert preview['_transcript']['truncated'] and len(preview['content']) < 6100
+        assert preview['additional_kwargs']['reasoning_content'] == 'Known thought'
+        offset, text = 0, ''
+        while True:
+            page = transcript.record_page(preview['id'], offset=offset, revision=preview['_transcript']['revision'])
+            text += page['text']
+            if page['next'] == page['total']: break
+            offset = page['next']
+        import json
+        assert json.loads(text)['content'] == '🙂全文' * 25000
+        assert 'PRIVATE_' not in text
+        assert transcript.size + transcript.records_size <= transcript.max_bytes
+        transcript.capture([message.model_copy(update={'content': 'Changed'})])
+        with pytest.raises(ValueError, match='changed'):
+            transcript.record_page(preview['id'], revision=preview['_transcript']['revision'])
+    finally: transcript.close()

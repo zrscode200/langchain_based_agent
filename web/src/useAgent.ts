@@ -39,7 +39,7 @@ export function useAgent() {
 
   const request = useCallback(async (route: string, method = 'GET', body?: unknown, signal?: AbortSignal, headers: Record<string, string> = {}) => {
     const result = await fetch('/api' + route, { method, headers: { 'x-workspace-token': token.current, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers }, body: body === undefined ? undefined : JSON.stringify(body), signal });
-    if (!result.ok) { const data = await result.json().catch(() => ({})); throw new Error(data.detail || `Request failed (${result.status}).`); }
+    if (!result.ok) { const data = await result.json().catch(() => ({})); throw Object.assign(new Error(data.detail || `Request failed (${result.status}).`), { status: result.status }); }
     return result;
   }, []);
   const data = useCallback(async (route: string, method = 'GET', body?: unknown) => (await request(route, method, body)).json(), [request]);

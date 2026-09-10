@@ -21,10 +21,21 @@ async def background(request):
             if operation != "list":
                 return JSONResponse({"detail": "Background tasks are unavailable"}, status_code=409)
             return JSONResponse({"tasks": [], "enabled": False})
-        if operation in ("inspect", "resume", "cancel"):
+        if operation in ("inspect", "conversation", "message", "resume", "cancel"):
             task_id = body.get("task_id")
             if not isinstance(task_id, str) or task_id not in tasks.jobs or tasks.jobs[task_id].owner != owner:
                 return JSONResponse({"detail": "Unknown task for this conversation"}, status_code=404)
+            if operation == "conversation":
+                task = tasks.inspect(owner, task_id)
+                task["conversation_records"] = tasks.jobs[task_id].transcript.structured(
+                    before=body.get("before"), after=body.get("after"))
+                return JSONResponse({"task": task, "enabled": True})
+            if operation == "message":
+                identity = body.get("message_id")
+                if not isinstance(identity, str):
+                    raise ValueError("Invalid message")
+                return JSONResponse(tasks.jobs[task_id].transcript.record_page(
+                    identity, offset=body.get("offset", 0), revision=body.get("revision")))
             if operation == "inspect":
                 return JSONResponse({"task": tasks.inspect(owner, task_id,
                     transcript_page=body.get("transcript_page", -1)), "enabled": True})

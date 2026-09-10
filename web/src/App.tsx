@@ -3,6 +3,10 @@ import { ArrowUp, BookOpen, Bot, Check, ChevronDown, ChevronLeft, ChevronRight, 
 import { ArtifactView, Files, IconButton, Mark, Modal, Prose, type Artifact } from './components.tsx';
 import { Approvals } from './approvals.tsx';
 import { Conversation } from './conversation.tsx';
+import { Attention } from './attention.tsx';
+import { TasksPanel } from './tasks-panel.tsx';
+import { useTaskRequests } from './useTaskRequests.ts';
+import './tasks.css';
 import { InspectorResizeHandle, useInspectorSize } from './inspector-resize.tsx';
 import { useAgent, type Agent } from './useAgent.ts';
 import { type Json, type Task } from './protocol.ts';
@@ -14,46 +18,6 @@ type Panel = 'tasks' | 'files' | 'agent' | null;
 const labels: Record<string, string> = { queued: 'Queued', running: 'Running', needs_approval: 'Needs approval', needs_input: 'Needs input', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', timed_out: 'Timed out' };
 const activeStatuses = ['running', 'queued', 'needs_approval', 'needs_input'];
 
-function TasksPanel({ agent, compose }: { agent: Agent; compose: (text: string) => void }) {
-  const [selected, setSelected] = useState('');
-  const [detail, setDetail] = useState<Task | null>(null);
-  const [page, setPage] = useState(-1);
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [revision, setRevision] = useState(0);
-  useEffect(() => { setSelected(''); setDetail(null); setError(''); }, [agent.threadId]);
-  useEffect(() => {
-    if (!selected) return;
-    let active = true, loading = false;
-    const load = () => {
-      if (loading) return; loading = true;
-      agent.data(agent.base + '/background', 'POST', { operation: 'inspect', task_id: selected, transcript_page: page }).then(r => { if (active) { setDetail(r.task); setError(''); } }).catch(e => { if (active) setError(e.message); }).finally(() => { loading = false; });
-    };
-    load(); const timer = setInterval(load, 3500);
-    return () => { active = false; clearInterval(timer); };
-  }, [selected, page, agent.base, agent.data, revision]);
-  const taskAction = async (operation: string, responses?: Json) => {
-    setBusy(true);
-    try { await agent.data(agent.base + '/background', 'POST', { operation, task_id: selected, responses }); setRevision(x => x + 1); await agent.refresh(); }
-    finally { setBusy(false); }
-  };
-  if (selected) return <div className="task-detail"><button className="text-button back" onClick={() => { setSelected(''); setDetail(null); }}><ChevronLeft size={15} />All tasks</button>{error && <p className="inline-error" role="alert">{error}</p>}{detail ? <><div className="task-detail-heading"><span className={'status-label ' + detail.status}><span className={'status-dot ' + detail.status} />{labels[detail.status]}</span><h3>{detail.name}</h3><p>{detail.description}</p><code className="task-id">{detail.task_id}</code></div>
-      {activeStatuses.includes(detail.status) && <div className="task-controls"><button className="button" disabled={busy} onClick={() => void taskAction('cancel').catch(e => setError(e.message))}><Square size={12} />Cancel task</button>{detail.steerable && <button className="button" onClick={() => compose(`Please guide background task ${detail.task_id}: `)}>Guide via agent</button>}</div>}
-      <Approvals interrupts={detail.interrupts || []} submit={responses => taskAction('resume', responses)} />
-      {detail.result && <div className="task-result"><span className="eyebrow">Result</span><Prose>{detail.result}</Prose></div>}
-      {detail.steering?.length ? <details className="tool-card"><summary>Guidance delivery</summary>{detail.steering.map((s: Json) => <p key={s.message_id}>{s.message} · {s.delivery_outcome || s.status}</p>)}</details> : null}
-      {detail.activity?.length ? <details className="tool-card"><summary>Recent activity · {detail.activity.length}</summary><div className="activity-feed">{detail.activity.map((a: Json) => <div key={a.sequence}><span className={'status-dot ' + (a.status || 'completed')} /><span>{a.kind === 'finding' ? a.text : `${a.tool_name} · ${a.status}`}</span></div>)}</div></details> : null}
-      <div className="section-heading"><h3>Task conversation</h3><div className="pagination"><IconButton label="Previous transcript page" disabled={!detail.conversation || detail.conversation.page <= 0} onClick={() => setPage((detail.conversation?.page || 0) - 1)}><ChevronLeft size={14} /></IconButton><span>{detail.conversation?.pages ? `${(detail.conversation.page || 0) + 1} / ${detail.conversation.pages}` : '0 / 0'}</span><IconButton label="Next transcript page" disabled={!detail.conversation || detail.conversation.page >= detail.conversation.pages - 1} onClick={() => setPage((detail.conversation?.page || 0) + 1)}><ChevronRight size={14} /></IconButton></div></div>
-      {detail.conversation?.notice && <p className="scope-note">{detail.conversation.notice}</p>}<pre className="transcript">{detail.conversation?.text || 'No conversation output yet.'}</pre>
-    </> : <div className="panel-empty"><LoaderCircle className="spin" />Loading task</div>}</div>;
-  const active = agent.tasks.filter(t => activeStatuses.includes(t.status));
-  const done = agent.tasks.filter(t => !activeStatuses.includes(t.status));
-  return <div className="tasks-panel"><div className="panel-intro"><p>Follow work delegated to background agents. You can keep chatting while these tasks run.</p></div>
-    {agent.pendingResults.length > 0 && <div className="results-ready"><Sparkles size={16} /><p>{agent.pendingResults.length} result{agent.pendingResults.length === 1 ? '' : 's'} ready for the agent’s next turn.</p><button className="text-button" onClick={() => compose('Review the completed background work and summarize the results.')}>Review with agent <ChevronRight size={13} /></button></div>}
-    {!agent.tasks.length ? <div className="panel-empty tall"><Workflow size={34} /><h3>Room for parallel work</h3><p>Delegated tasks appear here when the agent starts background work.</p></div> : <>{[[active, 'In progress'], [done, 'Finished']].map(([items, heading]) => (items as Task[]).length > 0 && <section className="task-group" key={heading as string}><span className="eyebrow">{heading as string} · {(items as Task[]).length}</span>{(items as Task[]).map(task => <button key={task.task_id} className="task-row" onClick={() => { setSelected(task.task_id); setPage(-1); setDetail(null); }}><div className="task-row-top"><span className={'status-dot ' + task.status} /><strong>{task.name}</strong><ChevronRight size={14} /></div><p>{task.description}</p><span className={'status-label ' + task.status}>{labels[task.status]}</span></button>)}</section>)}</>}
-    <p className="scope-note">Background tasks and transcripts are retained by the running server. Restart retention depends on the harness configuration.</p>
-  </div>;
-}
 
 function AgentPanel({ agent, chooseSkill, open, tab, setTab }: { tab: string; setTab: (tab: string) => void; agent: Agent; chooseSkill: (path: string) => void; open: (file: Artifact) => void }) {
   const [filter, setFilter] = useState('');
@@ -72,6 +36,11 @@ function AgentPanel({ agent, chooseSkill, open, tab, setTab }: { tab: string; se
 
 export default function App() {
   const agent = useAgent();
+  const taskRequests = useTaskRequests(agent);
+  const [selectedTask, setSelectedTask] = useState('');
+  const [expandedTask, setExpandedTask] = useState(false);
+  const [attentionTask, setAttentionTask] = useState<string | null>(null);
+  const attention = useRef<HTMLDivElement>(null);
   const [panel, setPanel] = useState<Panel>(null);
   const [agentTab, setAgentTab] = useState('skills');
   const [sidebar, setSidebar] = useState(() => window.innerWidth > 700);
@@ -132,7 +101,7 @@ export default function App() {
     finally { renameBusy.current = false; setRenaming(false); }
   }
   useEffect(() => {
-    setAtBottom(true); setArtifact(null); setSkill(''); setModel(''); setRename(null); setRenameError(''); setModal(null);
+    setAtBottom(true); setSelectedTask(''); setExpandedTask(false); setAttentionTask(null); setArtifact(null); setSkill(''); setModel(''); setRename(null); setRenameError(''); setModal(null);
     setCommandError(''); setLiteralDraft(null); setDismissedFor(null); setCommandIndex(0);
     draftKey.current = `lc.draft.${agent.projectId}.${agent.threadId}`;
     setDraft(localStorage.getItem(draftKey.current) || '');
@@ -207,7 +176,7 @@ export default function App() {
     {renameError && <span className="inline-error" role="alert">{renameError}</span>}
   </form>;
 
-  return <div className={'workspace ' + (sidebar ? '' : 'sidebar-hidden') + (panel ? ' has-panel' : '') + (inspectorSize.dragging ? ' resizing-panel' : '') + (panel && artifact && inspectorSize.overlayArtifact ? ' compact-artifact' : '')} style={{ '--inspector-width': `${inspectorSize.width}px` } as CSSProperties}>
+  return <div className={'workspace ' + (sidebar ? '' : 'sidebar-hidden') + (panel ? ' has-panel' : '') + (inspectorSize.dragging ? ' resizing-panel' : '') + (panel && artifact && inspectorSize.overlayArtifact ? ' compact-artifact' : '') + (panel === 'tasks' && expandedTask ? ' expanded-task' : '')} style={{ '--inspector-width': `${inspectorSize.width}px` } as CSSProperties}>
     <aside className="sidebar" aria-label="Project and conversations">
       <div className="brand"><span className="brand-mark"><Mark /></span><div><strong>Agent Workspace</strong><span>LANGCHAIN BASED AGENT</span></div><IconButton label="Hide sidebar" onClick={() => setSidebar(false)}><PanelLeftClose size={17} /></IconButton></div>
       <div className="project-switcher"><span className="project-icon"><Layers size={19} /></span><label><span>WORKSPACE</span><select aria-label="Project" value={agent.projectId} onChange={e => agent.setProjectId(e.target.value)}>{agent.projects.map(p => <option value={p.id} key={p.id}>{p.name}</option>)}</select></label><ChevronDown size={14} /></div>
@@ -230,12 +199,13 @@ export default function App() {
       </header>
       <div className="working-surface"><section className="conversation" aria-label="Conversation">
         <div className="conversation-scroll" ref={scroll} onWheel={event => { if (event.deltaY < 0) setAtBottom(false); }} onClickCapture={event => { if ((event.target as HTMLElement).closest('.disclosure-toggle')) setAtBottom(false); }} onScroll={() => { const el = scroll.current!; setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 24); }}>
-          {agent.messages.length || agent.interrupts.length ? <Conversation key={agent.projectId + ':' + agent.threadId} scope={agent.threadId} messages={agent.messages} interrupts={agent.interrupts} running={isBusy} disconnected={agent.status === 'disconnected'} receipts={agent.receipts} submit={async responses => { const sent = await agent.run(undefined, undefined, responses, model || undefined); if (!sent) throw new Error('Decision was not accepted. Refresh and review the current request.'); }} /> : <div className="welcome"><div className="welcome-label"><span className="status-dot completed" />YOUR PROJECT, IN FOCUS</div><div className="welcome-mark"><Mark /></div><h1>What will we<br /><span>work on today?</span></h1><p>{agent.threadId ? <>Ask a question or describe your next task.<br />Type <kbd>/</kbd> for skills and commands.</> : <>Choose New conversation in the sidebar to begin.</>}</p></div>}
+          {agent.messages.length || agent.interrupts.length ? <Conversation key={agent.projectId + ':' + agent.threadId} scope={agent.threadId} messages={agent.messages} interrupts={agent.interrupts} running={isBusy} disconnected={agent.status === 'disconnected'} receipts={agent.receipts} showRequests={false} submit={async responses => { const sent = await agent.run(undefined, undefined, responses, model || undefined); if (!sent) throw new Error('Decision was not accepted. Refresh and review the current request.'); }} /> : <div className="welcome"><div className="welcome-label"><span className="status-dot completed" />YOUR PROJECT, IN FOCUS</div><div className="welcome-mark"><Mark /></div><h1>What will we<br /><span>work on today?</span></h1><p>{agent.threadId ? <>Ask a question or describe your next task.<br />Type <kbd>/</kbd> for skills and commands.</> : <>Choose New conversation in the sidebar to begin.</>}</p></div>}
           <div className="messages conversation-status">
             {todo.length > 0 && <details className="plan conversation-plan"><summary>Current plan · {todo.filter(t => t.status === 'completed').length}/{todo.length}</summary>{todo.map((item, i) => <div className={'todo ' + item.status} key={i}>{item.status === 'completed' ? <Check size={15} /> : item.status === 'in_progress' ? <LoaderCircle size={15} className="spin" /> : <span className="todo-ring" />}<span>{item.content}</span></div>)}</details>}
           </div>
         </div>
         <div className="composer-region">
+          <div ref={attention}><Attention key={agent.base} requests={taskRequests} interrupts={agent.interrupts} running={isBusy} atBottom={atBottom} selected={attentionTask} select={setAttentionTask} inspect={task => { setSelectedTask(task.task_id); setPanel('tasks'); }} submitMain={async responses => { if (!await agent.run(undefined, undefined, responses, model || undefined)) throw new Error('Decision was not accepted. Refresh and review this request.'); }} /></div>
           {!atBottom && <button className="jump-button" onClick={() => { setAtBottom(true); scroll.current?.scrollTo({ top: scroll.current.scrollHeight, behavior: 'smooth' }); }}>{isBusy ? 'New activity' : 'Jump to latest'} <ChevronDown size={14} /></button>}
           {!!agent.state.next?.length && !agent.interrupts.length && !isBusy && <div className="notice-banner"><span>This turn was interrupted. Continue from its saved checkpoint when you’re ready.</span><button className="text-button" onClick={() => void agent.run()}>Continue turn</button></div>}
           {agent.error && <div className="error-banner" role="alert"><CircleHelp size={17} /><span>{agent.error}</span><button onClick={() => void agent.reconnect()}>Reconnect</button><IconButton label="Dismiss error" onClick={() => agent.setError('')}><X size={14} /></IconButton></div>}
@@ -268,7 +238,7 @@ export default function App() {
         </div>
       </section>{artifact && <ArtifactView key={artifact.path} file={artifact} close={() => setArtifact(null)} reference={() => compose(draft + `${draft ? '\n' : ''}Please refer to the project file \`${artifact.path}\`. `)} />}</div>
     </main>
-    {panel && <aside id="workspace-inspector" className="inspector" aria-label={panel + ' panel'}><InspectorResizeHandle sizing={inspectorSize} /><div className="inspector-heading"><div>{panel === 'tasks' ? <Workflow size={18} /> : panel === 'agent' ? <Bot size={18} /> : <FolderOpen size={18} />}<h2>{panel === 'tasks' ? 'Background work' : panel === 'agent' ? 'Agent definition' : 'Project files'}</h2></div><IconButton label="Close inspector" onClick={() => setPanel(null)}><X size={17} /></IconButton></div><div className="inspector-body">{panel === 'tasks' ? <TasksPanel agent={agent} compose={compose} /> : panel === 'agent' ? <AgentPanel tab={agentTab} setTab={setAgentTab} agent={agent} chooseSkill={chooseSkill} open={setArtifact} /> : <Files key={agent.projectId} agent={agent} open={setArtifact} />}</div></aside>}
+    {panel && <aside id="workspace-inspector" className="inspector" aria-label={panel + ' panel'}><InspectorResizeHandle sizing={inspectorSize} /><div className="inspector-heading"><div>{panel === 'tasks' ? <Workflow size={18} /> : panel === 'agent' ? <Bot size={18} /> : <FolderOpen size={18} />}<h2>{panel === 'tasks' ? 'Background work' : panel === 'agent' ? 'Agent definition' : 'Project files'}</h2></div><IconButton label="Close inspector" onClick={() => setPanel(null)}><X size={17} /></IconButton></div><div className="inspector-body">{panel === 'tasks' ? <TasksPanel agent={agent} compose={text => { compose(text); if (window.innerWidth <= 1000) setPanel(null); }} selected={selectedTask} setSelected={setSelectedTask} requests={taskRequests} expanded={expandedTask} setExpanded={setExpandedTask} review={id => { setAttentionTask(id); setExpandedTask(false); if (window.innerWidth <= 1000) setPanel(null); requestAnimationFrame(() => attention.current?.querySelector<HTMLButtonElement>('.attention-heading button')?.focus()); }} /> : panel === 'agent' ? <AgentPanel tab={agentTab} setTab={setAgentTab} agent={agent} chooseSkill={chooseSkill} open={setArtifact} /> : <Files key={agent.projectId} agent={agent} open={setArtifact} />}</div></aside>}
     {modal === 'search' && <Modal title="Find a conversation" close={() => setModal(null)}><div className="command-search"><Search size={19} /><input autoFocus aria-label="Search conversations" placeholder="Search by conversation title…" value={search} onChange={e => setSearch(e.target.value)} /><kbd>ESC</kbd></div><div className="command-results">{agent.threads.filter(t => conversationTitle(t).toLowerCase().includes(search.toLowerCase())).map(t => <button key={t.thread_id} onClick={() => { agent.selectThread(t.thread_id); setModal(null); }}><MessageSquare size={16} /><span>{conversationTitle(t)}</span>{t.thread_id === agent.threadId && <Check size={15} />}</button>)}</div><div className="command-footer"><Command size={13} /> K to open · Escape to close</div></Modal>}
     {modal === 'settings' && <Modal title="Session settings" close={() => setModal(null)}><div className="settings-body"><span className="eyebrow">Model</span><label className="field-label">Model for the next turn<input placeholder={agent.state.values._model_spec || agent.catalog.model || 'Use the server default'} value={model} onChange={e => setModel(e.target.value)} /></label><p className="field-hint">Use provider:model. Credentials and model policy stay on the backend. The effective model appears in Agent definition → Context after a successful turn.</p><span className="eyebrow">Tool approvals</span><div className="mode-options">{([['manual', 'Ask first', 'Review actions yourself.'], ['auto', 'Auto review', 'The configured classifier reviews actions.'], ['yolo', 'YOLO', 'Approve actions automatically within server policy.']] as const).map(([value, name, description]) => <button disabled={!agent.threadId} className={agent.mode === value ? 'selected' : ''} key={value} onClick={() => void agent.changeMode(value)}><span className="radio">{agent.mode === value && <i />}</span><div><strong>{name}</strong><p>{description}</p></div></button>)}</div><p className="field-hint">A mode change also applies to this conversation’s background agents at their next approval boundary.</p><dl className="settings-meta"><dt>Backend</dt><dd>{agent.backend}</dd><dt>Workspace</dt><dd>{agent.project?.path}</dd></dl></div></Modal>}
     {modal === 'rename' && <Modal title="Rename conversation" close={closeRename}>{titleEditor}</Modal>}

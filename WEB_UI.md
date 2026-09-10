@@ -79,8 +79,15 @@ local launcher.
   On phones the panel uses the full screen width.
 - **Background work** shows delegated jobs, results and pending input. The main
   agent’s current plan appears within the conversation.
-  Select a task for its retained transcript, tool activity and cancellation.
+  Select a task for its organized conversation, grouped tools, quiet reasoning,
+  completed result and cancellation. **Expand view** gives longer investigations
+  more room; **Load earlier messages** preserves the reading position.
   **Guide via agent** prepares a message to the main agent; review and send it.
+- **Needs your attention**, above the main composer, collects main-agent and
+  subagent approvals and questions. Each request names its agent. Review one task
+  at a time; a subagent waiting for input does not block an otherwise available
+  main composer. The task sidebar links to these controls instead of duplicating
+  them. Child responses go directly to that task’s exact current pause.
 - Real approval requests display the action and arguments. Approve or reject
   a single action directly; select each decision and submit for multiple actions.
   Questions support text, single choice, multiple selections,
@@ -170,6 +177,13 @@ factory configuration. A listed conversation is not a promise of durable
 cross-restart indexing.
 
 Background transcripts are process-retained and capped/paged by the harness.
+The text and structured projections share the 64 MiB per-task spool budget.
+Structured messages preserve stable identities and revisions, page by message,
+and expose bounded previews with a paged full-message view for large content.
+The old text API remains available for the TUI. Older running backends use the
+labelled text-transcript fallback; restart activation applies to newly captured
+tasks. Restarting the backend clears its retained background tasks, so finish
+and preserve any needed work first. Frontend-only refresh does not clear them.
 The viewer displays its retention notices. Browser drafts use local storage on
 this machine; conversation export is an explicit JSON download.
 
