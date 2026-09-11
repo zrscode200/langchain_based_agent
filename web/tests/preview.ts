@@ -6,7 +6,7 @@ import { project, threads, snapshot, tasks, catalog, files, artifact } from './f
 const root = path.resolve(import.meta.dirname, '..');
 let html = await readFile(path.join(root, 'dist/index.html'), 'utf8');
 const js = html.match(/src="\.\/(assets\/[^\"]+\.js)"/)![1];
-const css = html.match(/href="\.\/(assets\/[^\"]+\.css)"/)![1];
+const stylesheets = [...html.matchAll(/<link rel="stylesheet"[^>]+href="\.\/([^\"]+\.css)"[^>]*>/g)];
 const fixture = JSON.stringify({ project, threads, snapshot, tasks, catalog, files, artifact }).replaceAll('<', '\\u003c');
 const mock = `const fixture=${fixture};
 localStorage.removeItem('lc.workspace.thread.sample');
@@ -25,7 +25,9 @@ window.fetch=async(input,init={})=>{
  else if(p.endsWith('/run'))return new Response(JSON.stringify({detail:'This is a static preview. Start the local backend to run the agent.'}),{status:503,headers:{'content-type':'application/json'}});
  return Response.json(data);
 };`;
-html = html.replace(/<script type="module"[^>]+><\/script>/, '').replace(/<link rel="stylesheet"[^>]+>/, `<style>${await readFile(path.join(root, 'dist', css), 'utf8')}</style>`);
+html = html.replace(/<script type="module"[^>]+><\/script>/, '');
+for (const stylesheet of stylesheets) html = html.replace(stylesheet[0], `<style>${await readFile(path.join(root, 'dist', stylesheet[1]), 'utf8')}</style>`);
+html = html.replace(/<script src="\.\/theme-init.js"><\/script>/, `<script>${await readFile(path.join(root, 'dist/theme-init.js'), 'utf8')}</script>`);
 html = html.replace('</body>', `<div style="position:fixed;right:12px;bottom:3px;z-index:100;font:9px system-ui;color:#798b80;background:#f2f7ef;padding:2px 6px;border-radius:3px">STATIC PREVIEW · SAMPLE DATA</div><script>${mock.replaceAll('</script', '<\\/script')}</script><script type="module">${(await readFile(path.join(root, 'dist', js), 'utf8')).replaceAll('</script', '<\\/script')}</script></body>`);
 await mkdir(path.join(root, 'test-results'), { recursive: true });
 await writeFile(path.join(root, 'test-results/preview.html'), html);

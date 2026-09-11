@@ -56,7 +56,7 @@ export function Files({ agent, open }: { agent: Agent; open: (file: Artifact) =>
 }
 export function ArtifactView({ file, close, reference }: { file: Artifact; close: () => void; reference: () => void }) {
   const [source, setSource] = useState(false);
-  const html = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><style>body{font:15px system-ui;padding:20px;color:#26313a}img{max-width:100%}</style>${file.text}`;
+  const html = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'"><style>html{color-scheme:light;background:#fff}body{font:15px system-ui;padding:20px;color:#26313a}img{max-width:100%}</style>${file.text}`;
   return <section className="artifact" aria-label="File preview"><div className="artifact-toolbar"><FileText size={16} /><strong title={file.path}>{file.path}</strong><span>{Math.ceil(file.size / 1024)} KB</span><IconButton label="Close file preview" onClick={close}><X size={16} /></IconButton></div><div className="artifact-actions"><div className="segmented"><button className={!source ? 'active' : ''} onClick={() => setSource(false)}>Preview</button><button className={source ? 'active' : ''} onClick={() => setSource(true)}>Source</button></div><button className="text-button" onClick={reference}>Reference in chat</button><CopyButton text={file.text} /></div>
     <div className="artifact-content">{source || file.kind === 'code' ? <pre className="source-code">{file.text}</pre> : file.kind === 'html' ? <iframe title={file.path} sandbox="" referrerPolicy="no-referrer" srcDoc={html} /> : <Prose>{file.text}</Prose>}</div>
   </section>;

@@ -190,7 +190,7 @@ test('slash commands open controls, unknown commands stay local and literal text
   const composer = page.getByRole('combobox', { name: 'Message the agent' });
   await composer.fill('/settings');
   await composer.press('Enter');
-  await expect(page.getByRole('dialog', { name: 'Session settings' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
   await page.keyboard.press('Escape');
   await composer.fill('/unsupported argument');
@@ -470,4 +470,32 @@ test('subagent history uses shared chat rendering, shows the result once and exp
   await expect(page.locator('.workspace')).toHaveClass(/expanded-task/);
   await inspector.getByRole('button', { name: 'Return to sidebar', exact: true }).click();
   await expect(page.locator('.workspace')).not.toHaveClass(/expanded-task/);
+});
+
+test('appearance previews switch all surfaces, preserve drafts and persist across reload', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  const calls = await mount(page, { approval: true, childRequests: true, structuredTasks: true });
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('Keep this draft while changing appearance.');
+  await page.getByRole('button', { name: 'Model and approval settings' }).click();
+  for (const [label, value] of [['Studio Light', 'studio'], ['Graphite', 'graphite'], ['Midnight', 'midnight'], ['Paper', 'paper']]) {
+    await page.getByText(label, { exact: true }).click();
+    await expect(page.getByRole('radio', { name: new RegExp(label) })).toBeChecked();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', value);
+    await expect(composer).toHaveValue('Keep this draft while changing appearance.');
+    await page.screenshot({ path: path.join(root, `test-results/theme-${value}.png`) });
+  }
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'paper');
+  await expect(composer).toHaveValue('Keep this draft while changing appearance.');
+  await page.getByRole('button', { name: 'Model and approval settings' }).click();
+  await page.getByRole('radio', { name: /^System/ }).check();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'studio');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'graphite');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const modal = page.getByRole('dialog', { name: 'Settings' });
+  await expect(modal).toBeVisible();
+  expect(await modal.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
 });

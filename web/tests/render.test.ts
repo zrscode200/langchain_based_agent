@@ -21,4 +21,5 @@ test('Markdown and tool text cannot create executable HTML or fetch external ima
 test('HTML preview uses an opaque sandbox and a restrictive resource policy', () => {
   const html = renderToStaticMarkup(createElement(ArtifactView, { file: { path: 'page.html', text: '<script>bad()</script>', kind: 'html', size: 20 }, close: () => {}, reference: () => {} }));
   assert.match(html, /sandbox=""/); assert.match(html, /default-src &#x27;none&#x27;/); assert.doesNotMatch(html, /allow-scripts|allow-same-origin/);
+  assert.match(html, /html\{color-scheme:light;background:#fff\}/);
 });

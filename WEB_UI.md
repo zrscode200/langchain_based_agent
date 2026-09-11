@@ -129,6 +129,27 @@ agent-workspace workflows above. In particular, it does not run configured
 client-side command hooks or automatically initiate the TUI's idle background
 wake. Existing backend capabilities are not replaced with browser-owned state.
 
+## Appearance
+
+Open **Settings → Appearance** from the existing model/settings control or
+`/settings`. Choose **Studio Light**, **Graphite**, **Midnight**, or **Paper**.
+The default **System** option follows the device's light/dark preference using
+Studio Light and Graphite. An explicit theme stays selected when the device
+preference changes.
+
+Changes apply immediately and persist in this browser across projects and tabs.
+If browser storage is blocked, selection still works for the current page.
+Appearance loads before the app renders and does not change models, approvals,
+conversation drafts or backend settings. The same palette covers task views,
+tools, requests, dialogs and file preview controls. HTML artifacts retain their
+own styling on an independent light canvas; code and Markdown follow the theme.
+
+`web/src/themes.css` owns semantic color roles; components use those variables
+instead of individual color values. `web/public/theme-init.js` runs as a local
+external script under the existing CSP. No external fonts or theme packages are
+required. Offline tests cover preference lifecycle, text/control contrast and
+theme coverage; the browser fixture covers switching, drafts and reloads.
+
 ## Conversation experience
 
 Each user turn groups the agent's updates, tool activity, exposed reasoning and
