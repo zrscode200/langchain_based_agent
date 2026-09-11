@@ -97,3 +97,55 @@
 .attention .request-footer{gap:9px}
 .task-conversation-scroll{padding-left:16px;padding-right:16px}
 }
+
+/* Task list: flat rows with a status rail, a live subtitle and time context. */
+.task-summary-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;color:var(--secondary);font-weight:550;padding:0 0 12px;border-bottom:1px solid var(--line)}
+.task-summary-strip>span:last-child{color:var(--muted);font-size:10px;font-weight:400;white-space:nowrap}
+
+.task-stale{margin:0 0 12px;padding:8px 10px;border-radius:6px;background:var(--warning-soft);color:var(--warning);font-size:11px;line-height:1.5}
+
+.task-group-heading{display:flex;align-items:center;gap:8px;width:100%;padding:4px 0 6px;text-align:left;border-radius:4px}
+.task-group-heading .eyebrow{font-size:10px}
+.task-group-count{font-size:10px;font-weight:600;color:var(--secondary);background:var(--surface-subtle);border-radius:10px;padding:1px 7px;line-height:1.5}
+.task-group-heading>svg{margin-left:auto;color:var(--muted);transition:transform .15s}
+.task-group-heading[aria-expanded=false]>svg{transform:rotate(-90deg)}
+button.task-group-heading:hover{background:var(--surface-hover)}
+.task-group.task-group-attention .eyebrow,.task-group.task-group-attention .task-group-count{color:var(--warning)}
+.task-group.task-group-attention .task-group-count{background:var(--warning-bg)}
+
+.task-item{border-bottom:1px solid var(--line)}
+.task-item:last-child{border-bottom:0}
+
+.task-row{display:flex;align-items:stretch;gap:10px;width:100%;text-align:left;padding:10px 6px 10px 0;border-radius:6px}
+.task-row:hover{background:var(--surface-hover)}
+
+.task-rail{width:3px;border-radius:2px;flex-shrink:0;background:var(--control-border);min-height:34px}
+.task-rail.running{background:var(--info)}
+.task-rail.needs_approval,.task-rail.needs_input{background:var(--warning)}
+.task-rail.completed{background:var(--success)}
+.task-rail.failed,.task-rail.timed_out{background:var(--danger)}
+.task-rail.queued,.task-rail.cancelled{background:var(--muted)}
+
+.task-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;justify-content:center}
+.task-title{display:flex;align-items:baseline;gap:8px;min-width:0}
+.task-title strong{font-size:12px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.task-sub{font-size:11px;line-height:1.5;color:var(--secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.task-meta{display:flex;flex-direction:column;align-items:flex-end;justify-content:center;gap:3px;flex-shrink:0;font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.task-meta>svg{color:var(--muted)}
+
+.task-delivery{font-size:10px;color:var(--muted)}
+.task-delivery.waiting{color:var(--warning)}
+
+.task-review{display:inline-flex;align-items:center;gap:4px;margin:0 0 10px 13px;font-size:11px;color:var(--warning);background:var(--warning-soft);border:1px solid var(--warning-border);border-radius:6px;padding:5px 9px}
+button.task-review:hover:not(:disabled){background:var(--warning-bg)}
+.task-review.sent{color:var(--muted);background:var(--surface-subtle);border-color:var(--line)}
+
+.task-state{margin:6px 0 0;font-size:11px;line-height:1.5;color:var(--secondary)}
+
+.task-cancel-confirm{display:inline-flex;align-items:center;flex-wrap:wrap;gap:10px;font-size:11px;color:var(--danger)}
+.task-cancel-confirm .text-button{font-size:11px}
+.text-button.danger{color:var(--danger)}
+
+.toolbar-button.needs-attention{color:var(--warning);border-color:var(--warning-border);background:var(--warning-soft)}
+.attention-count{font-style:normal;font-size:10px;font-weight:650;color:var(--on-accent);background:var(--warning);border-radius:9px;padding:1px 6px;line-height:1.5}

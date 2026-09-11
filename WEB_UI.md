@@ -77,12 +77,18 @@ local launcher.
   task details. The width is remembered in this browser. Double-click the edge
   to reset, or focus it and use **←/→** (hold **Shift** for larger steps).
   On phones the panel uses the full screen width.
-- **Background work** shows delegated jobs, results and pending input. The main
-  agent’s current plan appears within the conversation.
-  Select a task for its organized conversation, grouped tools, quiet reasoning,
-  completed result and cancellation. **Expand view** gives longer investigations
-  more room; **Load earlier messages** preserves the reading position.
-  **Guide via agent** prepares a message to the main agent; review and send it.
+- **Background work** lists delegated tasks by what they need from you: tasks
+  waiting for a decision first, then running work with its latest tool call or
+  finding and elapsed time, then the queue with each task's position, then
+  finished work newest first, marked as waiting for or delivered to the agent.
+  A row's **Review in main chat** jumps to that request. The main agent's
+  current plan appears within the conversation. Select a task for its organized
+  conversation, grouped tools, quiet reasoning, completed result and two-step
+  cancellation. **Expand view** gives longer investigations more room;
+  **Load earlier messages** preserves the reading position. **Guide through
+  main agent** prepares a message to the main agent; review and send it.
+  Timing, queue position, slot usage and latest activity come from the updated
+  backend; older backends show status only.
 - **Needs your attention**, above the main composer, collects main-agent and
   subagent approvals and questions. Each request names its agent. Review one task
   at a time; a subagent waiting for input does not block an otherwise available

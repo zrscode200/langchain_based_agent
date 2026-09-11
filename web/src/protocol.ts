@@ -6,7 +6,9 @@ export type Thread = { thread_id: string; metadata: Json; status: string; update
 export type Message = { _transcript?: { revision: number; order: number; truncated: boolean }; id?: string; type?: string; role?: string; content: unknown; name?: string; status?: string; artifact?: Json; tool_call_id?: string; tool_calls?: Json[]; tool_call_chunks?: Json[]; usage_metadata?: Json; additional_kwargs?: Json };
 export type Interrupt = { id: string; value: Json };
 export type Snapshot = { values: Json; interrupts?: Interrupt[]; tasks?: Json[]; next?: string[]; checkpoint?: Json | null };
-export type Task = { task_id: string; name: string; description: string; status: string; result?: string; interrupts: Interrupt[]; steerable: boolean; conversation_records?: { version: number; messages: Message[]; cursor: number; before: number; notice: string; limited: boolean }; activity?: Json[]; steering?: Json[]; conversation?: { text: string; page: number; pages: number; limited: boolean; notice: string } };
+export type TaskActivity = { sequence?: number; kind?: string; tool_name?: string; status?: string; text?: string };
+export type TaskCapacity = { running: number; max_running: number; queued: number; retained: number; max_jobs: number };
+export type Task = { task_id: string; name: string; description: string; status: string; result?: string; interrupts: Interrupt[]; steerable: boolean; queued_at?: number | null; started_at?: number | null; updated_at?: number | null; finished_at?: number | null; acknowledged?: boolean; latest?: TaskActivity | null; queue_position?: number; conversation_records?: { version: number; messages: Message[]; cursor: number; before: number; notice: string; limited: boolean }; activity?: Json[]; steering?: Json[]; conversation?: { text: string; page: number; pages: number; limited: boolean; notice: string } };
 export type Skill = { name: string; description: string; path: string; source?: string };
 export type Catalog = { skills: Skill[]; tools: { name: string; description: string }[]; model?: string; instructions?: { path: string; content: string }[]; capabilities?: Json; notice?: string };
 

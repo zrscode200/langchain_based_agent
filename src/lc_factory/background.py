@@ -11,7 +11,7 @@ import json
 from collections import deque
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
-from time import monotonic
+from time import monotonic, time
 from uuid import uuid4
 from typing import Any, TypedDict
 
@@ -68,6 +68,19 @@ def inspection_interrupts(interrupts):
     return result
 
 
+def latest_activity(job):
+    """The newest visible activity record, bounded for host list rows."""
+    for record in reversed(job.activity):
+        if record.get("kind") == "tool" and record.get("tool_name") == "report_background_task":
+            continue
+        value = {"sequence": record.get("sequence"), "kind": record.get("kind")}
+        for key, limit in (("tool_name", 200), ("status", 80), ("text", 240)):
+            if isinstance(record.get(key), str):
+                value[key] = record[key][:limit]
+        return value
+    return None
+
+
 @dataclass
 class Job:
     owner: str
@@ -93,6 +106,10 @@ class Job:
     interrupt_ids: dict[str, str] = field(default_factory=dict, repr=False)
     queued_input: Any = field(default=None, repr=False)
     transcript: ChildTranscript = field(default_factory=ChildTranscript, repr=False)
+    queued_at: float | None = None
+    started_at: float | None = None
+    updated_at: float | None = None
+    finished_at: float | None = None
 
     def record(self, kind, **fields):
         self.activity_sequence += 1
@@ -207,6 +224,44 @@ class BackgroundTasks(AgentMiddleware):
         """List host transport snapshots; model callers use the inspection projection."""
         return [self._snapshot(key, j, inspection=inspection)
                 for key, j in self.jobs.items() if j.owner == owner]
+
+    def _queued_keys(self):
+        return [key for key in self._queue if key in self.jobs and self.jobs[key].status == "queued"]
+
+    @staticmethod
+    def _host_metadata(key, job, queued):
+        value = dict(queued_at=job.queued_at, started_at=job.started_at, updated_at=job.updated_at,
+                     finished_at=job.finished_at, acknowledged=job.acknowledged, latest=latest_activity(job))
+        if key in queued:
+            value["queue_position"] = queued.index(key) + 1
+        return value
+
+    def host_list(self, owner):
+        """Owner rows for host displays: timing, queue order and latest visible activity.
+
+        The model projection returned by list() is unchanged.
+        """
+        queued = self._queued_keys()
+        rows = []
+        for key, job in self.jobs.items():
+            if job.owner != owner:
+                continue
+            row = self._snapshot(key, job)
+            row.update(self._host_metadata(key, job, queued))
+            rows.append(row)
+        return rows
+
+    def host_inspect(self, owner, task_id, *, transcript_page=None):
+        """Host detail metadata without changing the model's inspection projection."""
+        job = self._owned(owner, task_id)
+        return {**self.inspect(owner, task_id, transcript_page=transcript_page),
+                **self._host_metadata(task_id, job, self._queued_keys())}
+
+    def capacity(self):
+        """Runtime-wide execution slot usage; counts only, never another owner's content."""
+        running = sum(j.worker is not None and not j.worker.done() for j in self.jobs.values())
+        return {"running": running, "max_running": self.max_running, "queued": len(self._queued_keys()),
+                "retained": len(self.jobs), "max_jobs": self.max_jobs}
 
     def _owned(self, owner, task_id):
         job = self.jobs.get(task_id)
@@ -344,6 +399,9 @@ class BackgroundTasks(AgentMiddleware):
 
     def _enqueue(self, key, job, value):
         job.status, job.queued_input = "queued", value
+        job.updated_at = time()
+        if job.queued_at is None:
+            job.queued_at = job.updated_at
         self._queue.append(key)
         self._drain_queue()
 
@@ -365,6 +423,9 @@ class BackgroundTasks(AgentMiddleware):
 
     def _launch(self, key, job, value):
         job.status = "running"
+        job.updated_at = time()
+        if job.started_at is None:
+            job.started_at = job.updated_at
         job.worker = asyncio.create_task(self._run(job, value), name=key, context=contextvars.Context())
         job.worker.add_done_callback(lambda _: self._worker_finished())
 
@@ -480,9 +541,11 @@ class BackgroundTasks(AgentMiddleware):
             job.status, job.result = "failed", "Background task failed before returning a result."
         finally:
             job.remaining = max(0, job.remaining - (monotonic() - started))
+            job.updated_at = time()
             if job.outcome is None and job.status not in ("needs_approval", "needs_input"):
                 job.outcome = {"ok": False, "error": {"type": job.status, "message": job.result}}
             if job.status not in ("needs_approval", "needs_input"):
+                job.finished_at = job.updated_at
                 job.close_inbox()
                 job.graph = None
                 job.config = {}
@@ -501,6 +564,7 @@ class BackgroundTasks(AgentMiddleware):
                     if job.status == "queued":
                         self._queue = deque(queued for queued in self._queue if queued != key)
                     job.status, job.result = "cancelled", "Background task cancelled."
+                    job.updated_at = job.finished_at = time()
                     job.interrupts, job.graph, job.config = [], None, {}
                     job.outcome = {"ok": False, "error": {"type": "cancelled", "message": job.result}}
                     job.interrupt_ids = {}
@@ -517,6 +581,7 @@ class BackgroundTasks(AgentMiddleware):
             for job in cancelled_jobs:
                 if job.status == "running":
                     job.status, job.result = "cancelled", "Background task cancelled."
+                    job.updated_at = job.finished_at = time()
                     job.outcome = {"ok": False, "error": {"type": job.status, "message": job.result}}
                     job.graph, job.config = None, {}
                     job.close_inbox()

@@ -7,7 +7,8 @@ import { textContent, type Json, type Message } from './protocol.ts';
 import type { Agent } from './useAgent.ts';
 import type { TaskRequests } from './useTaskRequests.ts';
 import { useTaskConversation } from './useTaskConversation.ts';
-import { taskLabels } from './tasks-panel.tsx';
+import { activeStatuses, stateSentence, taskLabels } from './task-list.ts';
+import { useNow } from './use-now.ts';
 
 function FullMessage({ agent, taskId, message, close }: { agent: Agent; taskId: string; message: Message; close: () => void }) {
   const [offset, setOffset] = useState(0), [value, setValue] = useState<Json | null>(null), [error, setError] = useState('');
@@ -34,7 +35,10 @@ function LegacyTranscript({ agent, taskId, text, pages }: { agent: Agent; taskId
 
 export function TaskDetail({ agent, taskId, requests, compose, back, review, expanded, setExpanded }: { agent: Agent; taskId: string; requests: TaskRequests; compose: (text: string) => void; back: () => void; review: () => void; expanded: boolean; setExpanded: (value: boolean) => void }) {
   const view = useTaskConversation(agent, taskId);
+  const now = useNow(view.detail && activeStatuses.includes(view.detail.status) ? 1000 : 60000);
   const [busy, setBusy] = useState(false), [actionError, setActionError] = useState(''), [full, setFull] = useState<Message | null>(null), [follow, setFollow] = useState(true);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const disconnected = agent.status === 'disconnected';
   const scroll = useRef<HTMLDivElement>(null);
   const prepend = useRef<{ height: number; top: number } | null>(null);
   const detail = view.detail;
@@ -61,7 +65,7 @@ export function TaskDetail({ agent, taskId, requests, compose, back, review, exp
   const instructions = view.messages.filter(m => m.type === 'system');
   return <ExpansionScope><div className="task-detail organized-task">
     <div className="task-nav"><button className="text-button" onClick={back}><ChevronLeft size={14} />All tasks</button><button className="text-button" onClick={() => setExpanded(!expanded)}>{expanded ? <Minimize2 size={14} /> : <Maximize2 size={14} />}{expanded ? 'Return to sidebar' : 'Expand view'}</button></div>
-    {detail && <header className="task-summary"><div><h3>{detail.name}</h3><span className={'status-label ' + detail.status}><span className={'status-dot ' + detail.status} />{taskLabels[detail.status] || detail.status}</span></div><Disclosure title="Assignment" storageKey="assignment"><Prose>{detail.description}</Prose><small className="task-id">{taskId}</small></Disclosure>{active && <div className="task-actions">{detail.steerable && <button className="text-button" onClick={() => { compose(`Please guide background task ${taskId}: `); setExpanded(false); }}>Guide through main agent</button>}<button className="text-button" disabled={busy} onClick={() => void cancel()}><Square size={11} />Cancel task</button></div>}{pending && <button className="task-review-link" onClick={review}>{detail.status === 'needs_input' ? 'Answer in main chat' : 'Review in main chat'} <ChevronLeft size={14} /></button>}</header>}
+    {detail && <header className="task-summary"><div><h3>{detail.name}</h3><span className={'status-label ' + detail.status}><span className={'status-dot ' + detail.status} />{taskLabels[detail.status] || detail.status}</span></div><p className="task-state">{stateSentence(detail, now, agent.pendingResults)}</p><Disclosure title="Assignment" storageKey="assignment"><Prose>{detail.description}</Prose><small className="task-id">{taskId}</small></Disclosure>{active && <div className="task-actions">{detail.steerable && <button className="text-button" onClick={() => { compose(`Please guide background task ${taskId}: `); setExpanded(false); }}>Guide through main agent</button>}{confirmCancel ? <span className="task-cancel-confirm" role="group" aria-label="Confirm cancellation"><span>Cancel this task?</span><button className="text-button danger" disabled={busy} onClick={() => { setConfirmCancel(false); void cancel(); }}>Yes, cancel it</button><button className="text-button" onClick={() => setConfirmCancel(false)}>Keep it running</button></span> : <button className="text-button" disabled={busy || disconnected} onClick={() => setConfirmCancel(true)}><Square size={11} />Cancel task</button>}</div>}{pending && <button className="task-review-link" onClick={review}>{detail.status === 'needs_input' ? 'Answer in main chat' : 'Review in main chat'} <ChevronLeft size={14} /></button>}</header>}
     <div className="task-conversation-scroll" ref={scroll} onWheel={event => { if (event.deltaY < 0) setFollow(false); }} onClickCapture={event => { if ((event.target as HTMLElement).closest('.disclosure-toggle')) setFollow(false); }} onScroll={() => { const el = scroll.current!; if (!prepend.current) setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 24); }}>
       {(view.error || actionError) && <p className="inline-error" role="alert">{view.error || actionError} <button className="text-button" onClick={view.reload}>Refresh task</button></p>}
       {!detail && !view.error && <div className="panel-empty"><LoaderCircle className="spin" />Loading task</div>}

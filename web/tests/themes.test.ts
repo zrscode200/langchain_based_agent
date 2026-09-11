@@ -140,7 +140,7 @@ test('all palettes define the same roles and maintain readable text and controls
 });
 
 test('actual button hover and resize focus styles stay readable in every palette', () => {
-  const source = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+  const source = ['styles.css', 'tasks.css'].map(name => readFileSync(new URL('../src/' + name, import.meta.url), 'utf8')).join('\n');
   const rules = [...source.matchAll(/([^{}]+)\{([^{}]+)\}/g)];
   const role = (selector: string, property: string) => {
     const rule = rules.find(m => m[1].trim().split(',').includes(selector));
@@ -155,6 +155,8 @@ test('actual button hover and resize focus styles stay readable in every palette
     [role('.icon-button:hover:not(:disabled)', 'color'), role('.icon-button:hover:not(:disabled)', 'background'), 3],
     [role('.button.primary', 'color'), role('.button.primary:hover:not(:disabled)', 'background'), 4.5],
     [role('.send-button', 'color'), role('.send-button:hover:not(:disabled)', 'background'), 4.5],
+    [role('.attention-count', 'color'), role('.attention-count', 'background'), 4.5],
+    [role('.task-review', 'color'), role('button.task-review:hover:not(:disabled)', 'background'), 4.5],
     [role('.inspector-resize-handle:focus-visible:after', 'background'), 'surface', 3],
     [role('.inspector-resize-handle:focus-visible', 'box-shadow'), 'surface-subtle', 3],
   ] as const;

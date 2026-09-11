@@ -26,7 +26,7 @@ async def background(request):
             if not isinstance(task_id, str) or task_id not in tasks.jobs or tasks.jobs[task_id].owner != owner:
                 return JSONResponse({"detail": "Unknown task for this conversation"}, status_code=404)
             if operation == "conversation":
-                task = tasks.inspect(owner, task_id)
+                task = tasks.host_inspect(owner, task_id)
                 task["conversation_records"] = tasks.jobs[task_id].transcript.structured(
                     before=body.get("before"), after=body.get("after"))
                 return JSONResponse({"task": task, "enabled": True})
@@ -37,7 +37,7 @@ async def background(request):
                 return JSONResponse(tasks.jobs[task_id].transcript.record_page(
                     identity, offset=body.get("offset", 0), revision=body.get("revision")))
             if operation == "inspect":
-                return JSONResponse({"task": tasks.inspect(owner, task_id,
+                return JSONResponse({"task": tasks.host_inspect(owner, task_id,
                     transcript_page=body.get("transcript_page", -1)), "enabled": True})
             if operation == "resume":
                 tasks.resume(owner, task_id, body.get("responses"))
@@ -45,8 +45,8 @@ async def background(request):
                 await tasks.cancel(owner, task_id=task_id)
         elif operation != "list":
             raise ValueError("Unknown background operation")
-        return JSONResponse({"tasks": tasks.list(owner), "enabled": True,
-                             "pending_results": list(tasks.pending(owner))})
+        return JSONResponse({"tasks": tasks.host_list(owner), "enabled": True,
+                             "pending_results": list(tasks.pending(owner)), "capacity": tasks.capacity()})
     except WorkspaceConflictError:
         return JSONResponse({"detail": "Workspace does not match this conversation"}, status_code=409)
     except (ValueError, TypeError):

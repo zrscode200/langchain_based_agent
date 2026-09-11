@@ -326,7 +326,7 @@ class _FixedArtifactsStorage:
         self.large_results_dir = root / "large_tool_results" if large_results else None
 
 
-def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = True):
+def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = True, project_reasoning: bool = True):
     import deepagents_code.agent as v0_module
 
     import lc_factory.assembly as ours_module
@@ -358,7 +358,74 @@ def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = Tr
     finally:
         for module, original in originals:
             module._artifacts_root = original
-    return ours, v0
+    return _reasoning_projection(ours) if project_reasoning else ours, v0
+
+
+def _reasoning_projection(captured):
+    """Assert the owned DeepSeek adapter delta, then compare all upstream state.
+
+    The factory deliberately adds one stateless serializer adapter inside model
+    retry for main, child and grader calls. Validate that exact contract before
+    projecting it away; never ignore arbitrary middleware or mutate the capture.
+    Runtime serialization is checked in test_deepseek_reasoning.py.
+    """
+    from lc_factory.deepseek_reasoning import DeepSeekReasoningMiddleware
+    from lc_factory.upstream import CodeModelRetryMiddleware
+
+    def stack(items):
+        items = list(items)
+        positions = [i for i, item in enumerate(items) if isinstance(item, DeepSeekReasoningMiddleware)]
+        assert len(positions) == 1, "exactly one reasoning adapter is required"
+        index = positions[0]
+        adapter = items[index]
+        assert type(adapter) is DeepSeekReasoningMiddleware and not vars(adapter), "adapter type/state drift"
+        assert index > 0 and isinstance(items[index - 1], CodeModelRetryMiddleware), "adapter must follow retry"
+        return items[:index] + items[index + 1:]
+
+    result = {**captured, "kwargs": dict(captured["kwargs"])}
+    main = stack(result["kwargs"]["middleware"])
+    for index, item in enumerate(main):
+        if hasattr(item, "_grader_middleware"):
+            projected = copy(item)
+            projected._grader_middleware = stack(item._grader_middleware)
+            main[index] = projected
+    result["kwargs"]["middleware"] = main
+    result["kwargs"]["subagents"] = [
+        {**spec, "middleware": stack(spec["middleware"])} for spec in result["kwargs"]["subagents"]
+    ]
+    return result
+
+
+@pytest.mark.parametrize("site", ["main", "child", "grader"])
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "reordered", "state", "subclass"])
+def test_reasoning_projection_rejects_adapter_drift(tmp_path, site, fault):
+    from lc_factory.deepseek_reasoning import DeepSeekReasoningMiddleware
+
+    actual, baseline = _run_both({}, tmp_path, project_reasoning=False)
+    original = _fingerprint(actual)
+    assert _fingerprint(_reasoning_projection(actual)) == _fingerprint(baseline)
+    assert _fingerprint(actual) == original, "projection mutated the captured assembly"
+    if site == "main":
+        items = actual["kwargs"]["middleware"]
+    elif site == "child":
+        items = actual["kwargs"]["subagents"][0]["middleware"]
+    else:
+        items = next(m._grader_middleware for m in actual["kwargs"]["middleware"] if hasattr(m, "_grader_middleware"))
+    index = next(i for i, m in enumerate(items) if type(m) is DeepSeekReasoningMiddleware)
+    if fault == "missing":
+        items.pop(index)
+    elif fault == "duplicate":
+        items.insert(index, DeepSeekReasoningMiddleware())
+    elif fault == "reordered":
+        items.insert(0, items.pop(index))
+    elif fault == "state":
+        items[index].unexpected = True
+    else:
+        class DifferentAdapter(DeepSeekReasoningMiddleware):
+            pass
+        items[index] = DifferentAdapter()
+    with pytest.raises(AssertionError):
+        _reasoning_projection(actual)
 
 
 def _auto_delegation_projection(ours, v0):
