@@ -1,26 +1,24 @@
 import http from 'node:http';
-import { readFile, realpath, stat } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { parseArgs } from 'node:util';
-import { createHash } from 'node:crypto';
+import { workspaceProject, workspaceStore } from './workspaces.ts';
 import { createApp } from './app.ts';
 
-const { values } = parseArgs({ options: { workspace: { type: 'string', multiple: true }, backend: { type: 'string', default: 'http://127.0.0.1:2024' }, port: { type: 'string', default: '3100' }, dev: { type: 'boolean' }, help: { type: 'boolean' } } });
+const { values } = parseArgs({ options: { workspace: { type: 'string', multiple: true }, 'workspace-store': { type: 'string' }, backend: { type: 'string', default: 'http://127.0.0.1:2024' }, port: { type: 'string', default: '3100' }, dev: { type: 'boolean' }, help: { type: 'boolean' } } });
 if (values.help || !values.workspace?.length) {
-  console.log('Usage: pnpm start --workspace /absolute/project [--workspace /another/project] [--backend http://127.0.0.1:2024] [--port 3100]\nUse pnpm dev with the same arguments for frontend development. Start the agent backend with python -m lc_factory.web_backend --cwd /absolute/project.');
+  console.log('Usage: pnpm start --workspace /absolute/project [--workspace /another/project] [--backend http://127.0.0.1:2024] [--port 3100] [--workspace-store /path/to/workspaces.json]\nUse pnpm dev with the same arguments for frontend development. Start the agent backend with python -m lc_factory.web_backend --cwd /absolute/project.');
   process.exit(values.help ? 0 : 1);
 }
 const port = Number(values.port);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Choose a port between 1024 and 65535.');
-const projects = await Promise.all(values.workspace.map(async root => {
-  const full = await realpath(path.resolve(root));
-  if (!(await stat(full)).isDirectory()) throw new Error('Workspace must be a directory.');
-  return { id: createHash('sha256').update(full).digest('hex').slice(0, 16), name: path.basename(full), path: full };
-}));
-const origin = `http://127.0.0.1:${port}`;
-const app = createApp({ projects: [...new Map(projects.map(p => [p.id, p])).values()], backend: values.backend!, apiKey: process.env.LC_WEB_API_KEY, origin });
 const root = path.resolve(import.meta.dirname, '..');
+const initial = await Promise.all(values.workspace.map(folder => workspaceProject(folder)));
+const workspaces = workspaceStore(path.resolve(values['workspace-store'] || path.join(root, '.local', 'workspaces.json')), initial);
+const projects = await workspaces.list();
+const origin = `http://127.0.0.1:${port}`;
+const app = createApp({ projects, workspaces, backend: values.backend!, apiKey: process.env.LC_WEB_API_KEY, origin });
 const vite = values.dev ? await (await import('vite')).createServer({ root, server: { middlewareMode: true, hmr: false, allowedHosts: ['127.0.0.1'] } }) : null;
 const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 const server = http.createServer(async (req, res) => {

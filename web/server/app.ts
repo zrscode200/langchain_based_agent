@@ -1,9 +1,10 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { HttpError, listFiles, readFile } from './files.ts';
+import type { WorkspaceStore } from './workspaces.ts';
 import { conversationTitles } from './titles.ts';
 import { allowedDecisions, pendingInterrupts, validAnswer, type Json, type Project, type Workspace, type Snapshot } from '../src/protocol.ts';
 
-export type Config = { projects: Project[]; backend: string; apiKey?: string; origin: string; fetch?: typeof fetch };
+export type Config = { projects: Project[]; workspaces?: WorkspaceStore; backend: string; apiKey?: string; origin: string; fetch?: typeof fetch };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const validId = (id: string) => /^[\w-]{1,128}$/.test(id);
 export function validateResponses(state: Snapshot, responses: Json) {
@@ -59,15 +60,14 @@ export function createApp(config: Config) {
     }
     catch (error) { if (error instanceof HttpError && error.status === 404) return 'manual'; throw error; }
   }
+  const projectList = () => config.workspaces ? config.workspaces.list() : Promise.resolve(config.projects);
   async function api(request: Request) {
     const url = new URL(request.url);
     if (url.origin !== config.origin || request.headers.get('origin') && request.headers.get('origin') !== config.origin || ['cross-site', 'same-site'].includes(request.headers.get('sec-fetch-site') || '')) throw new HttpError(403, 'Open this workspace from its local address.');
-    if (url.pathname === '/api/bootstrap' && request.method === 'GET') return json({ token, projects: config.projects, backend: upstreamUrl.origin });
+    if (url.pathname === '/api/bootstrap' && request.method === 'GET') return json({ token, projects: await projectList(), backend: upstreamUrl.origin });
     if (request.headers.get('x-workspace-token') !== token) throw new HttpError(403, 'Session expired. Reload the workspace.');
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] !== 'api' || parts[1] !== 'projects') throw new HttpError(404, 'Unknown route.');
-    const project = config.projects.find(p => p.id === parts[2]);
-    if (!project) throw new HttpError(404, 'Unknown workspace.');
     let body: Json = {};
     if (['POST', 'PUT', 'PATCH'].includes(request.method)) {
       if (!request.headers.get('content-type')?.startsWith('application/json')) throw new HttpError(415, 'Expected JSON.');
@@ -76,6 +76,18 @@ export function createApp(config: Config) {
       try { body = JSON.parse(raw); } catch { throw new HttpError(400, 'Invalid JSON.'); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) throw new HttpError(400, 'Expected an object.');
     }
+    if (parts.length === 2 && request.method === 'GET') return json(await projectList());
+    if (parts.length === 2 && request.method === 'POST') {
+      if (!config.workspaces) throw new HttpError(501, 'Restart the frontend with workspace management enabled.');
+      const result = await config.workspaces.add(body.path, body.name);
+      return json(result, result.created ? 201 : 200);
+    }
+    if (parts.length === 3 && parts[2] === 'browse' && request.method === 'GET') {
+      if (!config.workspaces) throw new HttpError(501, 'Restart the frontend with workspace management enabled.');
+      return json(await config.workspaces.browse(url.searchParams.get('path') || undefined));
+    }
+    const project = (await projectList()).find(p => p.id === parts[2]);
+    if (!project) throw new HttpError(404, 'Unknown workspace.');
     if (parts[3] === 'files' && request.method === 'GET') return json(url.searchParams.has('read') ? await readFile(project.path, url.searchParams.get('path') || '') : await listFiles(project.path, url.searchParams.get('path') || ''));
     if (parts[3] !== 'threads') throw new HttpError(404, 'Unknown route.');
     if (parts.length === 4) {

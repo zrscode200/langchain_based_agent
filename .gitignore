@@ -8,3 +8,6 @@ build/
 *.egg-info/
 .DS_Store
 .env
+
+# Local web workspace registry
+web/.local/

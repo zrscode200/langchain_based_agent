@@ -38,7 +38,7 @@ pnpm start --workspace /absolute/path/to/your/project --backend http://127.0.0.1
 
 Open **http://127.0.0.1:3100**. Repeat `--workspace /absolute/path/to/another/project`
 to offer multiple projects. The launcher canonicalizes these directories; the
-browser cannot add arbitrary directories. Use `--port` for another frontend port.
+browser can also add folders from the workspace dropdown. Use `--port` for another frontend port.
 
 If backend port 2024 is occupied, the backend launcher stops its own fallback
 process and fails clearly; it never silently hands the frontend a different
@@ -55,6 +55,32 @@ invocation. If needed, set `LC_WEB_API_KEY` in the **Node server's environment**
 it forwards the key only to that fixed backend. Remote hosting, reverse proxies,
 multi-user access, and remote sandbox file browsing are not supported by this
 local launcher.
+
+## Adding workspaces
+
+Open the **Workspace** dropdown in the left sidebar and choose **Add workspace…**.
+Browse local folders with Home, the up arrow and folder rows, or paste an absolute
+folder path (`~/` is supported). Enter an optional display name, then choose
+**Add workspace**. The app switches to that project; use **New conversation** to
+start chatting. Adding a folder does not run the agent or change that folder.
+Cancel and validation failures leave the existing conversation and draft intact.
+Selecting an already registered folder opens its existing workspace, preserving
+its name and conversations. Symbolic-link aliases resolve to the same workspace.
+
+The local launcher saves the list in `web/.local/workspaces.json` (gitignored),
+so browser refreshes and frontend restarts retain it. `--workspace-store
+/absolute/path/workspaces.json` selects another store, for example when multiple
+installed checkouts should share one list. Startup `--workspace` roots are merged
+with saved workspaces; saved display names win. Store errors are reported without
+replacing the existing file. A leftover `.lock` after an abrupt crash requires
+checking that no frontend is writing before removing that lock.
+
+Folder selection exposes directory names only, including navigation outside the
+current project. It requires the same local-origin and session-token checks as
+other UI APIs. File previews remain confined to registered workspace roots;
+thread bindings and agent filesystem permissions remain backend-owned. Hidden
+folders and symbolic links are omitted from the folder list; a known folder path
+can be entered directly. There is no upload and no remote folder picker.
 
 ## Everyday workflow
 
