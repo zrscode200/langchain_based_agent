@@ -99,17 +99,26 @@
 }
 
 /* Task list: flat rows with a status rail, a live subtitle and time context. */
-.task-summary-strip{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;color:var(--secondary);font-weight:550;padding:0 0 12px;border-bottom:1px solid var(--line)}
-.task-summary-strip>span:last-child{color:var(--muted);font-size:10px;font-weight:400;white-space:nowrap}
+.task-summary-strip{position:relative;display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;color:var(--secondary);font-weight:550;padding:0 0 12px;border-bottom:1px solid var(--line)}
+.task-summary-text{min-width:0}
+
+/* Finished work opens from the summary bar, so history never shares space with live rows. */
+.finished-toggle{display:inline-flex;align-items:center;gap:6px;flex-shrink:0;font-size:11px;font-weight:500;color:var(--secondary);border:1px solid var(--control-border);border-radius:14px;padding:4px 8px 4px 10px;background:var(--surface-raised);white-space:nowrap}
+.finished-toggle:hover,.finished-toggle.open{background:var(--surface-hover);border-color:var(--accent);color:var(--ink)}
+.finished-toggle>svg{transition:transform .15s}
+.finished-toggle.open>svg{transform:rotate(180deg)}
+.unread-dot{width:6px;height:6px;border-radius:50%;background:var(--warning);display:inline-block}
+.finished-menu{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:6;background:var(--surface);border:1px solid var(--line);border-radius:9px;box-shadow:0 10px 30px var(--shadow-strong);max-height:min(60dvh,520px);overflow:auto;padding:0 10px 6px;overscroll-behavior:contain;font-weight:400;color:var(--ink)}
+.finished-menu-head{display:flex;align-items:center;justify-content:space-between;font-size:10px;color:var(--muted);padding:6px 0 4px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--surface);z-index:1}
+.finished-menu-head .icon-button{width:24px;height:24px}
+.finished-menu .task-row{padding-left:2px}
+.task-capacity{margin:8px 0 0;font-size:10px;color:var(--muted)}
 
 .task-stale{margin:0 0 12px;padding:8px 10px;border-radius:6px;background:var(--warning-soft);color:var(--warning);font-size:11px;line-height:1.5}
 
-.task-group-heading{display:flex;align-items:center;gap:8px;width:100%;padding:4px 0 6px;text-align:left;border-radius:4px}
+.task-group-heading{display:flex;align-items:center;gap:8px;width:100%;padding:4px 0 6px;text-align:left}
 .task-group-heading .eyebrow{font-size:10px}
 .task-group-count{font-size:10px;font-weight:600;color:var(--secondary);background:var(--surface-subtle);border-radius:10px;padding:1px 7px;line-height:1.5}
-.task-group-heading>svg{margin-left:auto;color:var(--muted);transition:transform .15s}
-.task-group-heading[aria-expanded=false]>svg{transform:rotate(-90deg)}
-button.task-group-heading:hover{background:var(--surface-hover)}
 .task-group.task-group-attention .eyebrow,.task-group.task-group-attention .task-group-count{color:var(--warning)}
 .task-group.task-group-attention .task-group-count{background:var(--warning-bg)}
 

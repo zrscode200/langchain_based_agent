@@ -4,10 +4,9 @@ import path from 'node:path';
 import { artifact, catalog, files, project, snapshot, tasks, threads } from '../fixtures.ts';
 
 const root = path.resolve(import.meta.dirname, '../..');
-async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean; multipleApprovals?: boolean; failApproval?: boolean; reasoningStream?: boolean; childRequests?: boolean; structuredTasks?: boolean; workspaces?: boolean } = {}) {
+async function mount(page: Page, options: { empty?: boolean; approval?: boolean; delayOldState?: boolean; delayRun?: boolean; longContent?: boolean; multipleApprovals?: boolean; failApproval?: boolean; reasoningStream?: boolean; childRequests?: boolean; structuredTasks?: boolean } = {}) {
   const calls: { url: string; body: any }[] = [];
   const rows = structuredClone(threads);
-  const workspaceRows = [structuredClone(project)];
   const taskRows = structuredClone(tasks) as any[];
   if (options.childRequests) for (const [index, task] of taskRows.entries()) {
     task.status = 'needs_approval'; task.result = undefined;
@@ -60,19 +59,7 @@ async function mount(page: Page, options: { empty?: boolean; approval?: boolean;
     }
     const body = req.postDataJSON() || {}; calls.push({ url: url.pathname, body });
     let result: unknown = {};
-    if (url.pathname === '/api/bootstrap') result = { token: 'test-token', projects: workspaceRows, backend: 'http://127.0.0.1:2024' };
-    else if (options.workspaces && url.pathname === '/api/projects/browse') {
-      const folder = url.searchParams.get('path') || '/sample';
-      result = { path: folder, parent: folder === '/sample' ? '/' : '/sample', entries: folder === '/sample' ? [{ name: 'Second project', path: '/sample/Second project' }] : [], limited: false };
-    }
-    else if (options.workspaces && url.pathname === '/api/projects' && req.method() === 'POST') {
-      if (body.path === '/missing') { await route.fulfill({ status: 400, json: { detail: 'Folder not found. Check the path and try again.' } }); return; }
-      const existing = workspaceRows.find(p => p.path === body.path);
-      const added = existing || { id: 'second', path: body.path, name: body.name || 'Second project' };
-      if (!existing) workspaceRows.push(added);
-      result = { project: added, projects: workspaceRows, created: !existing };
-    }
-    else if (options.workspaces && url.pathname === '/api/projects/second/threads') result = [];
+    if (url.pathname === '/api/bootstrap') result = { token: 'test-token', projects: [project], backend: 'http://127.0.0.1:2024' };
     else if (url.pathname.endsWith('/threads')) result = req.method() === 'POST' ? { ...rows[0], thread_id: 'new-thread', metadata: { cwd: project.path } } : rows;
     else if (url.pathname.endsWith('/state')) {
       if (options.delayOldState && url.pathname.includes('conversation-1')) await new Promise(r => setTimeout(r, 450));
@@ -254,7 +241,7 @@ test('slash navigation respects Escape, arrow selection, IME and multiline input
 
 test('slash tab commands still work after manually switching definition tabs', async ({ page }) => {
   await mount(page, { empty: true });
-  await page.getByRole('button', { name: 'Agent definition', exact: true }).click();
+  await page.getByRole('button', { name: 'Agent setup', exact: true }).click();
   await page.getByRole('button', { name: /^Tools/ }).click();
   const composer = page.getByRole('combobox', { name: 'Message the agent' });
   await composer.fill('/skills'); await composer.press('Enter');
@@ -490,7 +477,7 @@ test('appearance previews switch all surfaces, preserve drafts and persist acros
   const calls = await mount(page, { approval: true, childRequests: true, structuredTasks: true });
   const composer = page.getByRole('combobox', { name: 'Message the agent' });
   await composer.fill('Keep this draft while changing appearance.');
-  await page.getByRole('button', { name: 'Model and approval settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   for (const [label, value] of [['Studio Light', 'studio'], ['Graphite', 'graphite'], ['Midnight', 'midnight'], ['Paper', 'paper']]) {
     await page.getByText(label, { exact: true }).click();
     await expect(page.getByRole('radio', { name: new RegExp(label) })).toBeChecked();
@@ -502,7 +489,7 @@ test('appearance previews switch all surfaces, preserve drafts and persist acros
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'paper');
   await expect(composer).toHaveValue('Keep this draft while changing appearance.');
-  await page.getByRole('button', { name: 'Model and approval settings' }).click();
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
   await page.getByRole('radio', { name: /^System/ }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'studio');
   await page.emulateMedia({ colorScheme: 'dark' });
@@ -514,50 +501,52 @@ test('appearance previews switch all surfaces, preserve drafts and persist acros
 });
 
 
-test('add workspace browses folders, persists a name and switches without sending a message', async ({ page }) => {
-  const calls = await mount(page, { workspaces: true });
-  const composer = page.getByRole('combobox', { name: 'Message the agent' });
-  await composer.fill('Keep my original draft');
-  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption('__add_workspace__');
-  const dialog = page.getByRole('dialog', { name: 'Add workspace', exact: true });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('button', { name: 'Parent folder' })).toBeEnabled();
-  await dialog.getByRole('button', { name: 'Parent folder' }).click();
-  await dialog.getByRole('button', { name: 'Second project', exact: true }).click();
-  await expect(dialog.getByLabel('Folder path')).toHaveValue('/sample/Second project');
-  await dialog.getByLabel('Display name').fill('Research');
-  await dialog.getByRole('button', { name: 'Add workspace', exact: true }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(page.getByRole('combobox', { name: 'Project', exact: true })).toHaveValue('second');
-  await expect(page.getByText('Start a conversation', { exact: true })).toBeVisible();
-  await page.reload();
-  await expect(page.getByRole('combobox', { name: 'Project', exact: true })).toHaveValue('second');
-  await expect(page.getByRole('option', { name: 'Research', exact: true })).toHaveCount(1);
-  await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(project.id);
-  await expect(composer).toHaveValue('Keep my original draft');
-  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
-});
-
-test('cancel, invalid folders and duplicate registration preserve the existing chat and draft', async ({ page }) => {
-  const calls = await mount(page, { workspaces: true });
+test('sidebar identifies one fixed project and separates app settings from conversation controls', async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem('lc.workspace.project', 'old-other-project'));
+  const calls = await mount(page);
+  const sidebar = page.getByRole('complementary', { name: 'Project and conversations' });
+  await expect(sidebar.locator('.sidebar-project')).toContainText(project.name);
+  await expect(sidebar.locator('.sidebar-project-path')).toHaveAttribute('title', project.path);
+  await expect(sidebar.getByRole('combobox')).toHaveCount(0);
+  await expect(sidebar.getByText('Add workspace', { exact: false })).toHaveCount(0);
+  await expect(sidebar.getByRole('button', { name: 'New conversation', exact: true })).toHaveCount(1);
   const composer = page.getByRole('combobox', { name: 'Message the agent' });
   await composer.fill('Keep this draft');
-  const selector = page.getByRole('combobox', { name: 'Project', exact: true });
-  await selector.selectOption('__add_workspace__');
-  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect(composer).toHaveValue('Keep this draft');
-  await selector.selectOption('__add_workspace__');
-  const dialog = page.getByRole('dialog', { name: 'Add workspace', exact: true });
-  await expect(dialog.getByRole('button', { name: 'Add workspace', exact: true })).toBeEnabled();
-  await dialog.getByLabel('Folder path').fill('/missing');
-  await dialog.getByRole('button', { name: 'Add workspace', exact: true }).click();
-  await expect(dialog.getByRole('alert')).toContainText('Folder not found');
-  await expect(selector).toHaveValue(project.id);
-  await expect(composer).toHaveValue('Keep this draft');
-  await dialog.getByLabel('Folder path').fill(project.path);
-  await dialog.getByRole('button', { name: 'Add workspace', exact: true }).click();
-  await expect(dialog).toHaveCount(0);
+  await sidebar.getByRole('button', { name: 'Settings', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings', exact: true });
+  await expect(settings.getByRole('radio', { name: /^Paper/ })).toBeVisible();
+  await expect(settings.getByText(project.path, { exact: true })).toBeVisible();
+  await expect(settings.getByLabel('Model for the next turn')).toHaveCount(0);
+  await settings.getByRole('radio', { name: /^Paper/ }).check();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Model and approval settings' }).click();
+  const conversation = page.getByRole('dialog', { name: 'Conversation settings', exact: true });
+  await expect(conversation.getByLabel('Model for the next turn')).toBeVisible();
+  await expect(conversation.getByRole('radio', { name: /^Paper/ })).toHaveCount(0);
+  await expect(conversation.getByText('Tool approvals', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
   await expect(composer).toHaveValue('Keep this draft');
   await expect(page.locator('.editable-title')).toContainText('Explore the agent architecture');
+  expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
+  await page.reload();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'paper');
+  await expect(composer).toHaveValue('Keep this draft');
+  await expect(sidebar.locator('.sidebar-project')).toContainText(project.name);
+});
+
+test('model slash command opens conversation controls; sidebar stays usable on small screens', async ({ page }) => {
+  const calls = await mount(page);
+  const composer = page.getByRole('combobox', { name: 'Message the agent' });
+  await composer.fill('/model deepseek:deepseek-chat'); await composer.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Conversation settings', exact: true });
+  await expect(dialog.getByLabel('Model for the next turn')).toHaveValue('deepseek:deepseek-chat');
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings', exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Hide sidebar' }).click();
+  await expect(page.getByRole('button', { name: 'Show sidebar' })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   expect(calls.filter(c => c.url.endsWith('/run'))).toHaveLength(0);
 });

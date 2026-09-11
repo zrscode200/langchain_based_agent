@@ -36,9 +36,9 @@ In another terminal, from `web/`:
 pnpm start --workspace /absolute/path/to/your/project --backend http://127.0.0.1:2024
 ```
 
-Open **http://127.0.0.1:3100**. Repeat `--workspace /absolute/path/to/another/project`
-to offer multiple projects. The launcher canonicalizes these directories; the
-browser can also add folders from the workspace dropdown. Use `--port` for another frontend port.
+Open **http://127.0.0.1:3100**. This instance serves exactly one project: the
+folder passed to `--workspace`. The launcher canonicalizes that directory and
+rejects multiple workspaces. Use `--port` for another frontend port.
 
 If backend port 2024 is occupied, the backend launcher stops its own fallback
 process and fails clearly; it never silently hands the frontend a different
@@ -56,31 +56,26 @@ it forwards the key only to that fixed backend. Remote hosting, reverse proxies,
 multi-user access, and remote sandbox file browsing are not supported by this
 local launcher.
 
-## Adding workspaces
+## One launch, one project
 
-Open the **Workspace** dropdown in the left sidebar and choose **Add workspace…**.
-Browse local folders with Home, the up arrow and folder rows, or paste an absolute
-folder path (`~/` is supported). Enter an optional display name, then choose
-**Add workspace**. The app switches to that project; use **New conversation** to
-start chatting. Adding a folder does not run the agent or change that folder.
-Cancel and validation failures leave the existing conversation and draft intact.
-Selecting an already registered folder opens its existing workspace, preserving
-its name and conversations. Symbolic-link aliases resolve to the same workspace.
+The web app is an alternative interface to a project agent. Its sidebar identifies
+the startup project and folder; it does not switch projects or add folders. To
+work on a different project, start that project's agent and frontend separately,
+using its intended installation and configuration. If both stay running, choose
+different backend and frontend ports (for example 2025 and 3101 for the second
+project) and point that frontend at the matching backend.
 
-The local launcher saves the list in `web/.local/workspaces.json` (gitignored),
-so browser refreshes and frontend restarts retain it. `--workspace-store
-/absolute/path/workspaces.json` selects another store, for example when multiple
-installed checkouts should share one list. Startup `--workspace` roots are merged
-with saved workspaces; saved display names win. Store errors are reported without
-replacing the existing file. A leftover `.lock` after an abrupt crash requires
-checking that no frontend is writing before removing that lock.
+Saved lists from the earlier multi-workspace UI are preserved on disk but are no
+longer read. The old `--workspace-store` flag and folder-browsing/registration APIs
+are unavailable. Existing project conversations and browser drafts are retained.
+A future hub that coordinates distinct project agents is separate work.
 
-Folder selection exposes directory names only, including navigation outside the
-current project. It requires the same local-origin and session-token checks as
-other UI APIs. File previews remain confined to registered workspace roots;
-thread bindings and agent filesystem permissions remain backend-owned. Hidden
-folders and symbolic links are omitted from the folder list; a known folder path
-can be entered directly. There is no upload and no remote folder picker.
+The sidebar gives conversations most of its space, groups **Project files** and
+**Agent setup** below them, and places **Settings** at the bottom. Settings contains
+appearance and the current project/connection details. The control beneath the
+composer opens **Conversation settings** for the model and tool approvals.
+`/settings` opens app settings; `/model` opens conversation settings. These controls
+do not send a message or change approval mode merely by opening them.
 
 ## Everyday workflow
 
@@ -96,18 +91,20 @@ can be entered directly. There is no upload and no remote folder picker.
   `/tools`, `/files`, `/tasks`, `/rename`, `/new`, `/compact`, and `/help` open
   supported controls without sending a prompt. Unknown commands stay in the draft;
   **Use as message text** explicitly prepares literal slash text for sending.
-- Open **Agent definition** to discover skills and tools. **Use skill** attaches
+- Open **Agent setup** to discover skills and tools. **Use skill** attaches
   the real server-discovered skill to your next message. Its instructions and
   invocation metadata use the harness's existing format.
 - Drag the left edge of the right panel to make more room for skills, files or
   task details. The width is remembered in this browser. Double-click the edge
   to reset, or focus it and use **←/→** (hold **Shift** for larger steps).
   On phones the panel uses the full screen width.
-- **Background work** lists delegated tasks by what they need from you: tasks
+- **Background work** lists live subagents by what they need from you: tasks
   waiting for a decision first, then running work with its latest tool call or
-  finding and elapsed time, then the queue with each task's position, then
-  finished work newest first, marked as waiting for or delivered to the agent.
-  A row's **Review in main chat** jumps to that request. The main agent's
+  finding and elapsed time, then the queue with each task's position. Finished
+  work is collected in the **Finished** dropdown on the summary bar, newest
+  first and marked as waiting for or delivered to the agent, so history never
+  shares space with running work. A row's **Review in main chat** jumps to that
+  request. The main agent's
   current plan appears within the conversation. Select a task for its organized
   conversation, grouped tools, quiet reasoning, completed result and two-step
   cancellation. **Expand view** gives longer investigations more room;
@@ -128,11 +125,11 @@ can be entered directly. There is no upload and no remote folder picker.
 - **Project files** previews Markdown, code/text and inert HTML. Use **Reference
   in chat** to name a file in your message. The agent reads it through its own
   tools. The browser does not upload file contents or automatically grant edits.
-- The combined model/approval control below the composer opens **Session settings**,
+- The combined model/approval control below the composer opens **Conversation settings**,
   which selects the next turn's model and the live Manual, Auto
   or YOLO approval mode. Mode changes affect running background agents at their
   next approval boundary, as in the TUI. The effective model and saved state are
-  available in **Agent definition → Context**.
+  available in **Agent setup → Context**.
 - **Compact conversation** in the `…` menu invokes the existing server-owned
   offload operation. It can call the configured summarization model. Cancellation
   is available; archives and retention remain backend policy.
@@ -163,13 +160,13 @@ wake. Existing backend capabilities are not replaced with browser-owned state.
 
 ## Appearance
 
-Open **Settings → Appearance** from the existing model/settings control or
+Open **Settings → Appearance** from the bottom-left Settings button or
 `/settings`. Choose **Studio Light**, **Graphite**, **Midnight**, or **Paper**.
 The default **System** option follows the device's light/dark preference using
 Studio Light and Graphite. An explicit theme stays selected when the device
 preference changes.
 
-Changes apply immediately and persist in this browser across projects and tabs.
+Changes apply immediately and persist in this browser across tabs on the same app address.
 If browser storage is blocked, selection still works for the current page.
 Appearance loads before the app renders and does not change models, approvals,
 conversation drafts or backend settings. The same palette covers task views,

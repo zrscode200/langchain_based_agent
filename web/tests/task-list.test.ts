@@ -13,7 +13,8 @@ test('groups put attention first, keep queue order and list finished work newest
 });
 
 test('summary line counts states in priority order', () => {
-  assert.equal(summaryLine([task({ status: 'running' }), task({ status: 'needs_approval' }), task({ status: 'queued' }), task({ status: 'completed' }), task({ status: 'running' })]), '1 needs you · 2 running · 1 queued · 1 finished');
+  assert.equal(summaryLine([task({ status: 'running' }), task({ status: 'needs_approval' }), task({ status: 'queued' }), task({ status: 'completed' }), task({ status: 'running' })]), '1 needs you · 2 running · 1 queued');
+  assert.equal(summaryLine([task({ status: 'completed' })]), '');
   assert.equal(summaryLine([]), '');
 });
 

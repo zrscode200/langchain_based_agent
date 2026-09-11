@@ -23,15 +23,14 @@ export function groupTasks(tasks: Task[]): TaskGroup[] {
   ];
 }
 
+/** Live work only; finished tasks are counted by their own dropdown. */
 export function summaryLine(tasks: Task[]): string {
   const count = (statuses: string[]) => tasks.filter(t => statuses.includes(t.status)).length;
   const attention = count(waitingStatuses), running = count(['running']), queued = count(['queued']);
-  const finished = tasks.length - attention - running - queued;
   const parts: string[] = [];
   if (attention) parts.push(`${attention} need${attention === 1 ? 's' : ''} you`);
   if (running) parts.push(`${running} running`);
   if (queued) parts.push(`${queued} queued`);
-  if (finished) parts.push(`${finished} finished`);
   return parts.join(' · ');
 }
 

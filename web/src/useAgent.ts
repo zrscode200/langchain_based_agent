@@ -63,10 +63,10 @@ export function useAgent() {
       if (!response.ok) throw new Error('Open the workspace through its Node launcher.');
       const result = await response.json();
       if (bootstrapLoad.current !== load) return;
+      if (!Array.isArray(result.projects) || result.projects.length !== 1) throw new Error('This web UI needs one project. Restart its frontend with one --workspace folder.');
       token.current = result.token;
       setProjects(result.projects); setBackend(result.backend);
-      const saved = localStorage.getItem('lc.workspace.project');
-      setProjectId(result.projects.find((p: Project) => p.id === saved)?.id || result.projects[0]?.id || '');
+      setProjectId(result.projects[0].id);
     } catch (e: any) { if (bootstrapLoad.current === load) { setError(e.message); setStatus('disconnected'); } }
   }, []);
   useEffect(() => { void bootstrap(); return () => { bootstrapLoad.current++; stream.current?.abort(); }; }, [bootstrap]);
@@ -78,7 +78,6 @@ export function useAgent() {
     selection.current = { projectId, threadId: '', epoch: selection.current.epoch + 1 };
     const load = ++projectLoad.current;
     setThreadId(''); setThreads([]); setMessages([]); setState(empty); setTasks([]); setCapacity(null); setRunId(''); setCatalog({ skills: [], tools: [] }); setError(''); setStatus('loading');
-    localStorage.setItem('lc.workspace.project', projectId);
     data(route(projectId, '')).then(rows => {
       if (projectLoad.current !== load || selection.current.projectId !== projectId) return;
       setThreads(rows);
@@ -248,19 +247,8 @@ export function useAgent() {
     titleRevisions.current.set(key, (titleRevisions.current.get(key) || 0) + 1);
     if (selection.current.projectId === p) setThreads(old => old.map(t => t.thread_id === id ? { ...t, metadata: { ...t.metadata, title: title.trim() } } : t));
   }
-  async function addWorkspace(path: string, name: string) {
-    const result = await data('/projects', 'POST', { path, name });
-    setProjects(result.projects);
-    return result.project as Project;
-  }
-  function changeProject(id: string) {
-    if (id === selection.current.projectId) return;
-    stream.current?.abort(); busy.current = false; compaction.current = '';
-    selection.current = { projectId: id, threadId: '', epoch: selection.current.epoch + 1 };
-    setThreadId(''); setProjectId(id);
-  }
   const capture = () => { const epoch = selection.current.epoch; return () => selection.current.epoch === epoch; };
-  return { projects, project, projectId, addWorkspace, setProjectId: changeProject, threads, thread, threadId, selectThread, newThread, creating, state, messages, receipts, tasks, pendingResults, capacity, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
+  return { projects, project, projectId, threads, thread, threadId, selectThread, newThread, creating, state, messages, receipts, tasks, pendingResults, capacity, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
 }
 function hideSubmitted(snapshot: Snapshot, submitted: Set<string>): Snapshot {
   return { ...snapshot, interrupts: snapshot.interrupts?.filter(i => !submitted.has(i.id)), tasks: snapshot.tasks?.map(t => ({ ...t, interrupts: t.interrupts?.filter((i: Json) => !submitted.has(i.id)) })) };

@@ -12,7 +12,7 @@ export type ComposerCommand = {
 
 const commands: [CommandAction, string][] = [
   ['model', 'Choose the model for your next message'],
-  ['settings', 'Open model and approval settings'],
+  ['settings', 'Open appearance and app settings'],
   ['skills', 'Browse the workspace’s loaded skills'],
   ['tools', 'Inspect available tools'],
   ['tasks', 'Open background work'],

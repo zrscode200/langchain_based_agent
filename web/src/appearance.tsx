@@ -30,7 +30,7 @@ export function AppearanceSettings() {
   const activeName = themes.find(theme => theme.id === current.theme)!.name;
   return <fieldset className="appearance-settings">
     <legend className="eyebrow">Appearance</legend>
-    <p className="field-hint">Choose how your workspace looks. Saved in this browser for all projects.</p>
+    <p className="field-hint">Choose how your workspace looks. Saved in this browser.</p>
     <label className={'theme-system' + (current.preference === 'system' ? ' selected' : '')}>
       <input type="radio" name={name} value="system" checked={current.preference === 'system'} onChange={() => select('system')} />
       <Monitor size={18} /><span><strong>System</strong><small>{current.preference === 'system' ? `Follow your device · ${activeName}` : 'Follow your device’s light or dark appearance'}</small></span>

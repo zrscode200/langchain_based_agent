@@ -104,7 +104,7 @@ test('appearance offers one native radio group with labelled palette previews', 
   assert.equal((html.match(/type="radio"/g) || []).length, 5);
   assert.equal(new Set([...html.matchAll(/name="([^"]+)"/g)].map(m => m[1])).size, 1);
   assert.match(html, /<legend[^>]*>Appearance<\/legend>/);
-  assert.match(html, /Saved in this browser for all projects/);
+  assert.match(html, /Saved in this browser/);
   for (const theme of themes) assert.ok(html.includes(theme.name));
 });
 
