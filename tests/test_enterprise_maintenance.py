@@ -215,7 +215,7 @@ assert observed == ["lc_factory_enterprise.upstream_cli"]
 '''
     result = subprocess.run(
         [sys.executable, "-c", code], cwd=tmp_path,
-        env={**os.environ, "PYTHONPATH": str(source)},
+        env={**os.environ, "PYTHONPATH": os.pathsep.join((str(source.parents[1] / "src"), str(source)))},
         capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stderr

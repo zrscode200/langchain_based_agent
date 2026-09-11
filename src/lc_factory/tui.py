@@ -32,6 +32,7 @@ def main() -> None:
     server_manager_module._scaffold_workspace = launch.scaffold_workspace  # noqa: SLF001
     from lc_factory.skill_policy import client_skill_policy
     from lc_factory.background_ui import client_background_tasks
+    from lc_factory.web_launcher import client_web_frontend
 
-    with client_runtime_environment(), client_skill_policy(), client_background_tasks():
+    with client_runtime_environment(), client_skill_policy(), client_background_tasks(), client_web_frontend():
         cli_main()

@@ -5,6 +5,8 @@ import { AgentRunError, runFailure } from './run-errors.ts';
 
 const empty: Snapshot = { values: {}, next: [], interrupts: [] };
 export function useAgent() {
+  const [attached, setAttached] = useState(false);
+  const initialThread = useRef('');
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState('');
   const [threads, setThreads] = useState<Thread[]>([]);
@@ -65,6 +67,7 @@ export function useAgent() {
       if (bootstrapLoad.current !== load) return;
       if (!Array.isArray(result.projects) || result.projects.length !== 1) throw new Error('This web UI needs one project. Restart its frontend with one --workspace folder.');
       token.current = result.token;
+      initialThread.current = result.initialThread || ''; setAttached(!!result.attached);
       setProjects(result.projects); setBackend(result.backend);
       setProjectId(result.projects[0].id);
     } catch (e: any) { if (bootstrapLoad.current === load) { setError(e.message); setStatus('disconnected'); } }
@@ -78,10 +81,12 @@ export function useAgent() {
     selection.current = { projectId, threadId: '', epoch: selection.current.epoch + 1 };
     const load = ++projectLoad.current;
     setThreadId(''); setThreads([]); setMessages([]); setState(empty); setTasks([]); setCapacity(null); setRunId(''); setCatalog({ skills: [], tools: [] }); setError(''); setStatus('loading');
-    data(route(projectId, '')).then(rows => {
+    data(route(projectId, '')).then(async rows => {
+      const requested = initialThread.current;
+      if (requested && !rows.some((r: Thread) => r.thread_id === requested)) rows = [await data(route(projectId, requested)), ...rows];
       if (projectLoad.current !== load || selection.current.projectId !== projectId) return;
       setThreads(rows);
-      const saved = localStorage.getItem(`lc.workspace.thread.${projectId}`);
+      const saved = requested || localStorage.getItem(`lc.workspace.thread.${projectId}`);
       setThreadId(rows.find((r: Thread) => r.thread_id === saved)?.thread_id || rows[0]?.thread_id || '');
       setStatus('ready');
     }).catch(e => { if (projectLoad.current === load && selection.current.projectId === projectId) { setError(e.message); setStatus('disconnected'); } });
@@ -125,6 +130,7 @@ export function useAgent() {
 
   async function newThread() {
     const p = selection.current.projectId;
+    if (attached) { setNotice('Return to the terminal to change conversations.'); return; }
     if (!p || creation.current) return;
     creation.current = true; setCreating(true);
     try { const row = await data(route(p, ''), 'POST', {}); if (selection.current.projectId !== p) return; setThreads(old => [row, ...old]); setThreadId(row.thread_id); }
@@ -248,7 +254,7 @@ export function useAgent() {
     if (selection.current.projectId === p) setThreads(old => old.map(t => t.thread_id === id ? { ...t, metadata: { ...t.metadata, title: title.trim() } } : t));
   }
   const capture = () => { const epoch = selection.current.epoch; return () => selection.current.epoch === epoch; };
-  return { projects, project, projectId, threads, thread, threadId, selectThread, newThread, creating, state, messages, receipts, tasks, pendingResults, capacity, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
+  return { attached, projects, project, projectId, threads, thread, threadId, selectThread, newThread, creating, state, messages, receipts, tasks, pendingResults, capacity, catalog, mode, status, error, setError, notice, setNotice, runId, activity, backend, run, reconnect, cancel, compact, refresh, changeMode, rename, data, request, capture, base: route(projectId, threadId), interrupts: pendingInterrupts(state) };
 }
 function hideSubmitted(snapshot: Snapshot, submitted: Set<string>): Snapshot {
   return { ...snapshot, interrupts: snapshot.interrupts?.filter(i => !submitted.has(i.id)), tasks: snapshot.tasks?.map(t => ({ ...t, interrupts: t.interrupts?.filter((i: Json) => !submitted.has(i.id)) })) };

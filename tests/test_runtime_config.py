@@ -196,7 +196,8 @@ def test_diagnostic_commands_remain_available_with_invalid_preferences(
     environment = dict(os.environ)
     for key in CLIENT_KEYS:
         environment.pop(key, None)
-    environment["PYTHONPATH"] = str(Path(__file__).resolve().parents[1] / "enterprise" / "src")
+    source = Path(__file__).resolve().parents[1]
+    environment["PYTHONPATH"] = os.pathsep.join(str(p) for p in (source / "src", source / "enterprise" / "src"))
     environment["DEEPAGENTS_CODE_NO_UPDATE_CHECK"] = "1"
     result = subprocess.run([sys.executable, "-c", f"from {entry}.tui import main; main()", *arguments],
         cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=30)

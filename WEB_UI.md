@@ -6,7 +6,66 @@ adapter and the existing Python/LangGraph agent backend. The TUI remains availab
 The interface keeps conversation central. Background work, files and agent definition open in a contextual panel; files can open beside the chat. No model API
 keys are sent to the browser.
 
-## Start locally
+## Launch from a project
+
+With a release wheel containing the bundled frontend and Node.js 22.12+ on PATH:
+
+```sh
+cd /path/to/project
+lc-code --web-frontend
+# Enterprise installation:
+ddt-agent --web-frontend
+```
+
+The terminal prints a local URL. Open it yourself and keep that terminal running.
+Both ports are selected automatically, and the browser is connected to exactly
+the backend that was launched. Ctrl+C stops those owned processes. Normal startup
+does not run npm, build JavaScript, or open a browser. The entry point uses its
+installed agent package and project configuration; it does not search for or
+replace a pinned submodule. Activate the project's intended installation first.
+Native `--model`, agent profile, MCP and local runtime options still flow through
+the existing CLI. The initial approval mode applies to new conversations;
+existing conversations retain their saved mode.
+
+In an idle TUI, enter:
+
+```text
+/web-frontend
+```
+
+This hands the **current conversation** to the browser while the terminal waits.
+Use **Return to terminal** after finishing its current turn and approvals. The
+launcher closes that browser server and reloads the saved conversation and
+approval mode into the TUI. It never starts or stops another backend for this
+attachment. To change conversations, models, or compact during an attachment,
+return to the terminal first. Closing a browser tab does not end the handoff.
+
+The browser currently has no native command-hook or goal lifecycle executor.
+Launches with configured command hooks, sandbox sessions, and handoffs with
+existing goal/rubric state fail explicitly. Standalone `--resume`, initial
+prompt/skill/goal and startup-shell options are also TUI-only: complete native
+startup in the TUI, then invoke `/web-frontend` when eligible. A stopped frontend
+or uncertain handoff keeps terminal input paused; reconnect the browser to
+inspect/finish work, then quit and resume the session in the TUI if needed.
+
+### Building an editable checkout or release
+
+Install the pinned dependencies once under your environment's normal policy,
+then run this in `web/`:
+
+```sh
+npm run build:launcher
+```
+
+This emits the React assets and a standalone Node server into
+`src/lc_factory/_web/`. Editable installations use that copy. Wheel builds include those assets when present. Release builds should set
+`LC_FACTORY_REQUIRE_WEB_ASSETS=1` to fail if the bundle is missing or incomplete.
+Plain Python source/sdist installs remain valid for TUI and backend use without
+Node; their web command explains the missing build. To include the web client
+when building from an sdist, run the same frontend build step first. Consumers of the
+wheel need Node but do not need npm, TypeScript, or frontend dependencies.
+
+## Manual development launch
 
 Requirements: the project's existing Python environment, Node 22.12+ and pnpm.
 The frontend dependencies are pinned in `web/package.json` and `web/pnpm-lock.yaml`.

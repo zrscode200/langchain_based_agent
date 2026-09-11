@@ -67,3 +67,16 @@ async def fulfill_background_hook(hooks, payload):
                 continue
         cleanup.result()
         raise
+
+
+def web_client_modules():
+    """Pinned native CLI, hooks and approval contracts used only by the launcher."""
+    from deepagents_code import main, approval_mode
+    from deepagents_code.hooks import manager
+    from deepagents_code.hooks.models import domain
+    return main, manager, domain, approval_mode
+
+
+def web_command_registry():
+    from deepagents_code import command_registry
+    return command_registry

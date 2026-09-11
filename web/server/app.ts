@@ -3,9 +3,13 @@ import { HttpError, listFiles, readFile } from './files.ts';
 import { conversationTitles } from './titles.ts';
 import { allowedDecisions, pendingInterrupts, validAnswer, type Json, type Project, type Workspace, type Snapshot } from '../src/protocol.ts';
 
-export type Config = { projects: Project[]; backend: string; apiKey?: string; origin: string; fetch?: typeof fetch };
+export type Config = { projects: Project[]; backend: string; apiKey?: string; backendHeaders?: Record<string, string>; onUncertain?: () => void; runtimeContext?: Json; initialMode?: string; initialThread?: string; attached?: boolean; origin: string; fetch?: typeof fetch };
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 const validId = (id: string) => /^[\w-]{1,128}$/.test(id);
+export function hasNativeGoalState(values: Json) {
+  return Object.entries(values).some(([key, value]) => !!value &&
+    (key.startsWith('_goal_') || key.startsWith('_pending_goal_') || ['rubric', '_sticky_rubric', 'goal_criteria_request'].includes(key)));
+}
 export function validateResponses(state: Snapshot, responses: Json) {
   const interrupts = pendingInterrupts(state);
   if (!interrupts.length || !responses || typeof responses !== 'object' || Array.isArray(responses) || Object.keys(responses).sort().join() !== interrupts.map(i => i.id).sort().join()) throw new HttpError(409, 'The pending request changed. Refresh before deciding.');
@@ -25,13 +29,31 @@ export function validateResponses(state: Snapshot, responses: Json) {
 }
 export function createApp(config: Config) {
   if (config.projects.length !== 1) throw new Error('The web UI requires exactly one startup project.');
+  if (config.attached && !validId(config.initialThread || '')) throw new Error('An attachment needs a valid conversation ID.');
+  if (config.initialMode && !['manual', 'auto', 'yolo'].includes(config.initialMode)) throw new Error('Invalid initial approval mode.');
   const projects = [Object.freeze({ ...config.projects[0] })];
   const token = randomBytes(32).toString('hex');
   const upstreamUrl = new URL(config.backend);
   if (!['http:', 'https:'].includes(upstreamUrl.protocol) || !['127.0.0.1', 'localhost', '[::1]'].includes(upstreamUrl.hostname) || upstreamUrl.username || upstreamUrl.password || upstreamUrl.pathname !== '/' || upstreamUrl.search || upstreamUrl.hash) throw new Error('The backend must be a fixed loopback HTTP origin.');
   const fetcher = config.fetch || fetch;
   async function upstream(route: string, method = 'GET', body?: unknown, headers: Record<string, string> = {}, signal?: AbortSignal) {
-    const result = await fetcher(new URL(route, upstreamUrl), { method, headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(config.apiKey ? { 'x-api-key': config.apiKey } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal: signal || AbortSignal.timeout(30_000) });
+    // An attached browser may disappear while a mutation is being admitted.
+    // Keep that admission alive until a definite response; only disconnect its
+    // stream after headers. Ambiguous writes permanently invalidate handback.
+    const admission = config.attached ? new AbortController() : null;
+    const deadline = admission ? setTimeout(() => admission.abort(), 30_000) : null;
+    let result: Response;
+    try {
+      result = await fetcher(new URL(route, upstreamUrl), { method, headers: { ...config.backendHeaders, ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...(config.apiKey ? { 'x-api-key': config.apiKey } : {}), ...headers }, body: body === undefined ? undefined : JSON.stringify(body), redirect: 'error', signal: admission?.signal || signal || AbortSignal.timeout(30_000) });
+      if (config.attached && method !== 'GET' && result.status >= 500) config.onUncertain?.();
+    } catch (error) {
+      if (config.attached && method !== 'GET') config.onUncertain?.();
+      throw error;
+    } finally { if (deadline) clearTimeout(deadline); }
+    if (admission && signal) {
+      if (signal.aborted) admission.abort();
+      else signal.addEventListener('abort', () => admission.abort(), { once: true });
+    }
     if (!result.ok) {
       let message = `Agent server returned ${result.status}.`;
       try { const data = await result.json(); message = typeof data.detail === 'string' ? data.detail : typeof data.message === 'string' ? data.message : message; } catch { /* keep safe status */ }
@@ -64,7 +86,7 @@ export function createApp(config: Config) {
   async function api(request: Request) {
     const url = new URL(request.url);
     if (url.origin !== config.origin || request.headers.get('origin') && request.headers.get('origin') !== config.origin || ['cross-site', 'same-site'].includes(request.headers.get('sec-fetch-site') || '')) throw new HttpError(403, 'Open this workspace from its local address.');
-    if (url.pathname === '/api/bootstrap' && request.method === 'GET') return json({ token, projects, backend: upstreamUrl.origin });
+    if (url.pathname === '/api/bootstrap' && request.method === 'GET') return json({ token, projects, backend: upstreamUrl.origin, initialThread: config.initialThread, attached: !!config.attached });
     if (request.headers.get('x-workspace-token') !== token) throw new HttpError(403, 'Session expired. Reload the workspace.');
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] !== 'api' || parts[1] !== 'projects') throw new HttpError(404, 'Unknown route.');
@@ -85,16 +107,23 @@ export function createApp(config: Config) {
     if (parts[3] === 'files' && request.method === 'GET') return json(url.searchParams.has('read') ? await readFile(project.path, url.searchParams.get('path') || '') : await listFiles(project.path, url.searchParams.get('path') || ''));
     if (parts[3] !== 'threads') throw new HttpError(404, 'Unknown route.');
     if (parts.length === 4) {
+      if (config.attached) {
+        if (request.method !== 'GET') throw new HttpError(409, 'This browser is attached to your terminal conversation. Return to the terminal to change conversations.');
+        await owned(project, config.initialThread!);
+        return json([await titles.read(config.initialThread!)]);
+      }
       if (request.method === 'GET') return json(await upJson('/threads/search', 'POST', { metadata: { cwd: project.path, graph_id: 'agent' }, limit: 100, offset: Math.max(0, Number(url.searchParams.get('offset')) || 0), sort_by: 'updated_at', sort_order: 'desc' }));
       if (request.method === 'POST') {
         const thread = randomUUID();
         await upJson(`/dcode/threads/${thread}/workspace`, 'POST', { cwd: project.path });
+        await upJson('/store/items', 'PUT', { namespace: ['deepagents_code', 'approval_mode'], key: modeKey(thread), value: { mode: config.initialMode || 'manual' }, index: false });
         return json(await upJson(`/threads/${thread}`), 201);
       }
       throw new HttpError(405, 'Method not allowed.');
     }
     const thread = parts[4];
     if (!validId(thread)) throw new HttpError(400, 'Invalid conversation ID.');
+    if (config.attached && thread !== config.initialThread) throw new HttpError(404, 'This browser is attached to another conversation.');
     const workspace = await owned(project, thread);
     const prefix = `/threads/${thread}`;
     if (parts.length === 5 && request.method === 'GET') return json(await titles.read(thread));
@@ -122,6 +151,7 @@ export function createApp(config: Config) {
       return json([...running, ...pending]);
     }
     if (operation === 'cancel' && request.method === 'POST' && validId(body.run_id || '')) return json(await upJson(`${prefix}/runs/${body.run_id}/cancel?wait=1&action=interrupt`, 'POST'));
+    if (config.attached && ['compact', 'compact-cancel'].includes(operation)) throw new HttpError(409, 'Return to the terminal to compact this conversation.');
     if (operation === 'compact' && request.method === 'POST') {
       if (!validId(body.operation_id || '')) throw new HttpError(400, 'Missing compaction operation ID.');
       const mode = await getMode(thread), operationId = body.operation_id;
@@ -137,11 +167,13 @@ export function createApp(config: Config) {
     if (operation === 'run' && request.method === 'POST') {
       const mode = await getMode(thread);
       const state = await upJson(prefix + '/state?subgraphs=true') as Snapshot;
+      if (hasNativeGoalState(state.values)) throw new HttpError(409, 'This conversation has native goal or rubric state. Continue it in the TUI.');
       const previousUser = (state.values.messages || []).findLast((m: Json) => ['human', 'user'].includes(m.type || m.role));
       const savedTurn = previousUser?.additional_kwargs?.deepagents_code_user_prompt?.turn_id;
       const turnId = (body.responses || body.continue) && typeof savedTurn === 'string' ? savedTurn : randomUUID();
-      const payload: Json = { assistant_id: 'agent', context: { workspace, thread_id: thread, turn_id: turnId, approval_mode: mode, approval_mode_key: modeKey(thread), auto_approve: mode !== 'manual' }, stream_mode: ['messages-tuple', 'updates', 'custom'], stream_subgraphs: true, stream_resumable: true, on_disconnect: 'continue', multitask_strategy: 'reject' };
+      const payload: Json = { assistant_id: 'agent', context: { ...config.runtimeContext, workspace, thread_id: thread, turn_id: turnId, approval_mode: mode, approval_mode_key: modeKey(thread), auto_approve: mode !== 'manual' }, stream_mode: ['messages-tuple', 'updates', 'custom'], stream_subgraphs: true, stream_resumable: true, on_disconnect: 'continue', multitask_strategy: 'reject' };
       if (body.model !== undefined) {
+        if (config.attached) throw new HttpError(409, 'Return to the terminal to change the model.');
         if (typeof body.model !== 'string' || body.model.length > 200 || !/^[\w.-]+:[\w./:@-]+$/.test(body.model)) throw new HttpError(400, 'Use a provider:model identifier.');
         payload.context.model = body.model;
       }
@@ -161,9 +193,9 @@ export function createApp(config: Config) {
         payload.input = { messages: [message] };
       }
       const response = await upstream(prefix + '/runs/stream', 'POST', payload, {}, request.signal);
-      // Start naming as soon as the run is accepted. Metadata failure must not
-      // delay live output or make an accepted message look safe to resend.
-      if (payload.input?.messages) void titles.initialize(thread, body.text).catch(() => {});
+      // Account for naming before acknowledging a managed handoff drain.
+      // Failure never makes an accepted run look safe to resend.
+      if (payload.input?.messages) await titles.initialize(thread, body.text).catch(() => {});
       return response;
     }
     throw new HttpError(404, 'Unknown operation.');
