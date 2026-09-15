@@ -5,9 +5,9 @@ from importlib.metadata import distribution, version
 
 import pytest
 
-PINNED_DEEPAGENTS_CODE = "0.1.66"
-PINNED_DEEPAGENTS = "0.7.13"
-PINNED_SOURCE_COMMIT = "6c89fe2197a2dfe4f3851cda38565bcadba6066b"
+PINNED_DEEPAGENTS_CODE = "0.1.69"
+PINNED_DEEPAGENTS = "0.7.14"
+PINNED_SOURCE_COMMIT = "1d3232c0852c47af09119edea10eeec887e4f0da"
 
 
 def test_upstream_pins_installed():

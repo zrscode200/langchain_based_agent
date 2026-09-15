@@ -25,6 +25,9 @@ def test_factory_fork_has_private_interpreter_state(tmp_path):
         AIMessage(content="child complete"),
         AIMessage(content="parent complete"),
     ]))
+    # SDK 0.7.14 enforces the advertised input budget; the fake's 8k default
+    # cannot hold the interpreter and delegation tool schemas.
+    model.profile = {"tool_calling": True, "max_input_tokens": 1_000_000}
     graph, _ = create_factory_agent(
         model=model, assistant_id="interpreter-isolation", cwd=tmp_path,
         enable_interpreter=True, enable_memory=False, enable_skills=False,

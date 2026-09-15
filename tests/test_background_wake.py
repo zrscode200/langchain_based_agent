@@ -378,6 +378,9 @@ async def test_wake_transport_preserves_real_ask_user_receipt_for_auto(tmp_path)
         call('ask_user', {'questions': [{'question': 'May I inspect fixture URL?', 'type': 'text'}]}, 'ask'),
         call('fetch_url', {'url': 'fixture://approved'}, 'fetch'), AIMessage('done'),
     ]))
+    # SDK 0.7.14 enforces the advertised input budget; the fake's 8k default
+    # cannot hold this composition's tool schemas.
+    model.profile = {'tool_calling': True, 'max_input_tokens': 1_000_000}
     store, config, context = session()
     classifier = Classifier()
     settings = args(tmp_path, model, store=store, tools=[fixture_tool([])],

@@ -46,8 +46,20 @@ export function describeTool(call: Json) {
   return { label: name.replaceAll('_', ' '), target, kind: 'generic', args };
 }
 
+export function toolExchange(call: Json, messages: Message[]): { request?: Message; output?: Message } {
+  if (typeof call.id !== 'string' || !call.id) return {};
+  const proposals = messages.filter(m => !isTool(m) && m.tool_calls?.some(c => c.id === call.id));
+  // Rendered calls retain their owning message's object identity. Detached
+  // callers can fall back to an ID only when it identifies one proposal.
+  const request = proposals.find(m => m.tool_calls?.includes(call)) || (proposals.length === 1 ? proposals[0] : undefined);
+  if (!request && proposals.length) return {};
+  const following = messages.slice(request ? messages.indexOf(request) + 1 : 0);
+  const next = following.findIndex(m => isUser(m) || (!isTool(m) && m.tool_calls?.some(c => c.id === call.id)));
+  const results = (next < 0 ? following : following.slice(0, next)).filter(m => isTool(m) && m.tool_call_id === call.id);
+  return { request, output: results.length === 1 ? results[0] : undefined };
+}
 export function toolOutput(call: Json, messages: Message[]) {
-  return typeof call.id === 'string' && call.id ? messages.find(m => isTool(m) && m.tool_call_id === call.id) : undefined;
+  return toolExchange(call, messages).output;
 }
 export function toolState(call: Json, messages: Message[], active: boolean, interrupts: Interrupt[]): ToolState {
   const output = toolOutput(call, messages);

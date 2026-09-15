@@ -13,12 +13,17 @@ from lc_factory.upstream import (
 )
 
 
-async def build_reloadable_tools(config, project_context, *, has_tavily=False, tavily_api_key=None):
+async def build_reloadable_tools(config, project_context, *, tavily_api_key=None):
     tools = [fetch_url, get_current_thread_id]
-    if has_tavily:
-        tools.append(create_web_search_tool(tavily_api_key or ""))
+    read_only_builtins = [fetch_url]
+    if tavily_api_key is not None:
+        # An empty string still binds the tool, which then reports the key as
+        # unconfigured, matching upstream `_build_tools`.
+        search_tool = create_web_search_tool(tavily_api_key)
+        tools.append(search_tool)
+        read_only_builtins.append(search_tool)
     if config.no_mcp:
-        return MCPToolBundle(tools, None, [])
+        return MCPToolBundle(tools, None, [], read_only_builtins=read_only_builtins)
     project_dir = (project_context.project_root or project_context.user_cwd
                    if project_context is not None else None)
     plugins = await asyncio.to_thread(discover_plugin_mcp_configs, project_dir=project_dir)
@@ -31,8 +36,8 @@ async def build_reloadable_tools(config, project_context, *, has_tavily=False, t
         )
         if not mcp_tools:
             await manager.cleanup()
-            return MCPToolBundle(tools, info, [])
-        return MCPToolBundle([*tools, *mcp_tools], info, mcp_tools, manager)
+            return MCPToolBundle(tools, info, [], read_only_builtins=read_only_builtins)
+        return MCPToolBundle([*tools, *mcp_tools], info, mcp_tools, manager, read_only_builtins=read_only_builtins)
     except BaseException:
         await manager.cleanup()
         raise

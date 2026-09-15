@@ -17,20 +17,117 @@ stay a constant-length document no matter how many bumps accumulate.
 
 | Date | `deepagents-code` | `deepagents` | Port changes | Effort | Commit |
 |---|---|---|---|---|---|
-| 2026-09-06 | 0.1.66 release → **6c89fe2 source** | 0.7.13 release → **6c89fe2 source** | **workspace snapshots + sandbox ownership; QuickJS 0.3.7** | ~18 min | this commit |
+| 2026-09-14 | 6c89fe2 source (0.1.66) → **1d3232c0 release commit (0.1.69)** | 6c89fe2 source (0.7.13) → **1d3232c0 release commit (0.7.14)** | **tracing isolation + workspace policy + server tool contract re-applied** | ~30 min | this commit |
+| 2026-09-06 | 0.1.66 release → **6c89fe2 source** | 0.7.13 release → **6c89fe2 source** | **workspace snapshots + sandbox ownership; QuickJS 0.3.7** | ~18 min | `6be187b` |
 | 2026-09-06 | 0.1.64 → **0.1.66** | 0.7.10 → **0.7.13** | **constructor + workspace runtime + fork seam** | ~36 min | `7bade13` |
 | 2026-08-28 | 0.1.54 → **0.1.64** | 0.7.5 → **0.7.10** | **broad runtime rebase** | ~1 hr | `eaf8a12` |
 | 2026-08-10 | 0.1.52 → **0.1.54** | 0.7.1 → **0.7.5** | **none** (proven) | <30 min | `cb43e40` |
 | 2026-08-06 | 0.1.48 → **0.1.52** | 0.7.0b2 → **0.7.1** | **7 hunks re-applied** | ~1 hr | `304f8a8` |
 | 2026-07-27 | 0.1.47 → **0.1.48** | 0.7.0b2 (held) | **none** (inferred) | ~15 min | `45c40bd` |
 
-Two free bumps and four re-applications. The 0.1.66 bump also changes an
+Two free bumps and five re-applications. The 0.1.66 bump also changes an
 extension contract: default forked subagents inherit main middleware. Package
 parity alone cannot prove that previously documented injection scopes survive.
 
 ---
 
-## 2026-09-06 — reviewed source baseline 6c89fe2 + QuickJS 0.3.7 — this commit
+## 2026-09-14 — 6c89fe2 source → release commit 1d3232c0 (0.1.66 → 0.1.69, SDK 0.7.13 → 0.7.14) — this commit
+
+**Verdict: re-application owed — nine hunks across the assembly shell block,
+the server graph and the owned reload helpers; QuickJS stays at 0.3.7.** Both
+Code and SDK now pin the upstream release tag commit
+`1d3232c0852c47af09119edea10eeec887e4f0da` (tags `deepagents-code==0.1.69` and
+`deepagents==0.7.14`; the SDK tag `ded0f118` is an ancestor). Metadata versions
+**0.1.69 / 0.7.14** match the PyPI releases published the same day, and the
+Git provenance assertions in `tests/test_smoke.py` are retained. Python remains
+**>=3.12,<4**.
+
+**Delta-read method:** full Git diff of the pinned revision against the tag in
+a read-only upstream clone (108 commits; 39 Code and 6 SDK source files), the
+CHANGELOG entries for 0.1.67 through 0.1.69 and 0.7.14, and function-level
+diffs of every ported file. Free verdicts below are *proven* by blob identity:
+`deepagents/graph.py`, `middleware/subagents.py`, `model_retry.py`, the
+extension modules, `server_manager._scaffold_workspace`/`_write_pyproject`,
+and the `_build_server_env` key denylist are unchanged in the ported regions.
+
+**Ported:** `create_cli_agent` now defaults its environment from
+`active_environment()`, restores launch and project-dotenv LangSmith settings
+for `execute` through `restore_user_langsmith_env`, and passes the restored
+project as `user_tracing_project`; the three removed tracing helpers left the
+boundary. The server graph gains upstream's process-lifetime tracing pin
+(`_configure_server_tracing` after `_ensure_bootstrap` and redaction resolution
+inside the workspace environment), off-loop sandbox entry (`_open_sandbox`,
+`_close_sandbox`), the new `_build_tools` contract (Tavily key only; read-only
+built-ins returned and forwarded to `_criteria_context_tools`),
+`mcp_server_info` on `ServerRuntime`, two-pass launch binding through
+`ServerConfig.resolve_workspace`, and per-request
+`_resolve_bound_workspace_config` with project-policy drift and fingerprint
+refusals. Those helpers are consumed from upstream through the boundary rather
+than copied, so their process-wide state stays single. The owned reload path
+(`mcp_reload.build_reloadable_tools`, `MCPToolBundle.read_only_builtins`,
+`unpack_tool_bundle`) mirrors the new tool contract and `FactoryRuntime`
+replacements carry MCP metadata.
+
+**Inherited free:** the offload API workspace endpoint (session claim versus
+project policy, request-field allowlist, `validate_only`, MCP payload) through
+the rebound `get_server_runtime`; the unchanged `RemoteAgent.abind_workspace`
+signature used by the web launcher; `create_model`'s new
+`bind_preserved_thinking` default; the Auto classifier's Anthropic JSON-schema
+path (the DeepSeek view still wraps `with_structured_output`); server reuse
+across workspace switches; thread resume age limits; stale Anthropic
+thinking-block handling; effort-aware caching; new picker entries (DeepSeek
+V4.1 Flash, GLM 5.3, GPT-6 Astra); dotenv source attribution; SDK `read_file`,
+`ls` and `glob` formatting, partial tool-call patching and bounded compaction
+recovery. Transitive updates: langchain-core 1.6.1 → 1.6.3, langchain-anthropic
+1.7.2, langchain-openai 1.6.2, langgraph-api 0.14.1, langgraph-runtime-inmem
+0.34.1, langsmith 0.12.4, cryptography 50.0.1.
+
+**Behavior changes to note:** post-binding validation now refuses drifted
+*project-scoped* policy and changed fingerprints; a tampered session field in
+a persisted binding is no longer a refusal on its own (upstream contract;
+`test_workspace_runtime_rejects_changed_config_before_build` now parametrizes
+`project_policy`). Web search binds whenever a Tavily key is configured, even
+empty, and reports the missing key at call time. The SDK now enforces the
+advertised input budget, so two tests using the 8k-token fake model declare a
+large profile, as the background tests already did.
+
+**Guard re-checks:** the three D4 checks (shell-first dotenv precedence probe,
+frozen shell environment, lazy model wrapper) pass in `test_server_graph.py`
+and `test_workspace_isolation.py`; SDK fork merge semantics and reserved names
+pass in `test_seam.py`; `_build_server_env` remains an explicit key denylist
+and still relays `LC_FACTORY_MIDDLEWARE` (the transport tripwire now seeds the
+complete launch LangSmith capture upstream requires); the scaffold rebind seam
+is untouched (`server_manager`'s only hunk is in `start_server_and_get_agent`,
+which has no port). Enterprise `maintenance.py` gates are unchanged; its test
+now patches `config._dotenv_loaded_values`, where the loader record lives.
+
+**Verification:** Python 3.12.12; boundary 5 and smoke 5 pass; default suite
+**937 passed, 36 skipped, 10 live tests deselected** in 137 s.
+`tests/test_parity.py` was **not edited** (47 pass); drift injection swapping
+the `ShellAllowListMiddleware` allow-list turns 2 parity tests red as required.
+Wheel and sdist build; wheel metadata keeps both Git pins and QuickJS 0.3.7.
+`git diff --check` is clean. Live-server suite **10 passed, 973 deselected**
+(9 in one run, plus the enterprise distribution check after building both
+wheels into `dist/og-enterprise`, its documented precondition).
+
+**Effort:** about 30 minutes wall-clock from worktree creation at
+2026-09-15 02:09 UTC through this ledger entry, covering dependency
+resolution, both ported modules, five test adjustments and full verification.
+The preceding upstream delta assessment took roughly 25 minutes and is
+excluded, matching the previous entry's convention.
+
+**Watches:** the Talon-derived modules (`archive*.py`, background workers)
+remain adapted from 6c89fe2 while `deepagents-talon` moved to 0.0.8; review
+separately. Upstream's `aswitch_workspace` (server reuse across cwd switches)
+meets the factory's per-owner background jobs and skill policy roots only
+through the unchanged binding contract; exercise it in the TUI. The web UI
+could surface `mcp_server_info` from the bind response.
+`_resolve_bound_workspace_config` reads the extension trust store on every
+request, as upstream does.
+
+---
+
+## 2026-09-06 — reviewed source baseline 6c89fe2 + QuickJS 0.3.7 — `6be187b`
 
 **Verdict: coordinated constructor and server re-application.** The user
 explicitly authorized bringing the reviewed upstream fixes into this repository.

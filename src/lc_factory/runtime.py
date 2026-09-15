@@ -16,7 +16,7 @@ from lc_factory.background_child import BackgroundChildMiddleware
 from lc_factory.archive import ArchiveScope, conversation_tools
 from lc_factory.workspace_subagents import load_subagent_policy
 from lc_factory.skill_policy import skill_policy_root
-from lc_factory.mcp_resources import MCPToolBundle
+from lc_factory.mcp_resources import MCPToolBundle, unpack_tool_bundle
 from lc_factory.upstream import (
     AgentMiddleware, AgentState, OmitFromSchema, AIMessage, ToolMessage, RunnableConfig, ToolRuntime, tool,
     Credentials, get_user_agents_dir, get_project_agents_dir, _parse_subagent_file,
@@ -298,11 +298,11 @@ class FactoryRuntime:
                     loaded = await self.reload_tools()
                     if isinstance(loaded, MCPToolBundle):
                         candidate_resources = loaded
-                    tools, info, mcp = loaded
+                    tools, info, mcp, read_only_builtins = unpack_tool_bundle(loaded)
                     if any((x.get("status") if isinstance(x, dict) else getattr(x, "status", None)) in {"error", "unauthenticated"} for x in (info or [])):
                         raise ValueError("MCP reload reported a configuration or connection error")
                     candidate.update(tools=list(tools), mcp_server_info=info, mcp_tools=list(mcp))
-                    read_only = _criteria_context_tools(tools, mcp)
+                    read_only = _criteria_context_tools(tools, mcp, read_only_builtins)
                     if candidate.get("goal_criteria_tools") is not None:
                         candidate["goal_criteria_tools"] = read_only
                     if candidate.get("rubric_grader_tools") is not None:
@@ -321,7 +321,8 @@ class FactoryRuntime:
                     child_phases["last"].append(BackgroundChildMiddleware())
                     build["subagent_middleware"] = child_phases
                 agent, backend = await asyncio.to_thread(create_factory_agent, **build)
-            replacement = ServerRuntime(agent, backend, offload_operation_from(backend))
+            replacement = ServerRuntime(agent, backend, offload_operation_from(backend),
+                                        mcp_server_info=candidate.get("mcp_server_info"))
         except BaseException:
             if candidate_resources is not None:
                 await candidate_resources.close()

@@ -2,7 +2,7 @@
 
 Port of the workspace-scaffolding half of
 ``deepagents_code.client.launch.server_manager`` at
-commit ``6c89fe2197a2dfe4f3851cda38565bcadba6066b`` (version ``0.1.66``).
+release commit ``1d3232c0852c47af09119edea10eeec887e4f0da`` (version ``0.1.69``).
 The scaffold bodies are unchanged from the release. The generated
 ``langgraph.json`` references ``lc_factory.server_graph:make_graph`` and its
 factory offload adapter, while the generated runtime pyproject depends on

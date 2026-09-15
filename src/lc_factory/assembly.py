@@ -1,8 +1,8 @@
 """Factory assembly: an owned recomposition of upstream's ``create_cli_agent``.
 
 ``create_factory_agent`` is a line-faithful port of
-``deepagents_code.agent.create_cli_agent`` (``agent.py:2417-3540`` at
-commit ``6c89fe2197a2dfe4f3851cda38565bcadba6066b``, retaining version ``0.1.66``), with every
+``deepagents_code.agent.create_cli_agent`` (``agent.py:2408-3513`` at
+release commit ``1d3232c0852c47af09119edea10eeec887e4f0da``, version ``0.1.69``), with every
 upstream import routed through :mod:`lc_factory.upstream`.
 
 **One deliberate behavioral delta**: the middleware injection seam
@@ -22,7 +22,6 @@ middleware stack.
 from __future__ import annotations
 
 import logging
-import os
 import warnings
 from collections import Counter
 from collections.abc import Mapping
@@ -81,7 +80,7 @@ from lc_factory.upstream import (
     _sanitize_agent_message_name,
     _ShellAllowAll,
     _has_resolvable_model_provider,
-    apply_inherited_user_tracing,
+    active_environment,
     attach_offload_operation,
     credentials,
     create_deep_agent,
@@ -97,8 +96,7 @@ from lc_factory.upstream import (
     is_env_truthy,
     list_subagents,
     OffloadOperation,
-    restore_user_tracing_api_keys,
-    restore_user_tracing_env,
+    restore_user_langsmith_env,
 )
 
 if TYPE_CHECKING:
@@ -1103,10 +1101,11 @@ def create_factory_agent(
     tools = list(tools or [])
     if interpreter_subagents is not None and type(interpreter_subagents) is not bool:
         raise ValueError("interpreter_subagents must be a boolean or None")
-    environment = os.environ if environ is None else environ
+    environment = active_environment() if environ is None else environ
     runtime_credentials = (
         credentials if credentials_snapshot is None else credentials_snapshot
     )
+    user_tracing_project = runtime_credentials.user_langchain_project
     if extension_registry is not None and not is_env_truthy(
         EXPERIMENTAL, environ=environment
     ):
@@ -1518,28 +1517,12 @@ def create_factory_agent(
         # ========== LOCAL MODE ==========
         root_dir = effective_cwd if effective_cwd is not None else Path.cwd()
         if enable_shell:
-            # Create environment for shell commands.
-            # Restore the user's original LANGSMITH_PROJECT so their code traces
-            # separately. When they had none, drop the agent's override (the
-            # `deepagents-code` default applied at bootstrap) entirely so shell
-            # commands don't inherit it.
+            # Restore launch and project-dotenv LangSmith settings instead of
+            # agent-only credentials in the workspace environment.
             shell_env = dict(environment)
             shell_env["GIT_TERMINAL_PROMPT"] = "0"
-            if runtime_credentials.user_langchain_project is not None:
-                shell_env["LANGSMITH_PROJECT"] = (
-                    runtime_credentials.user_langchain_project
-                )
-            else:
-                shell_env.pop("LANGSMITH_PROJECT", None)
-            # Restore the caller's tracing flags and key so `execute` commands
-            # never run under the agent's session credentials. On the server
-            # path the client relays its pre-bootstrap values through
-            # `_INHERITED_USER_TRACING_ENV`, because this process's own
-            # `_bootstrap_state` already holds the agent's values; when nothing
-            # was relayed, the local capture is authoritative.
-            if not apply_inherited_user_tracing(shell_env):
-                restore_user_tracing_env(shell_env)
-                restore_user_tracing_api_keys(shell_env)
+            restore_user_langsmith_env(shell_env, start_path=effective_cwd)
+            user_tracing_project = shell_env.get("LANGSMITH_PROJECT")
             # Re-apply a launch-time PYTHONPATH that was stripped from the server
             # interpreter but relayed for approval-gated `execute` commands.
             _apply_inherited_pythonpath(shell_env)
@@ -1548,11 +1531,8 @@ def create_factory_agent(
             # The SDK's FilesystemMiddleware exposes per-command timeout
             # on the execute tool natively.
             # `inherit_env=False`: `shell_env` is already a complete, curated
-            # copy of the active environment. Inheriting again would re-copy
-            # `os.environ` and resurrect the popped carrier vars, leaking them
-            # into `execute`. The tracing restore above depends on this too:
-            # flipping to `inherit_env=True` would re-copy the agent's
-            # overridden `LANGSMITH_API_KEY` and undo the restore.
+            # copy of the active environment. Inheriting again would resurrect
+            # carrier vars and agent-only LangSmith credentials in `execute`.
             backend = LocalShellBackend(
                 root_dir=root_dir,
                 virtual_mode=False,
@@ -1629,7 +1609,7 @@ def create_factory_agent(
                 backend=backend,
                 mcp_server_info=mcp_server_info,
                 tracing_project=get_langsmith_project_name(),
-                user_tracing_project=runtime_credentials.user_langchain_project,
+                user_tracing_project=user_tracing_project,
             )
         )
 

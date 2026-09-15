@@ -13,6 +13,7 @@ the transport only exists across a process boundary.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 
@@ -198,8 +199,18 @@ def test_the_transport_survives_the_upstream_server_env_filter(monkeypatch):
     marker, which `addopts` excludes. This is that tripwire, and it costs
     ~0.1s.
     """
+    from deepagents_code import config as upstream_config
     from deepagents_code.client.launch.server import _build_server_env
 
+    # The launcher now relays the caller's LangSmith selectors through a
+    # carrier that requires a complete bootstrap capture; seed all-None
+    # captures as upstream's own tests do, so this tripwire stays about the
+    # key filter.
+    for field in ("launch_langsmith_env", "user_langsmith_env"):
+        captured = getattr(upstream_config._bootstrap_state, field)
+        if upstream_config._validate_user_langsmith_env(captured) is None:
+            monkeypatch.setattr(upstream_config._bootstrap_state, field,
+                                dict.fromkeys(upstream_config._USER_LANGSMITH_ENV_VARS))
     monkeypatch.setenv(MIDDLEWARE_REF_ENV, "pkg.mod:build")
     relayed = _build_server_env()
     assert relayed.get(MIDDLEWARE_REF_ENV) == "pkg.mod:build", (
@@ -762,7 +773,7 @@ async def test_workspace_runtime_reuses_resources_and_separates_workspaces(
     assert bindings[0].resource_key in server_graph._workspace_runtimes
 
 
-@pytest.mark.parametrize("drift", ["fingerprint", "resource_policy"])
+@pytest.mark.parametrize("drift", ["fingerprint", "project_policy"])
 async def test_workspace_runtime_rejects_changed_config_before_build(
     monkeypatch, tmp_path, drift
 ):
@@ -783,14 +794,19 @@ async def test_workspace_runtime_rejects_changed_config_before_build(
     )
     if drift == "fingerprint":
         binding = replace(binding, config_fingerprint="stale-fingerprint")
+        expected = "configuration changed"
     else:
-        binding = replace(binding, workspace_config_json='{"enable_shell": false}')
+        # Project-scoped policy is re-resolved per request; a recorded grant the
+        # current project no longer carries names the drifted field.
+        bound = {**binding.workspace_config(), "trust_project_mcp": True}
+        binding = replace(binding, workspace_config_json=json.dumps(bound))
+        expected = "policy differs.*trust_project_mcp"
 
     async def unexpected_build(**kwargs):
         pytest.fail("A changed workspace policy reached graph construction")
 
     monkeypatch.setattr(server_graph, "_make_graphs", unexpected_build)
-    with pytest.raises(RuntimeError, match="configuration changed"):
+    with pytest.raises(RuntimeError, match=expected):
         await server_graph._workspace_runtime(binding)
 
 
@@ -830,7 +846,7 @@ async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_pol
         assert (provider, classifier) == ("test", "test:reviewer")
         return "resolved:reviewer"
 
-    monkeypatch.setattr(server_graph, "configure_langsmith_secret_redaction", lambda: None)
+    monkeypatch.setattr(server_graph, "_configure_server_tracing", lambda environ, *, redact: None)
     monkeypatch.setattr(server_graph, "_factory_middleware", lambda: {
         "main": main, "subagents": subagents, "grader": grader,
     })
@@ -849,7 +865,6 @@ async def test_overridden_graph_build_keeps_all_middleware_targets_and_model_pol
     assert calls["model_applied"] is True
     kwargs = calls["assembly"]
     assert calls["tool_credentials"] == {
-        "has_tavily": kwargs["credentials_snapshot"].has_tavily,
         "tavily_api_key": kwargs["credentials_snapshot"].tavily_api_key,
     }
     assert kwargs["model_result"] is result

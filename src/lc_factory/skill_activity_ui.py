@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 import inspect
+import json
 
 from lc_factory.skill_activity import skill_activities, skill_label
 from lc_factory.upstream import AIMessage, ToolMessage
@@ -68,13 +69,16 @@ class SkillActivityAgent:
 
     async def astream(self, *args, **kwargs):
         observations, widgets = {}, {}
+        proposals, seen_proposals, retired = {}, {}, {}
+        result_owners = {}
+        reused_ids = set()
         stream = self._agent.astream(*args, **kwargs)
 
         def apply():
             current = self._adapter._current_tool_messages
             for key, row in observations.items():
                 widget = current.get(key) or widgets.get(key)
-                if widget is None or widget.tool_name != "read_file":
+                if widget is None or widget is retired.get(key) or widget.tool_name != "read_file":
                     continue
                 widgets[key] = widget
                 setattr(widget, _ATTR, row)
@@ -88,8 +92,40 @@ class SkillActivityAgent:
         try:
             async for chunk in stream:
                 for message in _chunk_messages(chunk):
+                    field = message.get if isinstance(message, dict) else lambda name, default=None: getattr(message, name, default)
+                    ignored = set()
+                    if field("type") in {"ai", "AIMessage", "assistant"}:
+                        for call in field("tool_calls", []) or []:
+                            key = call.get("id")
+                            if not key:
+                                continue
+                            proposal = (field("id"), call.get("name"), json.dumps(call.get("args"), sort_keys=True))
+                            if proposals.get(key) == proposal:
+                                continue
+                            seen = seen_proposals.setdefault(key, set())
+                            if proposal in seen:
+                                ignored.add(key)  # Stale replay of an earlier request.
+                                continue
+                            seen.add(proposal)
+                            if key in proposals:
+                                reused_ids.add(key)
+                            proposals[key] = proposal
+                            observations.pop(key, None)
+                            retired[key] = widgets.pop(key, None)
+                    if field("type") in {"tool", "ToolMessage"}:
+                        key = field("tool_call_id")
+                        if not field("id") and key in reused_ids:
+                            continue  # Cannot attribute an idless result after ID reuse.
+                        if field("id"):
+                            identity = (field("id"), key)
+                            owner = proposals.get(key)
+                            if identity in result_owners and result_owners[identity] != owner:
+                                continue
+                            result_owners[identity] = owner
                     metadata = message.get("additional_kwargs") if isinstance(message, dict) else getattr(message, "additional_kwargs", {})
                     for key, row in skill_activities(metadata).items():
+                        if key in ignored:
+                            continue
                         # A replayed proposal must not overwrite a result.
                         if row["status"] != "loading" or observations.get(key, {}).get("status", "loading") == "loading":
                             observations[key] = row

@@ -157,8 +157,8 @@ from company-owned sources before enabling it.
 
 The root `uv.lock` is the reviewed dependency closure, including requests 2.34.2;
 enterprise adds no third-party dependency beyond it. Build both Deep Agents
-packages from source `6c89fe2197a2dfe4f3851cda38565bcadba6066b`, not merely matching
-nominal versions 0.1.66/0.7.13. Root metadata retains these Git provenance pins.
+packages from source `1d3232c0852c47af09119edea10eeec887e4f0da`, the release tag commit
+for 0.1.69/0.7.14. Root metadata retains these Git provenance pins.
 
 In an approved build environment, build the two local packages and all locked
 dependencies into a platform-specific wheelhouse. Record source commits, wheel

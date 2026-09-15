@@ -1,5 +1,5 @@
 import type { Json, Message } from './protocol.ts';
-import { isTool, toolOutput } from './timeline.ts';
+import { toolExchange } from './timeline.ts';
 
 export type SkillActivity = { name: string; path: string; description?: string; source?: string; origin: 'agent'; status: 'loading' | 'loaded' | 'partial' | 'empty' | 'failed' | 'unavailable'; offset?: number; limit?: number };
 const states = new Set(['loading', 'loaded', 'partial', 'empty', 'failed', 'unavailable']);
@@ -16,10 +16,9 @@ function recorded(message: Message | undefined, id: string): SkillActivity | und
 /** Consume server observations; filenames and assistant prose are not evidence. */
 export function skillActivity(call: Json, messages: Message[]): SkillActivity | undefined {
   if (call.name !== 'read_file' || typeof call.id !== 'string' || !call.id) return;
-  const output = toolOutput(call, messages);
+  const { request, output } = toolExchange(call, messages);
   const result = recorded(output, call.id);
   if (result) return result;
-  const request = messages.find(m => !isTool(m) && m.tool_calls?.some(c => c.id === call.id));
   const pending = recorded(request, call.id);
   if (!pending) return;
   return output ? { ...pending, status: output.status === 'error' ? 'failed' : 'unavailable' } : { ...pending, status: 'loading' };

@@ -1,7 +1,7 @@
 """Server-side graph entry point for ``langgraph dev`` (factory edition).
 
-Port of ``deepagents_code.server_graph`` at commit
-``6c89fe2197a2dfe4f3851cda38565bcadba6066b`` (version ``0.1.66``), whose
+Port of ``deepagents_code.server_graph`` at release commit
+``1d3232c0852c47af09119edea10eeec887e4f0da`` (version ``0.1.69``), whose
 primary semantic change is that the agent graph is built by
 :func:`lc_factory.assembly.create_factory_agent` instead of upstream's
 ``create_cli_agent``. The factory transport is resolved before provider or
@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import asyncio
 import atexit
-import dataclasses
 import importlib
 import logging
 import os
@@ -44,15 +43,20 @@ from lc_factory.upstream import (
     WorkspaceConflictError,
     _build_runtime_factory,
     _build_tools,
+    _close_sandbox,
+    _configure_server_tracing,
     _criteria_context_tools,
+    _ensure_bootstrap,
+    _open_sandbox,
+    _resolve_bound_workspace_config,
     bind_server_extensions,
-    configure_langsmith_secret_redaction,
     create_model,
     create_sandbox,
     emit_startup_failure,
     get_config_resolver,
     get_server_project_context,
     is_env_truthy,
+    is_langsmith_redaction_enabled,
     is_memory_auto_save_enabled,
     load_async_subagents,
     load_extensions,
@@ -338,19 +342,29 @@ async def _make_graphs(
     # rejects when invoked directly from the server loop (see issue #5043),
     # for the same reason as the offload in `_make_graphs_in_environment`.
     def _resolve_workspace_environment() -> tuple[
-        Mapping[str, str], CredentialsSnapshot
+        Mapping[str, str], CredentialsSnapshot, bool
     ]:
+        # Finish the one-time global credential publication before pinning
+        # tracing. A later lazy import of `agent` must not overwrite the pin.
+        _ensure_bootstrap()
         environ = MappingProxyType(_preview_dotenv_environ(start_path=workspace_path))
-        return environ, Credentials.snapshot_from_environment(
-            start_path=workspace_path,
-            environ=environ,
+        with use_environment(environ):
+            redact = is_langsmith_redaction_enabled()
+        return (
+            environ,
+            Credentials.snapshot_from_environment(
+                start_path=workspace_path,
+                environ=environ,
+            ),
+            redact,
         )
 
-    workspace_env, workspace_credentials = await asyncio.to_thread(
+    workspace_env, workspace_credentials, redact = await asyncio.to_thread(
         _resolve_workspace_environment
     )
 
     with use_environment(workspace_env):
+        _configure_server_tracing(workspace_env, redact=redact)
         resources = []
         try:
             return await _make_graphs_in_environment(
@@ -386,7 +400,6 @@ async def _make_graphs_in_environment(
     project_context = await asyncio.to_thread(
         _resolve_project_context
     )
-    configure_langsmith_secret_redaction()
 
     # Resolve the caller seam before model setup, MCP discovery, or sandbox
     # creation. Booting without requested middleware is never a fallback.
@@ -419,34 +432,33 @@ async def _make_graphs_in_environment(
     loaded_tools = await build_tools(
         config,
         project_context,
-        has_tavily=workspace_credentials.has_tavily,
         tavily_api_key=workspace_credentials.tavily_api_key,
     )
-    from lc_factory.mcp_resources import MCPToolBundle
+    from lc_factory.mcp_resources import MCPToolBundle, unpack_tool_bundle
     initial_resources = loaded_tools if isinstance(loaded_tools, MCPToolBundle) else None
     if initial_resources is not None:
         resources.append(initial_resources)
-    tools, mcp_server_info, mcp_tools = loaded_tools
-    read_only_context_tools = _criteria_context_tools(tools, mcp_tools)
+    tools, mcp_server_info, mcp_tools, read_only_builtins = unpack_tool_bundle(loaded_tools)
+    read_only_context_tools = _criteria_context_tools(
+        tools, mcp_tools, read_only_builtins
+    )
 
     global _sandbox_cm, _sandbox_backend  # noqa: PLW0603
     sandbox_backend = None
-    if config.sandbox_type:
+    if sandbox_type := config.sandbox_type:
         try:
-            _sandbox_cm = create_sandbox(
-                config.sandbox_type,
-                sandbox_id=config.sandbox_id,
-                snapshot_name=config.sandbox_snapshot_name,
-                setup_script_path=config.sandbox_setup,
+            sandbox_context, sandbox_entered = await _open_sandbox(
+                lambda: create_sandbox(
+                    sandbox_type,
+                    sandbox_id=config.sandbox_id,
+                    snapshot_name=config.sandbox_snapshot_name,
+                    setup_script_path=config.sandbox_setup,
+                )
             )
-            _sandbox_backend = _sandbox_cm.__enter__()  # noqa: PLC2801
-            sandbox_backend = _sandbox_backend
-
-            def _cleanup_sandbox() -> None:
-                if _sandbox_cm is not None:
-                    _sandbox_cm.__exit__(None, None, None)
-
-            atexit.register(_cleanup_sandbox)
+            _sandbox_cm = sandbox_context
+            _sandbox_backend = sandbox_entered
+            sandbox_backend = sandbox_entered
+            atexit.register(_close_sandbox, sandbox_context)
         except ImportError:
             logger.exception(
                 "Sandbox provider '%s' is not installed", config.sandbox_type
@@ -581,7 +593,6 @@ async def _make_graphs_in_environment(
             async def reload_tools():
                 return await build_tools(
                     config, project_context,
-                    has_tavily=workspace_credentials.has_tavily,
                     tavily_api_key=workspace_credentials.tavily_api_key,
                 )
 
@@ -601,7 +612,7 @@ async def _make_graphs_in_environment(
         offload = offload_operation_from(composite_backend)
         if offload is None:
             raise RuntimeError("Agent backend did not publish its offload operation")
-        return ServerRuntime(agent, composite_backend, offload)
+        return ServerRuntime(agent, composite_backend, offload, mcp_server_info=mcp_server_info)
     except BaseException:
         if extension_registry is not None:
             await shutdown_server_extensions()
@@ -696,12 +707,21 @@ async def _default_workspace_binding(config: ServerConfig) -> WorkspaceBinding |
     """
     if config.cwd is None:
         return None
-    return await asyncio.to_thread(
-        resolve_workspace,
-        config.cwd,
-        config.to_workspace_payload(),
-        config_fingerprint=config.workspace_fingerprint(),
-    )
+
+    def _bind() -> WorkspaceBinding:
+        # First pass resolves identity only (cwd plus project root); its
+        # fingerprints are digests of an empty policy and are discarded.
+        identity = resolve_workspace(config.cwd)
+        # The shared policy resolver honors the explicit launch root while
+        # keeping the durable identity consistent with workspace validation.
+        resolved = config.resolve_workspace(identity.cwd, identity.project_root)
+        return resolve_workspace(
+            identity.cwd,
+            resolved.to_workspace_payload(),
+            config_fingerprint=resolved.workspace_fingerprint(),
+        )
+
+    return await asyncio.to_thread(_bind)
 
 
 async def _workspace_runtime(binding: WorkspaceBinding, *, session=None) -> ServerRuntime:
@@ -710,6 +730,7 @@ async def _workspace_runtime(binding: WorkspaceBinding, *, session=None) -> Serv
     Returns:
         The runtime selected by the binding's immutable resource key.
     """
+    current_config = await asyncio.to_thread(_resolve_bound_workspace_config, binding)
     cached = _cached_workspace_runtime(binding)
     if cached is not None:
         return await _select_factory_runtime(cached, session)
@@ -720,25 +741,14 @@ async def _workspace_runtime(binding: WorkspaceBinding, *, session=None) -> Serv
         from lc_factory.runtime import RuntimeOptions
         if RuntimeOptions.from_environment().enabled and len(_workspace_runtimes) >= _MAX_WORKSPACE_RUNTIMES:
             raise RuntimeError("Factory workspace capacity reached; use a separate server process")
-        config = ServerConfig.from_env()
-        current_config = dataclasses.replace(
-            config,
-            cwd=binding.cwd,
-            project_root=binding.project_root,
-        )
-        if (
-            current_config.workspace_fingerprint() != binding.config_fingerprint
-            or current_config.to_workspace_payload() != binding.workspace_config()
-        ):
-            reason = "the server configuration changed after this workspace was bound"
-            # Built into a local first: `raise X.from_reason(...)` reads as a
-            # `from_reason` raise to ruff's DOC501.
-            conflict = WorkspaceConflictError.from_reason(reason)
-            raise conflict
         _claim_sandbox_workspace(current_config.sandbox_type, binding)
         project_context = ProjectContext(
             user_cwd=Path(binding.cwd),
-            project_root=Path(binding.project_root) if binding.project_root else None,
+            project_root=(
+                Path(current_config.project_root)
+                if current_config.project_root
+                else None
+            ),
         )
         runtime = await _make_graphs(
             config_override=current_config,

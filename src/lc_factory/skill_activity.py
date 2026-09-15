@@ -76,8 +76,29 @@ def _read_status(message, row):
     content = message.content
     if message.status != "success" or not isinstance(content, str):
         return "unavailable"
-    # The pinned file tool supplies numbered source rows. Warnings, empty
-    # files and zero-line reads must not become successful instruction loads.
+    # SDK 0.7.14 puts the actual window in a header, followed by verbatim
+    # source. Only the tool's leading notices may precede that header: a
+    # header-looking line inside the source must never replace its range.
+    header = re.match(
+        r"(?:\[Requested offset -\d+ is before the start of the file; read from line 1 instead\.\]\n"
+        r"|\[Output was truncated due to size limits\.[^\n]*\]\n)*"
+        r"@@ lines (\d+)-(\d+)(?: of (\d+))?"
+        r"(?: \| next offset (\d+))?"
+        r"( \| truncated due to size| \| truncated mid-line \| \d+ of \d+ chars)? @@\n",
+        content,
+    )
+    if header:
+        body = content[header.end():]
+        if not body.strip():
+            return "empty"
+        start, end, total, next_offset, truncated = header.groups()
+        if int(start) < 1 or int(end) < int(start) or (total and int(end) > int(total)):
+            return "unavailable"
+        if int(start) > 1 or next_offset is not None or truncated or total is None or int(end) < int(total):
+            return "partial"
+        return "loaded"
+    # Retain legacy numbered output support. Warnings, empty files and
+    # zero-line reads must not become successful instruction loads.
     lines = re.findall(r"(?m)^\s*(\d+)(?:\.\d+)?  (.*)$", content)
     if not lines:
         return "empty" if content.startswith(("System reminder: File exists but has empty contents",

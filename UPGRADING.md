@@ -38,8 +38,9 @@ contract, connection signatures, AnyIO task ownership and discovery return shape
 `pyproject.toml` pins Code and the SDK as one reviewed unit, plus an explicit
 QuickJS version when interpreter fixes are adopted. Normally use exact published
 versions and verify their artifacts. The current user-authorized exception pins
-both Code and SDK via PEP 508 Git references at
-`6c89fe2197a2dfe4f3851cda38565bcadba6066b`; their metadata still says **0.1.66 / 0.7.13**.
+both Code and SDK via PEP 508 Git references at the release tag commit
+`1d3232c0852c47af09119edea10eeec887e4f0da` (**0.1.69 / 0.7.14**), which keeps exact
+provenance enforcement while matching the published artifacts' sources.
 QuickJS is the published **0.3.7** release.
 
 Keep source references in project dependencies so built wheels retain them.

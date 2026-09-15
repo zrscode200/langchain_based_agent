@@ -126,3 +126,34 @@ def test_native_history_denial_and_reused_call_id_do_not_claim_another_skill():
         skills = [r for r in rows if getattr(r, "_lc_skill_activity", None)]
         assert [r._lc_skill_activity["name"] for r in skills] == [ROW["name"], "second"]
         assert [r._lc_skill_activity["status"] for r in skills] == ["failed", "loaded"]
+
+
+@pytest.mark.parametrize("result_id", ["first-result", None])
+async def test_live_same_turn_reused_ids_do_not_transfer_old_skill_evidence(result_id):
+    _, _, widgets, _ = skill_activity_ui_modules()
+    current = {}
+    adapter = SimpleNamespace(_current_tool_messages=current, _sync_tool_widget=lambda _: None)
+    first = AIMessage("", id="first", tool_calls=[CALL], additional_kwargs=meta("loading"))
+    result = ToolMessage("Instructions", id=result_id, tool_call_id="read", additional_kwargs=meta())
+    ordinary = AIMessage("", id="ordinary", tool_calls=[{**CALL, "args": {"file_path": "/README.md"}}])
+    retry = AIMessage("", id="retry", tool_calls=[CALL], additional_kwargs=meta("loading"))
+    created = []
+
+    class Agent:
+        async def astream(self):
+            for message in (first, result.model_copy(update={"additional_kwargs": {}}), result, ordinary, result, first,
+                            ToolMessage("Readme", id="ordinary-result", tool_call_id="read"), retry, retry):
+                yield ((), "updates", {"node": {"messages": [message]}})
+
+    with client_skill_activity():
+        async for _, _, update in SkillActivityAgent(Agent(), adapter, widgets.ToolGroupSummary).astream():
+            message = update["node"]["messages"][0]
+            if isinstance(message, AIMessage) and message.id not in {key for key, _ in created}:
+                widget = widgets.ToolCallMessage("read_file", message.tool_calls[0]["args"])
+                created.append((message.id, widget))
+                current["read"] = widget
+            elif isinstance(message, ToolMessage) and message.id != "first-result":
+                current.pop("read", None)
+    assert created[0][1]._lc_skill_activity["status"] == "loaded"
+    assert not hasattr(created[1][1], "_lc_skill_activity")
+    assert created[2][1]._lc_skill_activity["status"] == "loading"

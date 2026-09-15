@@ -168,7 +168,7 @@ async def test_workspace_http_refusal_precedes_thread_creation(
     async def build(**kwargs):
         if failure == "startup_exit":
             raise SystemExit(1)
-        return object()
+        return SimpleNamespace(agent=object(), backend=object(), offload=object(), mcp_server_info=None)
 
     monkeypatch.setattr(server_graph, "_make_graphs", build)
     async with httpx.AsyncClient(

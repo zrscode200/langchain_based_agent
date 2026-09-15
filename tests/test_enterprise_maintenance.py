@@ -131,11 +131,13 @@ def test_policy_restores_environment_if_upstream_import_fails(monkeypatch):
 def test_child_server_disables_analytics_version_checks_and_pricing(
     tmp_path, monkeypatch, entry,
 ):
+    from deepagents_code import config as upstream_config
     from deepagents_code.client.launch import server
 
     # Simulate dotenv cleanup removing the parent's flags, then restart overrides
     # trying to re-enable every feature. The final subprocess env must pin them.
-    monkeypatch.setattr(server, "_dotenv_loaded_values", dict(DISABLED_MAINTENANCE_ENV))
+    # The loader's record now lives in `config`; the launcher strips through it.
+    monkeypatch.setattr(upstream_config, "_dotenv_loaded_values", dict(DISABLED_MAINTENANCE_ENV))
     enabled = {
         "LANGGRAPH_CLI_NO_ANALYTICS": "0",
         "LANGGRAPH_NO_VERSION_CHECK": "0",

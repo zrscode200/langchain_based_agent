@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from lc_factory.upstream import MCPSessionManager, _connections_signature
 
@@ -129,6 +129,8 @@ class MCPToolBundle:
     mcp_tools: list
     manager: OwnedMCPSessionManager | None = None
     closed: bool = False
+    read_only_builtins: list = field(default_factory=list)
+    """Built-in tool objects that are safe for criteria drafting and grading."""
 
     def __iter__(self):
         return iter((self.tools, self.info, self.mcp_tools))
@@ -139,3 +141,15 @@ class MCPToolBundle:
         if self.manager is not None:
             await self.manager.cleanup()
         self.closed = True
+
+
+def unpack_tool_bundle(loaded):
+    """Return ``(tools, info, mcp_tools, read_only_builtins)`` for any tool result.
+
+    Accepts an owned :class:`MCPToolBundle`, upstream's four-tuple from
+    ``_build_tools``, or a legacy three-tuple without read-only built-ins.
+    """
+    if isinstance(loaded, MCPToolBundle):
+        return loaded.tools, loaded.info, loaded.mcp_tools, list(loaded.read_only_builtins)
+    tools, info, mcp_tools, *rest = loaded
+    return tools, info, mcp_tools, (list(rest[0]) if rest else [])

@@ -4,9 +4,9 @@ Every project source module imports ``deepagents-code``, ``deepagents``, and
 LangChain runtime symbols through this module. A pin bump therefore fails at
 one explicit boundary before copied assembly or launch code can drift silently.
 
-Verified against deepagents-code 0.1.66 / deepagents 0.7.13 from commit
-``6c89fe2197a2dfe4f3851cda38565bcadba6066b``, plus langchain-quickjs 0.3.7.
-The factory's owned assembly and server runtime port this unreleased baseline;
+Verified against deepagents-code 0.1.69 / deepagents 0.7.14 from release commit
+``1d3232c0852c47af09119edea10eeec887e4f0da``, plus langchain-quickjs 0.3.7.
+The factory's owned assembly and server runtime port this release baseline;
 private names remain intentionally guarded by tests and the bump ledger.
 """
 
@@ -131,17 +131,18 @@ from deepagents_code.config import (
     Credentials,
     DEFAULT_MODEL_RETRIES,
     _ShellAllowAll,
+    _ensure_bootstrap,
     _preview_dotenv_environ,
-    apply_inherited_user_tracing,
+    active_environment,
     configure_langsmith_secret_redaction,
     create_model,
     credentials,
     get_langsmith_project_name,
+    is_langsmith_redaction_enabled,
     is_memory_auto_save_enabled,
     resolve_auto_classifier_model,
     resolve_auto_classifier_model_for_provider,
-    restore_user_tracing_api_keys,
-    restore_user_tracing_env,
+    restore_user_langsmith_env,
     runtime_state,
     use_environment,
 )
@@ -227,7 +228,11 @@ from deepagents_code.server_graph import (
     _build_graph_factory,
     _build_runtime_factory,
     _build_tools,
+    _close_sandbox,
+    _configure_server_tracing,
     _criteria_context_tools,
+    _open_sandbox,
+    _resolve_bound_workspace_config,
 )
 
 
@@ -458,6 +463,10 @@ __all__ = [
     "_create_goal_criteria_agent",
     "_create_rubric_grader_tools",
     "_criteria_context_tools",
+    "_close_sandbox",
+    "_configure_server_tracing",
+    "_open_sandbox",
+    "_resolve_bound_workspace_config",
     "_ensure_glm_5p2_profile_registered",
     "_format_task_error",
     "_get_harness_tool_descriptions",
@@ -478,7 +487,7 @@ __all__ = [
     "_sanitize_agent_message_name",
     "_write_checkpointer",
     "attach_offload_operation",
-    "apply_inherited_user_tracing",
+    "active_environment",
     "bind_runtime_host_policy",
     "bind_server_extensions",
     "configure_langsmith_secret_redaction",
@@ -517,8 +526,9 @@ __all__ = [
     "resolve_auto_classifier_timeout",
     "resolve_recursion_limit",
     "resolve_workspace",
-    "restore_user_tracing_api_keys",
-    "restore_user_tracing_env",
+    "restore_user_langsmith_env",
+    "is_langsmith_redaction_enabled",
+    "_ensure_bootstrap",
     "runtime_state",
     "server_manager_module",
     "shutdown_server_extensions",

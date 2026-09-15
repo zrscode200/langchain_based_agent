@@ -11,11 +11,11 @@ license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.12,<4.0"
 dependencies = [
-    # Reviewed post-release baseline; package versions alone do not identify
-    # these workspace-isolation and filesystem fixes. Keep both source pins
-    # at this exact revision and re-port the owned assembly on every update.
-    "deepagents-code @ git+https://github.com/langchain-ai/deepagents.git@6c89fe2197a2dfe4f3851cda38565bcadba6066b#subdirectory=libs/code",
-    "deepagents @ git+https://github.com/langchain-ai/deepagents.git@6c89fe2197a2dfe4f3851cda38565bcadba6066b#subdirectory=libs/deepagents",
+    # Release commit of deepagents-code 0.1.69 / deepagents 0.7.14 (tag
+    # commit, identical to the published artifacts' sources). Keep both source
+    # pins at this exact revision and re-port the owned assembly on every update.
+    "deepagents-code @ git+https://github.com/langchain-ai/deepagents.git@1d3232c0852c47af09119edea10eeec887e4f0da#subdirectory=libs/code",
+    "deepagents @ git+https://github.com/langchain-ai/deepagents.git@1d3232c0852c47af09119edea10eeec887e4f0da#subdirectory=libs/deepagents",
     # Explicitly guard interpreter streaming and per-agent private state.
     "langchain-quickjs==0.3.7",
     # Direct use by the optional persistent conversation archive.

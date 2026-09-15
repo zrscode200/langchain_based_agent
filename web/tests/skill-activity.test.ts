@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ToolView } from '../src/tool-view.tsx';
 import { Conversation } from '../src/conversation.tsx';
 import { skillActivity, skillLabel } from '../src/skill-activity.ts';
+import { toolOutput } from '../src/timeline.ts';
 import { mergeUpdate, type Message } from '../src/protocol.ts';
 
 const call = { id: 'read', name: 'read_file', args: { file_path: '/skills/review/SKILL.md' } };
@@ -55,4 +56,23 @@ test('explicit user invocation remains distinct from agent-selected reads', () =
   assert.match(html, /Invoked skill: review/);
   assert.match(html, /Review my change/);
   assert.doesNotMatch(html, /Agent selected/);
+});
+
+test('same-turn reused IDs retain the exact proposal and its own result', () => {
+  const ordinary = { ...call, args: { file_path: '/project/README.md' } };
+  const retry = { ...call };
+  const done = result('loaded');
+  const messages: Message[] = [ai, done, { id: 'second', type: 'ai', content: '', tool_calls: [ordinary] }];
+  assert.equal(skillActivity(ordinary, messages), undefined);
+  assert.equal(toolOutput(ordinary, messages), undefined);
+  const ordinaryResult: Message = { id: 'ordinary-result', type: 'tool', content: 'Project readme', tool_call_id: call.id, status: 'success' };
+  messages.push(ordinaryResult, { ...ai, id: 'retry', tool_calls: [retry] });
+  assert.equal(toolOutput(ordinary, messages), ordinaryResult);
+  assert.equal(skillActivity(call, messages)?.status, 'loaded');
+  assert.equal(skillActivity(retry, messages)?.status, 'loading');
+  assert.equal(toolOutput(retry, messages), undefined);
+  assert.equal(skillActivity({ ...retry }, messages), undefined); // Ambiguous detached identity.
+  const saved = JSON.parse(JSON.stringify(messages));
+  assert.equal(skillActivity(saved[2].tool_calls[0], saved), undefined);
+  assert.equal(skillActivity(saved[4].tool_calls[0], saved)?.status, 'loading');
 });

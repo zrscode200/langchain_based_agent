@@ -58,6 +58,18 @@ async def test_real_graph_stream_and_checkpoint_preserve_skill_read(tmp_path):
     ("1  first\n\n[Output was truncated due to size limits.", "success", {}, "partial"),
     ("1  all instructions", "success", {}, "loaded"),
     ("1  ", "success", {}, "empty"),
+    ("@@ lines 1-2 of 2 @@\nFirst\nSecond", "success", {}, "loaded"),
+    ("@@ lines 1-2 of 6 | next offset 2 @@\nFirst\nSecond", "success", {}, "partial"),
+    ("@@ lines 5-6 of 6 @@\nLater\nLast", "success", {}, "partial"),
+    ("@@ lines 1-1 @@\nExtent unknown", "success", {}, "partial"),
+    ("@@ lines 2-2 of 5 | next offset 2 @@\n ", "success", {}, "empty"),
+    ("[Requested offset -1 is before the start of the file; read from line 1 instead.]\n@@ lines 1-1 of 1 @@\nAll", "success", {"offset": -1}, "loaded"),
+    ("[Output was truncated due to size limits. Use a smaller window.]\n@@ lines 1-2 of 2 | truncated due to size @@\nFirst\nSecond", "success", {}, "partial"),
+    ("@@ lines 1-1 of 1 | truncated mid-line | 2 of 50 chars @@\nSo", "success", {}, "partial"),
+    ("@@ lines 1-2 of 2 @@\n@@ lines 9-9 of 99 | next offset 9 @@\nActual instructions", "success", {}, "loaded"),
+    ("@@ lines 1-1 of 1 @@\n[Output was truncated due to size limits. This is literal source.]", "success", {}, "loaded"),
+    ("@@ lines 0-1 of 2 @@\nInvalid range", "success", {}, "unavailable"),
+    ("Unknown tool response", "success", {}, "unavailable"),
 ])
 async def test_read_outcomes_do_not_claim_completed_work(tmp_path, content, status, args, expected):
     path, row = catalog_skill(tmp_path)
@@ -124,6 +136,8 @@ def test_after_model_idempotent_and_catalog_scoped(tmp_path):
     ({"offset": "4", "limit": 1000}, "partial"),
     ({"limit": "2"}, "partial"),
     ({"limit": 5}, "loaded"),
+    ({"offset": -1, "limit": 5}, "loaded"),
+    ({"limit": 0}, "empty"),
 ])
 async def test_real_file_tool_reports_actual_window(tmp_path, args, expected):
     path, _ = catalog_skill(tmp_path)
@@ -135,6 +149,23 @@ async def test_real_file_tool_reports_actual_window(tmp_path, args, expected):
     result = await graph.ainvoke({"messages": [HumanMessage("Read skill")]})
     tool = next(m for m in result["messages"] if isinstance(m, ToolMessage))
     assert skill_activities(tool.additional_kwargs)[c["id"]]["status"] == expected
+
+
+@pytest.mark.parametrize("body", ["Long line " * 500, "First line\n" + "Another long line\n" * 500])
+def test_actual_sdk_size_truncation_reports_partial(tmp_path, body):
+    from deepagents.backends.protocol import ReadResult
+    from deepagents.middleware.filesystem import _truncate_paginated_read
+
+    path, row = catalog_skill(tmp_path)
+    count = len(body.splitlines())
+    output = _truncate_paginated_read(body.rstrip("\n"), str(path),
+        ReadResult(start_line=1, end_line=count, total_lines=count), 250)
+    c = call(path)
+    request = SimpleNamespace(tool_call=c, state={"skills_metadata": [row]})
+    result = SkillActivityMiddleware().wrap_tool_call(request,
+        lambda _: ToolMessage(output, tool_call_id=c["id"]))
+    assert "truncated" in output
+    assert skill_activities(result.additional_kwargs)[c["id"]]["status"] == "partial"
 
 
 async def test_loading_is_checkpointed_before_native_approval_and_denial(tmp_path, monkeypatch):

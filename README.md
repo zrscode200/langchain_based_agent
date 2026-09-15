@@ -41,11 +41,11 @@ suite gates it. Every bump so far, and what each cost, is recorded in
 
 ## Current upstream baseline
 
-Python **3.12+** is required. Code **0.1.66** and SDK **0.7.13** are installed
-from the exact upstream revision `6c89fe2197a2dfe4f3851cda38565bcadba6066b`, which includes
-post-release fixes absent from the same-numbered PyPI releases. QuickJS is
-pinned to the published **0.3.7** package. `uv sync --locked` reproduces this
-baseline; smoke tests verify Git provenance as well as package versions.
+Python **3.12+** is required. Code **0.1.69** and SDK **0.7.14** are installed
+from the exact upstream release commit `1d3232c0852c47af09119edea10eeec887e4f0da`, the
+tag commit behind the same-numbered PyPI releases. QuickJS is pinned to the
+published **0.3.7** package. `uv sync --locked` reproduces this baseline; smoke
+tests verify Git provenance as well as package versions.
 
 Both `create_factory_agent` and the owned server assembly include workspace
 configuration isolation. The server snapshots each workspace's environment and
