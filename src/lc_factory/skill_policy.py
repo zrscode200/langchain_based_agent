@@ -261,7 +261,9 @@ def client_skill_policy():
     try:
         for obj, key, value in replacements:
             setattr(obj, key, value)
-        yield
+        from lc_factory.skill_activity_ui import client_skill_activity
+        with client_skill_activity():
+            yield
     finally:
         for obj, key, value in reversed(originals):
             setattr(obj, key, value)

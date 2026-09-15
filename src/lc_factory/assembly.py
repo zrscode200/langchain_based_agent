@@ -1296,6 +1296,12 @@ def create_factory_agent(
         # middleware, still ahead of the SDK's own subagent tail.
         middleware.extend(extra)
         middleware.extend(injected_subagent_middleware["last"])
+        if enable_skills:
+            from lc_factory.skill_activity import SkillActivityMiddleware
+
+            # after_model runs in reverse: annotate before approvals and
+            # before the background observer captures the child's proposal.
+            middleware.append(SkillActivityMiddleware())
         # Validated per stack, not once: subagent stacks differ by
         # configuration, so a name unique against one can collide on another.
         _validate_subagent_stack(middleware, _injected_subagent_names)
@@ -2090,6 +2096,11 @@ def create_factory_agent(
     # SEAM (phase "last"): after every factory middleware, including extension
     # middleware and its runtime host, immediately ahead of the SDK's own tail.
     agent_middleware.extend(injected_middleware["last"])
+    if enable_skills:
+        from lc_factory.skill_activity import SkillActivityMiddleware
+
+        # Persist the observation before an after_model approval can pause.
+        agent_middleware.append(SkillActivityMiddleware())
     finish_specs(
         custom_subagents, main_middleware=agent_middleware, tools=tools,
         backend=composite_backend, fs_tools=fs_tools,

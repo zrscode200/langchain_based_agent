@@ -240,6 +240,21 @@ theme coverage; the browser fixture covers switching, drafts and reloads.
 
 ## Conversation experience
 
+Skill reads appear as compact, expandable activity in the web conversation and
+the native TUI. Explicit invocation is marked on the user's skill message.
+When the agent reads a skill from its effective catalog, its tool row shows
+Loading skill, Loaded skill, Loaded skill excerpt, or a failed/empty read.
+The details retain the source path and actual tool output. Child skill activity
+belongs to that child's conversation.
+
+These labels record instruction delivery, not proof that the agent followed the
+skill or completed its workflow. Detection covers catalog-matched absolute
+`read_file` calls; shell reads, guidance files, and reuse of instructions already
+in context remain ordinary activity. Historical messages created before this
+feature have no new inferred labels. Skill evidence follows existing message
+retention: main checkpoints persist, child transcripts last for the server
+runtime, and compacted-away messages are not reconstructed.
+
 Each user turn groups the agent's updates, tool activity, exposed reasoning and
 response. Reasoning uses smaller, muted text without a highlighted background. Completed activity can collapse while errors open their output. File
 and command tools have readable summaries and expandable exact arguments;

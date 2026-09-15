@@ -10,6 +10,8 @@ import hashlib
 import json
 import tempfile
 
+from lc_factory.skill_activity import SKILL_ACTIVITY, skill_activities, skill_label
+
 PAGE_CHARS = 24_000
 MAX_BYTES = 64 * 1024 * 1024
 
@@ -45,6 +47,8 @@ def message_text(message):
     if kind == "tool":
         role += f" · {message.name or 'tool'} · {message.tool_call_id} · {message.status}"
     parts = [role, content_text(message.content)]
+    for row in skill_activities(message.additional_kwargs).values():
+        parts.insert(1, skill_label(row) + " · Agent selected")
     # DeepSeek and some OpenAI-compatible adapters expose this separately.
     reasoning = message.additional_kwargs.get("reasoning_content")
     if isinstance(reasoning, str) and reasoning:
@@ -83,6 +87,9 @@ def projected_message(message):
         reasoning.append(exposed)
     if reasoning:
         value["additional_kwargs"] = {"reasoning_content": "\n\n".join(reasoning)}
+    activities = skill_activities(message.additional_kwargs)
+    if activities:
+        value.setdefault("additional_kwargs", {})[SKILL_ACTIVITY] = activities
     calls = getattr(message, "tool_calls", [])
     if calls:
         value["tool_calls"] = [{"id": call.get("id"), "name": call.get("name"), "args": call.get("args")} for call in calls]
@@ -106,7 +113,7 @@ def preview_message(value):
             return text[:limit] + "\n[Preview shortened — open full message]"
         return text
     value["content"] = clip(value["content"], 6000)
-    if value.get("additional_kwargs"):
+    if value.get("additional_kwargs", {}).get("reasoning_content"):
         value["additional_kwargs"]["reasoning_content"] = clip(value["additional_kwargs"]["reasoning_content"], 3000)
     calls = value.get("tool_calls", [])
     if len(calls) > 12:

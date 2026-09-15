@@ -80,3 +80,10 @@ def web_client_modules():
 def web_command_registry():
     from deepagents_code import command_registry
     return command_registry
+
+
+def skill_activity_ui_modules():
+    """Pinned rendering-only seams; never imported by the server."""
+    from deepagents_code.tui import textual_adapter
+    from deepagents_code.tui.widgets import messages, message_store
+    return app_module, textual_adapter, messages, message_store

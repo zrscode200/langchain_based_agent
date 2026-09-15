@@ -358,7 +358,35 @@ def _run_both(case_kwargs: dict[str, Any], tmp_path, *, large_results: bool = Tr
     finally:
         for module, original in originals:
             module._artifacts_root = original
+    ours = _skill_activity_projection(ours)
     return _reasoning_projection(ours) if project_reasoning else ours, v0
+
+
+def _skill_activity_projection(captured):
+    """Verify the display-only observer delta before comparing upstream stacks."""
+    from lc_factory.skill_activity import SkillActivityMiddleware
+    from lc_factory.upstream import PluginSkillsMiddleware
+    from lc_factory.upstream import AgentMiddleware
+
+    main = captured["kwargs"]["middleware"]
+    enabled = any(isinstance(m, PluginSkillsMiddleware) for m in main)
+
+    def stack(items, *, child=False):
+        items = list(items)
+        matches = [i for i, m in enumerate(items) if isinstance(m, SkillActivityMiddleware)]
+        assert len(matches) == int(enabled), "skill observer follows skill enablement"
+        if matches:
+            index = matches[0]
+            assert type(items[index]) is SkillActivityMiddleware and not vars(items[index])
+            assert all(type(m).after_model is AgentMiddleware.after_model and
+                       type(m).aafter_model is AgentMiddleware.aafter_model for m in items[index + 1:]), (
+                           "observer must precede after_model admission/capture")
+            items.pop(index)
+        return items
+
+    return {**captured, "kwargs": {**captured["kwargs"], "middleware": stack(main),
+        "subagents": [{**spec, "middleware": stack(spec["middleware"], child=True)}
+                      for spec in captured["kwargs"]["subagents"]]}}
 
 
 def _reasoning_projection(captured):

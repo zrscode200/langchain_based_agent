@@ -106,6 +106,14 @@ class BackgroundChildMiddleware(AgentMiddleware):
         job = _CURRENT_JOB.get()
         if job is not None:
             job.transcript.capture(state.get("messages", []))
+            # Forks keep inherited middleware positions. Project the same
+            # pending observation here when capture precedes its state hook,
+            # so a paused/slow child read is visible immediately.
+            from lc_factory.skill_activity import SkillActivityMiddleware
+
+            observation = SkillActivityMiddleware().after_model(state, runtime)
+            if observation:
+                job.transcript.capture(observation["messages"])
         if job is None or state.get("_background_steering_revision", 0) >= job.revision:
             return None
         messages = state["messages"]

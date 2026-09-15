@@ -1,8 +1,9 @@
 import { createContext, useContext, useId, useState, type ReactNode } from 'react';
-import { Check, ChevronRight, Circle, FileText, Search, Terminal, Workflow, Wrench, X, ShieldCheck } from 'lucide-react';
+import { BookOpen, Check, ChevronRight, Circle, FileText, Search, Terminal, Workflow, Wrench, X, ShieldCheck } from 'lucide-react';
 import { CopyButton } from './components.tsx';
 import { textContent, type Interrupt, type Json, type Message } from './protocol.ts';
 import { describeTool, toolOutput, toolState } from './timeline.ts';
+import { skillActivity, skillLabel } from './skill-activity.ts';
 
 const ExpansionContext = createContext<{ choices: Record<string, boolean>; change: (key: string, open: boolean) => void } | null>(null);
 export function ExpansionScope({ children }: { children: ReactNode }) {
@@ -43,10 +44,12 @@ const labels = { requested: 'Requested', awaiting_approval: 'Needs approval', su
 export function ToolView({ call, messages, active, interrupts }: { call: Json; messages: Message[]; active: boolean; interrupts: Interrupt[] }) {
   const identity = call.id ? `tool:${call.id}` : undefined;
   const info = describeTool(call), output = toolOutput(call, messages), state = toolState(call, messages, active, interrupts);
-  const Icon = info.kind === 'command' ? Terminal : info.kind === 'search' ? Search : info.kind === 'task' ? Workflow : ['read', 'write', 'edit'].includes(info.kind) ? FileText : Wrench;
+  const skill = skillActivity(call, messages);
+  const Icon = skill ? BookOpen : info.kind === 'command' ? Terminal : info.kind === 'search' ? Search : info.kind === 'task' ? Workflow : ['read', 'write', 'edit'].includes(info.kind) ? FileText : Wrench;
   const StatusIcon = state === 'succeeded' ? Check : state === 'failed' || state === 'cancelled' ? X : state === 'awaiting_approval' ? ShieldCheck : Circle;
   return <div className={'tool-entry ' + state}>
-    <Disclosure storageKey={identity} defaultOpen={state === 'failed'} title={<><Icon size={15} /><span className="tool-description"><strong>{info.label}</strong>{info.target && info.kind !== 'command' && <span title={info.target}>{info.target}</span>}{info.kind === 'command' && info.target && <code title={info.target}>{info.target}</code>}</span><span className="tool-state"><StatusIcon size={13} />{labels[state]}</span></>}>
+    <Disclosure storageKey={identity} defaultOpen={state === 'failed'} title={<><Icon size={15} /><span className="tool-description"><strong>{skill ? skillLabel(skill, active, state === 'awaiting_approval') + ': ' + skill.name : info.label}</strong>{!skill && info.target && info.kind !== 'command' && <span title={info.target}>{info.target}</span>}{info.kind === 'command' && info.target && <code title={info.target}>{info.target}</code>}</span><span className="tool-state">{skill ? 'Agent selected' : <><StatusIcon size={13} />{labels[state]}</>}</span></>}>
+      {skill && <div className="tool-notice"><p>{skill.description}</p><p>{skill.source && skill.source + ' · '}{skill.path}</p><p>{skill.status === 'partial' ? 'Only an excerpt of the instructions was loaded. ' : ''}This records an instruction read; it does not confirm the skill was followed.</p></div>}
       <ActionPreview action={call} identity={identity} />
       {output && <div className="tool-result"><div className="detail-label">{state === 'failed' ? 'Error output' : 'Result'}<CopyButton text={textContent(output.content)} /></div><TextOutput storageKey={identity && identity + ':result:full'} text={textContent(output.content) || '(No text output)'} /></div>}
       {!output && <p className="tool-notice">{active ? 'Waiting for a result from the agent server.' : 'This conversation has no saved result for this action.'}</p>}
